@@ -178,6 +178,28 @@ notes: row.get(6)?,
             .map_err(DbError::Sqlite)?;
         Ok(())
     }
+
+    pub fn distinct_projects(&self) -> Result<Vec<String>, DbError> {
+        let mut stmt = self.conn.prepare(
+        "SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL AND project != '' ORDER BY project",
+    ).map_err(DbError::Sqlite)?;
+
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
+    pub fn distinct_tasks(&self) -> Result<Vec<String>, DbError> {
+        let mut stmt = self.conn.prepare(
+        "SELECT DISTINCT task FROM sessions WHERE task IS NOT NULL AND task != '' ORDER BY task",
+    ).map_err(DbError::Sqlite)?;
+
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
 }
 
 fn parse_timestamp(s: String) -> Result<DateTime<Utc>, rusqlite::Error> {

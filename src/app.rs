@@ -3,10 +3,11 @@ use ratatui::Frame;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
-use crossterm::event::KeyCode;
-
 use crate::db::Db;
 use crate::session::Session;
+use crossterm::event::KeyCode;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 
 const ACTIVITIES: &[&str] = &[
     "Programming",
@@ -21,6 +22,9 @@ pub struct App {
     db: Db,
     active_session: Option<Session>,
     today_sessions: Vec<Session>,
+
+    projects: Vec<String>,
+    tasks: Vec<String>,
     screen: Screen,
 }
 
@@ -37,11 +41,16 @@ struct EndSessionForm {
 struct AddNoteForm {
     input: String,
 }
+
 struct StartSessionForm {
     step: Step,
     activity_index: usize,
     project_input: String,
     task_input: String,
+    project_query: String,
+    task_query: String,
+    project_selection: usize,
+    task_selection: usize,
 }
 
 enum Step {
@@ -54,10 +63,14 @@ impl App {
     pub fn new(db: Db) -> Self {
         let active_session = db.get_active_session().unwrap_or(None);
         let today_sessions = db.sessions_for_today().unwrap_or_default();
+        let projects = db.distinct_projects().unwrap_or_default();
+        let tasks = db.distinct_tasks().unwrap_or_default();
         Self {
             db,
             active_session,
             today_sessions,
+            projects,
+            tasks,
             screen: Screen::Main,
         }
     }
@@ -73,6 +86,10 @@ impl App {
                         activity_index: 0,
                         project_input: String::new(),
                         task_input: String::new(),
+                        project_query: String::new(),
+                        task_query: String::new(),
+                        project_selection: 0,
+                        task_selection: 0,
                     });
                 }
                 KeyCode::Char('n') => {
@@ -139,67 +156,123 @@ impl App {
                         KeyCode::Enter => form.step = Step::Project,
                         _ => {}
                     },
-                    Step::Project => match key {
-                        KeyCode::Char(c) => form.project_input.push(c),
-                        KeyCode::Backspace => {
-                            form.project_input.pop();
-                        }
-                        KeyCode::Enter => form.step = Step::Task,
-                        _ => {}
-                    },
-                    Step::Task => match key {
-                        KeyCode::Char(c) => form.task_input.push(c),
-                        KeyCode::Backspace => {
-                            form.task_input.pop();
-                        }
-                        KeyCode::Enter => {
-                            // Auto-stop any currently active session
-                            if let Some(old) = self.active_session.take() {
-                                if let Err(e) = self.db.complete_session(old.id, None, None, None) {
-                                    eprintln!("{e}");
-                                    self.active_session = Some(old);
+                    Step::Project => {
+                        let suggestions = fuzzy_filter(&form.project_query, &self.projects);
+                        match key {
+                            KeyCode::Char(c) => {
+                                form.project_input.push(c);
+                                form.project_query.push(c);
+                                form.project_selection = 0;
+                            }
+                            KeyCode::Backspace => {
+                                form.project_input.pop();
+                                form.project_query.pop();
+                                form.project_selection = 0;
+                            }
+                            KeyCode::Up => {
+                                if form.project_selection > 0 {
+                                    form.project_selection -= 1;
                                 }
                             }
-
-                            let activity = ACTIVITIES[form.activity_index];
-                            let project = form.project_input.clone();
-                            let task = form.task_input.clone();
-
-                            match self.db.create_session(
-                                activity,
-                                if project.is_empty() {
-                                    None
-                                } else {
-                                    Some(&project)
-                                },
-                                if task.is_empty() { None } else { Some(&task) },
-                            ) {
-                                Ok(id) => {
-                                    self.active_session = Some(Session {
-                                        id,
-                                        started_at: Utc::now(),
-                                        ended_at: None,
-                                        project: if project.is_empty() {
-                                            None
-                                        } else {
-                                            Some(project)
-                                        },
-                                        task: if task.is_empty() { None } else { Some(task) },
-                                        activity: activity.to_string(),
-                                        notes: None,
-                                        outcome: None,
-                                        focus: None,
-                                        interruptions: None,
-                                    });
+                            KeyCode::Down => {
+                                if form.project_selection < suggestions.len().saturating_sub(1) {
+                                    form.project_selection += 1;
                                 }
-                                Err(e) => eprintln!("{e}"),
                             }
-
-                            self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
-                            self.screen = Screen::Main;
+                            KeyCode::Tab => {
+                                if !suggestions.is_empty() {
+                                    form.project_selection =
+                                        (form.project_selection + 1) % suggestions.len();
+                                    form.project_input =
+                                        suggestions[form.project_selection].clone();
+                                }
+                            }
+                            KeyCode::Enter => form.step = Step::Task,
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
+                    Step::Task => {
+                        let suggestions = fuzzy_filter(&form.task_query, &self.tasks);
+                        match key {
+                            KeyCode::Char(c) => {
+                                form.task_input.push(c);
+                                form.task_query.push(c);
+                                form.task_selection = 0;
+                            }
+                            KeyCode::Backspace => {
+                                form.task_input.pop();
+                                form.task_query.pop();
+                                form.task_selection = 0;
+                            }
+                            KeyCode::Up => {
+                                if form.task_selection > 0 {
+                                    form.task_selection -= 1;
+                                }
+                            }
+                            KeyCode::Down => {
+                                if form.task_selection < suggestions.len().saturating_sub(1) {
+                                    form.task_selection += 1;
+                                }
+                            }
+                            KeyCode::Tab => {
+                                if !suggestions.is_empty() {
+                                    form.task_selection =
+                                        (form.task_selection + 1) % suggestions.len();
+                                    form.task_input = suggestions[form.task_selection].clone();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Auto-stop any currently active session
+                                if let Some(old) = self.active_session.take() {
+                                    if let Err(e) =
+                                        self.db.complete_session(old.id, None, None, None)
+                                    {
+                                        eprintln!("{e}");
+                                        self.active_session = Some(old);
+                                    }
+                                }
+
+                                let activity = ACTIVITIES[form.activity_index];
+                                let project = form.project_input.clone();
+                                let task = form.task_input.clone();
+
+                                match self.db.create_session(
+                                    activity,
+                                    if project.is_empty() {
+                                        None
+                                    } else {
+                                        Some(&project)
+                                    },
+                                    if task.is_empty() { None } else { Some(&task) },
+                                ) {
+                                    Ok(id) => {
+                                        self.active_session = Some(Session {
+                                            id,
+                                            started_at: Utc::now(),
+                                            ended_at: None,
+                                            project: if project.is_empty() {
+                                                None
+                                            } else {
+                                                Some(project)
+                                            },
+                                            task: if task.is_empty() { None } else { Some(task) },
+                                            activity: activity.to_string(),
+                                            notes: None,
+                                            outcome: None,
+                                            focus: None,
+                                            interruptions: None,
+                                        });
+                                    }
+                                    Err(e) => eprintln!("{e}"),
+                                }
+
+                                self.today_sessions =
+                                    self.db.sessions_for_today().unwrap_or_default();
+                                self.screen = Screen::Main;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             Screen::EndSession(form) => match key {
@@ -345,8 +418,13 @@ impl App {
                     .as_ref()
                     .map(fmt_time)
                     .unwrap_or_else(|| "??:??".to_string());
+                let duration = session
+                    .ended_at
+                    .as_ref()
+                    .map(|end| format!("  ({})", fmt_duration(&session.started_at, end)))
+                    .unwrap_or_default();
 
-                lines.push(Line::from(format!("{} ────── {}", start, end)));
+                lines.push(Line::from(format!("{} ────── {}{}", start, end, duration)));
                 let parts = [
                     session.project.as_deref().unwrap_or(""),
                     session.task.as_deref().unwrap_or(""),
@@ -398,30 +476,43 @@ impl App {
                 frame.render_widget(list, area);
             }
             Step::Project => {
-                let lines = vec![
+                let suggestions = fuzzy_filter(&form.project_query, &self.projects);
+                let mut lines = vec![
                     Line::from(format!("Project: {}", form.project_input)),
                     Line::from(""),
-                    Line::from("(Enter to confirm, Esc to cancel)"),
                 ];
+
+                for (i, s) in suggestions.iter().enumerate() {
+                    let marker = if i == form.project_selection {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    lines.push(Line::from(format!("  {marker} {s}")));
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from("(Tab accept · Enter confirm · Esc cancel)"));
+
                 let paragraph =
                     Paragraph::new(lines).block(Block::default().title(" Start session "));
                 frame.render_widget(paragraph, area);
             }
             Step::Task => {
-                let lines = vec![
-                    Line::from(format!("Activity: {}", ACTIVITIES[form.activity_index])),
-                    Line::from(format!(
-                        "Project:  {}",
-                        if form.project_input.is_empty() {
-                            "(none)"
-                        } else {
-                            &form.project_input
-                        }
-                    )),
-                    Line::from(format!("Task:     {}", form.task_input)),
+                let suggestions = fuzzy_filter(&form.task_query, &self.tasks);
+                let mut lines = vec![
+                    Line::from(format!("Task: {}", form.task_input)),
                     Line::from(""),
-                    Line::from("(Enter to start, Esc to cancel)"),
                 ];
+
+                for (i, s) in suggestions.iter().enumerate() {
+                    let marker = if i == form.task_selection { ">" } else { " " };
+                    lines.push(Line::from(format!("  {marker} {s}")));
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from("(Tab accept · Enter confirm · Esc cancel)"));
+
                 let paragraph =
                     Paragraph::new(lines).block(Block::default().title(" Start session "));
                 frame.render_widget(paragraph, area);
@@ -432,4 +523,29 @@ impl App {
 
 fn fmt_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
     dt.with_timezone(&chrono::Local).format("%H:%M").to_string()
+}
+fn fmt_duration(
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+) -> String {
+    let dur = *end - *start;
+    let h = dur.num_hours();
+    let m = dur.num_minutes() % 60;
+    if h > 0 {
+        format!("{}h {}m", h, m)
+    } else {
+        format!("{}m", m)
+    }
+}
+fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
+    if query.is_empty() {
+        return vec![];
+    }
+    let matcher = SkimMatcherV2::default();
+    let mut scored: Vec<(i64, &String)> = candidates
+        .iter()
+        .filter_map(|c| matcher.fuzzy_match(c, query).map(|s| (s, c)))
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.into_iter().take(5).map(|(_, c)| c.clone()).collect()
 }

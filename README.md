@@ -1,87 +1,91 @@
+# Jiary
 
-# jiary
+A local-first terminal application for maintaining a personal work diary.
 
-A small, local-first terminal work diary for understanding how I spend my working time.
+Jiary records what happened during your working day — sessions of programming, reading, writing, meetings — with minimal cognitive overhead. It does not manage tasks, set priorities, or tell you what to do next.
 
-`jiary` records what I work on throughout the day so I can later reflect on where my time goes, how much deep work I achieve, and how I might improve the way I work.
+## Building
 
-The name combines **Jeremy** and **diary**, inspired by a coach named Jeremy whose approach I particularly valued.
+```sh
+cargo build --release
+```
 
-## What it is
+The binary will be at `target/release/jiary`.
 
-jiary is a **work diary**, not a task or project management system.
+Requires Rust stable. No system dependencies needed (SQLite is bundled).
 
-The fundamental unit is a **work session**: a period of time spent doing something.
+## Running
 
-A session can record:
-
-* Start and end time
-* Activity (e.g. programming, reading, writing, meeting)
-* Project
-* Task
-* Description and/or outcome
-* Optional reflections such as focus or interruptions
-
-Projects and tasks are lightweight labels, not managed entities. Previous values should be available through autocomplete/tab completion to make recording consistent without adding unnecessary rigidity.
-
-The initial implementation will use **SQLite** for local storage and **Ratatui** for the terminal UI.
-
-Run it with:
-
-```bash
+```sh
 jiary
 ```
 
-## What it isn't
+On first run, a database is created at:
 
-jiary does not manage what I *should* do.
+- **macOS:** `~/Library/Application Support/jiary/jiary.db`
+- **Linux:** `~/.local/share/jiary/jiary.db`
 
-It is not intended to become a:
+## Usage
 
-* Todo list
-* Project management system
-* Kanban board
-* Planning or scheduling tool
-* Team productivity tracker
-* Billing/timesheet system
+| Key | Action |
+|-----|--------|
+| `s` | Start a new session |
+| `e` | End the active session (optional note prompt) |
+| `n` | Add a note to the active session |
+| `q` | Quit |
 
-**The diary records what happened; it does not manage what should happen.**
+### Starting a session
 
-## MVP
+1. **Activity** — navigate with ↑/↓ or press 1–6, confirm with Enter
+2. **Project** — type to filter suggestions (fuzzy match), Tab to cycle, Enter to confirm
+3. **Task** — same as project
 
-The first version should do only a few things well:
+All fields after activity are optional; press Enter on an empty field to skip.
 
-1. Start a work session
-2. Stop a work session
-3. Record session details
-4. Review today's work
-5. Provide simple historical summaries
+### Autocomplete
 
-The MVP should remain small, understandable, and quick to use.
+Project and task fields show suggestions from your session history as you type. Matching is fuzzy (subsequence-based, via `SkimMatcherV2`). You can always type a new value that doesn't match any suggestion.
 
-## Future direction
+### Notes
 
-jiary should eventually support **Pomodoro sessions** as an alternative to free-running sessions.
+Press `n` at any time during an active session to append a note. Notes are saved immediately and persist even if the app exits before the session ends.
 
-The motivation is to avoid common failures of conventional timers:
+You can also add a note when ending a session (press `e`).
 
-* A Pomodoro ends but I keep working and accidentally lose that additional work time.
-* A free-running timer continues through a meeting because I forgot to stop it.
+## Data
 
-The underlying model should therefore treat the **diary as the source of truth**, with timers as a means of helping record work accurately.
+All data is stored in a single SQLite file. The schema:
 
-Future versions may also support easy transitions such as starting a meeting or resuming previous work without losing accurate session history.
+```sql
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY,
+    started_at TEXT NOT NULL,   -- RFC 3339 UTC
+    ended_at TEXT,              -- NULL while active
+    project TEXT,
+    task TEXT,
+    activity TEXT NOT NULL,
+    notes TEXT,
+    outcome TEXT,
+    focus INTEGER,
+    interruptions INTEGER
+);
+```
+
+Timestamps are stored as UTC RFC 3339 strings (e.g. `2026-09-04T09:15:00Z`) and displayed in local time.
+
+To inspect your data directly:
+
+```sh
+sqlite3 ~/Library/Application\ Support/jiary/jiary.db "SELECT * FROM sessions ORDER BY started_at DESC LIMIT 10;"
+```
+
+## Backing up
+
+Copy the `.db` file. That's the entire dataset.
 
 ## Design principles
 
-* **Low friction:** recording work should not interrupt the work itself.
-* **Diary first:** record what happened rather than managing future work.
-* **Soft structure:** use structured data where it helps later analysis, without unnecessary rigidity.
-* **Historical truth:** past sessions should remain accurate and unchanged.
-* **Local first:** personal work data should live locally.
-* **Data before analysis:** collect useful data first; let real usage determine which analyses are worth building.
-* **Keep it small:** prefer a simple tool that is easy to understand and maintain.
-
-## Status
-
-Early design / MVP.
+- **Jiary records what happened; it does not manage what should happen.**
+- **The diary is the source of truth; timers are merely tools for recording it accurately.**
+- Sessions are historical observations, not workflow entities.
+- Projects and tasks are free-text labels, not managed objects with state.
