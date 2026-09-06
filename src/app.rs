@@ -15,6 +15,7 @@ const ACTIVITIES: &[&str] = &[
     "Writing",
     "Meeting",
     "Administration",
+    "Disruption",
     "Other",
 ];
 
@@ -80,6 +81,96 @@ impl App {
         match &mut self.screen {
             Screen::Main => match key {
                 KeyCode::Char('q') => return true,
+                KeyCode::Char('i') => {
+                    if let Some(session) = &mut self.active_session {
+                        if let Err(e) = self.db.increment_interruptions(session.id) {
+                            eprintln!("{e}");
+                        } else {
+                            session.interruptions = Some(session.interruptions.unwrap_or(0) + 1);
+                        }
+                    }
+                }
+                KeyCode::Char('r') => {
+                    let should_proceed = match &self.active_session {
+                        None => true,
+                        Some(s) if s.activity == "Disruption" => true,
+                        Some(_) => false,
+                    };
+
+                    if !should_proceed {
+                        return false;
+                    }
+
+                    if let Some(session) = self.active_session.take() {
+                        if let Err(e) = self.db.complete_session(session.id, None, None) {
+                            eprintln!("{e}");
+                            self.active_session = Some(session);
+                            return false;
+                        }
+                    }
+
+                    let combo = match self.db.latest_non_disruption() {
+                        Ok(Some(combo)) => combo,
+                        Ok(None) => return false,
+                        Err(e) => {
+                            eprintln!("{e}");
+                            return false;
+                        }
+                    };
+
+                    let (activity, project, task) = combo;
+                    match self
+                        .db
+                        .create_session(&activity, project.as_deref(), task.as_deref())
+                    {
+                        Ok(id) => {
+                            self.active_session = Some(Session {
+                                id,
+                                started_at: Utc::now(),
+                                ended_at: None,
+                                project,
+                                task,
+                                activity,
+                                notes: None,
+                                outcome: None,
+                                focus: None,
+                                interruptions: None,
+                            });
+                        }
+                        Err(e) => eprintln!("{e}"),
+                    }
+
+                    self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                }
+
+                KeyCode::Char('d') => {
+                    if let Some(old) = self.active_session.take() {
+                        match self.db.complete_session(old.id, None, None) {
+                            Err(e) => {
+                                eprintln!("{e}");
+                                self.active_session = Some(old);
+                            }
+                            Ok(()) => match self.db.create_session("Disruption", None, None) {
+                                Ok(id) => {
+                                    self.active_session = Some(Session {
+                                        id,
+                                        started_at: Utc::now(),
+                                        ended_at: None,
+                                        project: None,
+                                        task: None,
+                                        activity: "Disruption".to_string(),
+                                        notes: None,
+                                        outcome: None,
+                                        focus: None,
+                                        interruptions: None,
+                                    });
+                                }
+                                Err(e) => eprintln!("{e}"),
+                            },
+                        }
+                    }
+                    self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                }
                 KeyCode::Char('s') => {
                     self.screen = Screen::StartSession(StartSessionForm {
                         step: Step::Activity,
@@ -149,7 +240,7 @@ impl App {
                                 form.activity_index += 1;
                             }
                         }
-                        KeyCode::Char(c) if c >= '1' && c <= '6' => {
+                        KeyCode::Char(c) if c >= '1' && c <= '7' => {
                             form.activity_index = (c as u8 - b'1') as usize;
                             form.step = Step::Project;
                         }
@@ -224,9 +315,7 @@ impl App {
                             KeyCode::Enter => {
                                 // Auto-stop any currently active session
                                 if let Some(old) = self.active_session.take() {
-                                    if let Err(e) =
-                                        self.db.complete_session(old.id, None, None, None)
-                                    {
+                                    if let Err(e) = self.db.complete_session(old.id, None, None) {
                                         eprintln!("{e}");
                                         self.active_session = Some(old);
                                     }
@@ -289,7 +378,7 @@ impl App {
                             }
                         }
 
-                        if let Err(e) = self.db.complete_session(session.id, None, None, None) {
+                        if let Err(e) = self.db.complete_session(session.id, None, None) {
                             eprintln!("{e}");
                             self.active_session = Some(session);
                         }
@@ -401,6 +490,10 @@ impl App {
 
             lines.push(Line::from(""));
             lines.push(Line::from(format!("{h:02}:{m:02}:{s:02}")));
+            lines.push(Line::from(format!(
+                "Interruptions: {}",
+                session.interruptions.unwrap_or(0)
+            )));
         } else {
             lines.push(Line::from(""));
             lines.push(Line::from("No active session."));
@@ -418,13 +511,19 @@ impl App {
                     .as_ref()
                     .map(fmt_time)
                     .unwrap_or_else(|| "??:??".to_string());
-                let duration = session
+                let mut detail = session
                     .ended_at
                     .as_ref()
                     .map(|end| format!("  ({})", fmt_duration(&session.started_at, end)))
                     .unwrap_or_default();
 
-                lines.push(Line::from(format!("{} ────── {}{}", start, end, duration)));
+                if let Some(count) = session.interruptions {
+                    if count > 0 {
+                        detail.push_str(&format!(" ({} Int)", count));
+                    }
+                }
+
+                lines.push(Line::from(format!("{} ────── {}{}", start, end, detail)));
                 let parts = [
                     session.project.as_deref().unwrap_or(""),
                     session.task.as_deref().unwrap_or(""),
@@ -448,8 +547,9 @@ impl App {
         }
 
         // Footer
-        lines.push(Line::from("[s] start  [e] end  [n] note  [q] quit"));
-
+        lines.push(Line::from(
+            "[s] start  [e] end  [n] note  [i] int  [d] disrupt  [r] resume  [q] quit",
+        ));
         let paragraph = Paragraph::new(lines).block(Block::default().title(" Jiary "));
         frame.render_widget(paragraph, area);
     }

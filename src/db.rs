@@ -103,13 +103,12 @@ notes: row.get(6)?,
         id: i64,
         outcome: Option<&str>,
         focus: Option<i32>,
-        interruptions: Option<i32>,
     ) -> Result<(), DbError> {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         self.conn
             .execute(
-                "UPDATE sessions SET ended_at = ?1, outcome = ?2, focus = ?3, interruptions = ?4 WHERE id = ?5 AND ended_at IS NULL",
-                params![now, outcome, focus, interruptions, id],
+                "UPDATE sessions SET ended_at = ?1, outcome = ?2, focus = ?3 WHERE id = ?4 AND ended_at IS NULL",
+                params![now, outcome, focus, id],
             )
             .map_err(DbError::Sqlite)?;
         Ok(())
@@ -199,6 +198,34 @@ notes: row.get(6)?,
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(DbError::Sqlite)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
+    pub fn increment_interruptions(&self, id: i64) -> Result<(), DbError> {
+        self.conn
+        .execute(
+            "UPDATE sessions SET interruptions = COALESCE(interruptions, 0) + 1 WHERE id = ?1 AND ended_at IS NULL",
+            params![id],
+        )
+        .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    pub fn latest_non_disruption(
+        &self,
+    ) -> Result<Option<(String, Option<String>, Option<String>)>, DbError> {
+        let result = self.conn.query_row(
+            "SELECT activity, project, task FROM sessions
+         WHERE activity != 'Disruption' AND ended_at IS NOT NULL
+         ORDER BY started_at DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        );
+
+        match result {
+            Ok(combo) => Ok(Some(combo)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(DbError::Sqlite(e)),
+        }
     }
 }
 
