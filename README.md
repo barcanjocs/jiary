@@ -1,4 +1,3 @@
-````markdown
 # Jiary
 
 A local-first terminal application for maintaining a personal work diary.
@@ -117,4 +116,3 @@ Copy the `.db` file. That's the entire dataset.
 - **The diary is the source of truth; timers are merely tools for recording it accurately.**
 - Sessions are historical observations, not workflow entities.
 - Projects and tasks are free-text labels, not managed objects with state.
-````
