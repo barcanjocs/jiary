@@ -1,3 +1,4 @@
+````markdown
 # Jiary
 
 A local-first terminal application for maintaining a personal work diary.
@@ -30,27 +31,54 @@ On first run, a database is created at:
 | Key | Action |
 |-----|--------|
 | `s` | Start a new session |
-| `e` | End the active session (optional note prompt) |
+| `e` | End the active session (notes + focus rating) |
 | `n` | Add a note to the active session |
+| `i` | Increment interruption counter |
+| `d` | Stop current session, start a Disruption session |
+| `r` | Resume last non-Disruption session |
 | `q` | Quit |
 
 ### Starting a session
 
-1. **Activity** — navigate with ↑/↓ or press 1–6, confirm with Enter
+1. **Activity** — navigate with ↑/↓ or press 1–7, confirm with Enter
 2. **Project** — type to filter suggestions (fuzzy match), Tab to cycle, Enter to confirm
-3. **Task** — same as project
+3. **Task** — same as project (suggestions filtered by selected project)
 
 All fields after activity are optional; press Enter on an empty field to skip.
 
 ### Autocomplete
 
-Project and task fields show suggestions from your session history as you type. Matching is fuzzy (subsequence-based, via `SkimMatcherV2`). You can always type a new value that doesn't match any suggestion.
+Project and task fields show all previous values as soon as the field is active. As you type, suggestions are filtered using fuzzy matching (subsequence-based, via `SkimMatcherV2`). Task suggestions are further filtered by the selected project.
+
+Tab accepts the first suggestion; subsequent Tabs cycle through options. You can always type a new value that doesn't match any suggestion.
 
 ### Notes
 
 Press `n` at any time during an active session to append a note. Notes are saved immediately and persist even if the app exits before the session ends.
 
 You can also add a note when ending a session (press `e`).
+
+### Disruptions & Resume
+
+If you're interrupted (colleague conversation, phone call, context switch), press `d` to instantly stop your current session and start a "Disruption" session. When you're ready to get back to work, press `r` to end the disruption and restart your previous activity/project/task.
+
+The full round-trip is two keystrokes: `d` … work … `r`.
+
+### Focus rating
+
+When ending a session (`e`), after the notes prompt you'll be asked to rate your focus:
+
+- `1` — bad (fragmented, many context switches)
+- `2` — ok
+- `3` — good (deep flow)
+
+Press Enter to skip. The rating is shown in the daily history as `(F:N)` or `(F:-)` if not rated.
+
+### Interruptions
+
+Press `i` at any time during an active session to log a micro-interruption (phone glance, Slack ping, urge to check something). The count is shown in the active session view and in the daily history as `(I:N)`.
+
+Significant interruptions (conversations, meetings) should be captured as Disruption sessions via `d` rather than as interruption counts.
 
 ## Data
 
@@ -89,3 +117,4 @@ Copy the `.db` file. That's the entire dataset.
 - **The diary is the source of truth; timers are merely tools for recording it accurately.**
 - Sessions are historical observations, not workflow entities.
 - Projects and tasks are free-text labels, not managed objects with state.
+````

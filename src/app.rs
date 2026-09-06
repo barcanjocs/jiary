@@ -36,8 +36,15 @@ enum Screen {
     AddNote(AddNoteForm),
 }
 
+enum EndStep {
+    Notes,
+    Focus,
+}
+
 struct EndSessionForm {
     notes: String,
+    step: EndStep,
+    focus: Option<i32>,
 }
 struct AddNoteForm {
     input: String,
@@ -196,6 +203,8 @@ impl App {
                     if self.active_session.is_some() {
                         self.screen = Screen::EndSession(EndSessionForm {
                             notes: String::new(),
+                            step: EndStep::Notes,
+                            focus: None,
                         });
                     }
                 }
@@ -386,29 +395,68 @@ impl App {
                     }
                 }
             }
-            Screen::EndSession(form) => match key {
-                KeyCode::Char(c) => form.notes.push(c),
-                KeyCode::Backspace => {
-                    form.notes.pop();
-                }
-                KeyCode::Enter | KeyCode::Esc => {
-                    if let Some(session) = self.active_session.take() {
-                        // Append end-of-session note if provided
+            Screen::EndSession(form) => match &form.step {
+                EndStep::Notes => match key {
+                    KeyCode::Char(c) => {
+                        form.notes.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        form.notes.pop();
+                    }
+                    KeyCode::Enter | KeyCode::Esc => {
                         if !form.notes.is_empty() {
-                            if let Err(e) = self.db.append_note(session.id, &form.notes) {
-                                eprintln!("{e}");
+                            if let Some(session) = &mut self.active_session {
+                                if let Err(e) = self.db.append_note(session.id, &form.notes) {
+                                    eprintln!("{e}");
+                                } else {
+                                    session.notes = Some(match &session.notes {
+                                        None => form.notes.clone(),
+                                        Some(existing) => format!("{}\n{}", existing, form.notes),
+                                    });
+                                }
                             }
                         }
 
-                        if let Err(e) = self.db.complete_session(session.id, None, None) {
-                            eprintln!("{e}");
-                            self.active_session = Some(session);
+                        if key == KeyCode::Esc {
+                            if let Some(session) = self.active_session.take() {
+                                if let Err(e) = self.db.complete_session(session.id, None, None) {
+                                    eprintln!("{e}");
+                                    self.active_session = Some(session);
+                                }
+                                self.today_sessions =
+                                    self.db.sessions_for_today().unwrap_or_default();
+                            }
+                            self.screen = Screen::Main;
+                        } else {
+                            form.step = EndStep::Focus;
                         }
-                        self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
                     }
-                    self.screen = Screen::Main;
-                }
-                _ => {}
+                    _ => {}
+                },
+                EndStep::Focus => match key {
+                    KeyCode::Char(c) if c >= '1' && c <= '3' => {
+                        form.focus = Some(c as i32 - '0' as i32);
+                        if let Some(session) = self.active_session.take() {
+                            if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
+                                eprintln!("{e}");
+                                self.active_session = Some(session);
+                            }
+                            self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                        }
+                        self.screen = Screen::Main;
+                    }
+                    KeyCode::Enter | KeyCode::Esc => {
+                        if let Some(session) = self.active_session.take() {
+                            if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
+                                eprintln!("{e}");
+                                self.active_session = Some(session);
+                            }
+                            self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                        }
+                        self.screen = Screen::Main;
+                    }
+                    _ => {}
+                },
             },
         }
         false
@@ -421,11 +469,18 @@ impl App {
             Screen::Main => self.draw_main(frame, area),
             Screen::StartSession(form) => self.draw_start_session(frame, area, form),
             Screen::EndSession(form) => {
-                let lines = vec![
-                    Line::from(format!("Notes: {}", form.notes)),
-                    Line::from(""),
-                    Line::from("(Enter or Esc to confirm end)"),
-                ];
+                let lines = match &form.step {
+                    EndStep::Notes => vec![
+                        Line::from(format!("Notes: {}", form.notes)),
+                        Line::from(""),
+                        Line::from("(Enter continue · Esc skip)"),
+                    ],
+                    EndStep::Focus => vec![
+                        Line::from("Focus:"),
+                        Line::from(""),
+                        Line::from("(1 bad · 2 ok · 3 good · Enter skip)"),
+                    ],
+                };
                 let paragraph =
                     Paragraph::new(lines).block(Block::default().title(" End session "));
                 frame.render_widget(paragraph, area);
@@ -539,11 +594,11 @@ impl App {
                     .map(|end| format!("  ({})", fmt_duration(&session.started_at, end)))
                     .unwrap_or_default();
 
-                if let Some(count) = session.interruptions {
-                    if count > 0 {
-                        detail.push_str(&format!(" ({} Int)", count));
-                    }
-                }
+                detail.push_str(&match session.focus {
+                    Some(f) => format!(" (F:{f})"),
+                    None => " (F:-)".to_string(),
+                });
+                detail.push_str(&format!(" (I:{})", session.interruptions.unwrap_or(0)));
 
                 lines.push(Line::from(format!("{} ────── {}{}", start, end, detail)));
                 let parts = [
