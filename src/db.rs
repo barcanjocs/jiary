@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     project TEXT,
     task TEXT,
     activity TEXT NOT NULL,
-    description TEXT,
+    notes TEXT,
     outcome TEXT,
     focus INTEGER,
     interruptions INTEGER
@@ -72,7 +72,7 @@ impl Db {
 
     pub fn get_active_session(&self) -> Result<Option<Session>, DbError> {
         let result = self.conn.query_row(
-            "SELECT id, started_at, ended_at, project, task, activity, description, outcome, focus, interruptions
+            "SELECT id, started_at, ended_at, project, task, activity, notes, outcome, focus, interruptions
              FROM sessions WHERE ended_at IS NULL",
             [],
             |row| {
@@ -83,7 +83,7 @@ impl Db {
                     project: row.get(3)?,
                     task: row.get(4)?,
                     activity: row.get(5)?,
-                    description: row.get(6)?,
+notes: row.get(6)?,
                     outcome: row.get(7)?,
                     focus: row.get(8)?,
                     interruptions: row.get(9)?,
@@ -101,7 +101,6 @@ impl Db {
     pub fn complete_session(
         &self,
         id: i64,
-        description: Option<&str>,
         outcome: Option<&str>,
         focus: Option<i32>,
         interruptions: Option<i32>,
@@ -109,8 +108,8 @@ impl Db {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         self.conn
             .execute(
-                "UPDATE sessions SET ended_at = ?1, description = ?2, outcome = ?3, focus = ?4, interruptions = ?5 WHERE id = ?6 AND ended_at IS NULL",
-                params![now, description, outcome, focus, interruptions, id],
+                "UPDATE sessions SET ended_at = ?1, outcome = ?2, focus = ?3, interruptions = ?4 WHERE id = ?5 AND ended_at IS NULL",
+                params![now, outcome, focus, interruptions, id],
             )
             .map_err(DbError::Sqlite)?;
         Ok(())
@@ -121,10 +120,10 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, started_at, ended_at, project, task, activity, description, outcome, focus, interruptions
+                "SELECT id, started_at, ended_at, project, task, activity, notes, outcome, focus, interruptions
                  FROM sessions
                  WHERE date(started_at) = ?1
-                 ORDER BY started_at",
+                 ORDER BY started_at DESC",
             )
             .map_err(DbError::Sqlite)?;
         let rows = stmt
@@ -139,7 +138,7 @@ impl Db {
                     project: row.get(3)?,
                     task: row.get(4)?,
                     activity: row.get(5)?,
-                    description: row.get(6)?,
+                    notes: row.get(6)?,
                     outcome: row.get(7)?,
                     focus: row.get(8)?,
                     interruptions: row.get(9)?,
@@ -156,9 +155,9 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT COALESCE(description, outcome) FROM sessions
+                "SELECT COALESCE(notes, outcome) FROM sessions
          WHERE project = ?1 AND task = ?2 AND ended_at IS NOT NULL
-           AND (description IS NOT NULL OR outcome IS NOT NULL)
+           AND (notes IS NOT NULL OR outcome IS NOT NULL)
          ORDER BY started_at DESC LIMIT 5",
             )
             .map_err(DbError::Sqlite)?;
@@ -168,6 +167,16 @@ impl Db {
             .map_err(DbError::Sqlite)?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
+    pub fn append_note(&self, id: i64, note: &str) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE sessions SET notes = COALESCE(notes, '') || ?1 || char(10) WHERE id = ?2",
+                params![note, id],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
     }
 }
 

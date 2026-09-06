@@ -20,18 +20,24 @@ const ACTIVITIES: &[&str] = &[
 pub struct App {
     db: Db,
     active_session: Option<Session>,
+    today_sessions: Vec<Session>,
     screen: Screen,
 }
+
 enum Screen {
     Main,
-    NewSession(NewSessionForm),
-    StoppingSession(StoppingForm),
+    StartSession(StartSessionForm),
+    EndSession(EndSessionForm),
+    AddNote(AddNoteForm),
 }
 
-struct StoppingForm {
+struct EndSessionForm {
     notes: String,
 }
-struct NewSessionForm {
+struct AddNoteForm {
+    input: String,
+}
+struct StartSessionForm {
     step: Step,
     activity_index: usize,
     project_input: String,
@@ -47,9 +53,11 @@ enum Step {
 impl App {
     pub fn new(db: Db) -> Self {
         let active_session = db.get_active_session().unwrap_or(None);
+        let today_sessions = db.sessions_for_today().unwrap_or_default();
         Self {
             db,
             active_session,
+            today_sessions,
             screen: Screen::Main,
         }
     }
@@ -59,24 +67,54 @@ impl App {
         match &mut self.screen {
             Screen::Main => match key {
                 KeyCode::Char('q') => return true,
-                KeyCode::Char('n') => {
-                    self.screen = Screen::NewSession(NewSessionForm {
+                KeyCode::Char('s') => {
+                    self.screen = Screen::StartSession(StartSessionForm {
                         step: Step::Activity,
                         activity_index: 0,
                         project_input: String::new(),
                         task_input: String::new(),
                     });
                 }
-                KeyCode::Char('s') => {
+                KeyCode::Char('n') => {
                     if self.active_session.is_some() {
-                        self.screen = Screen::StoppingSession(StoppingForm {
+                        self.screen = Screen::AddNote(AddNoteForm {
+                            input: String::new(),
+                        });
+                    }
+                }
+                KeyCode::Char('e') => {
+                    if self.active_session.is_some() {
+                        self.screen = Screen::EndSession(EndSessionForm {
                             notes: String::new(),
                         });
                     }
                 }
                 _ => {}
             },
-            Screen::NewSession(form) => {
+            Screen::AddNote(form) => match key {
+                KeyCode::Char(c) => form.input.push(c),
+                KeyCode::Backspace => {
+                    form.input.pop();
+                }
+                KeyCode::Enter | KeyCode::Esc => {
+                    if !form.input.is_empty() {
+                        let note = form.input.clone();
+                        if let Some(session) = &mut self.active_session {
+                            if let Err(e) = self.db.append_note(session.id, &note) {
+                                eprintln!("{e}");
+                            } else {
+                                session.notes = Some(match &session.notes {
+                                    None => note,
+                                    Some(existing) => format!("{}\n{}", existing, note),
+                                });
+                            }
+                        }
+                    }
+                    self.screen = Screen::Main;
+                }
+                _ => {}
+            },
+            Screen::StartSession(form) => {
                 if key == KeyCode::Esc {
                     self.screen = Screen::Main;
                     return false;
@@ -98,7 +136,6 @@ impl App {
                             form.activity_index = (c as u8 - b'1') as usize;
                             form.step = Step::Project;
                         }
-
                         KeyCode::Enter => form.step = Step::Project,
                         _ => {}
                     },
@@ -116,6 +153,14 @@ impl App {
                             form.task_input.pop();
                         }
                         KeyCode::Enter => {
+                            // Auto-stop any currently active session
+                            if let Some(old) = self.active_session.take() {
+                                if let Err(e) = self.db.complete_session(old.id, None, None, None) {
+                                    eprintln!("{e}");
+                                    self.active_session = Some(old);
+                                }
+                            }
+
                             let activity = ACTIVITIES[form.activity_index];
                             let project = form.project_input.clone();
                             let task = form.task_input.clone();
@@ -141,7 +186,7 @@ impl App {
                                         },
                                         task: if task.is_empty() { None } else { Some(task) },
                                         activity: activity.to_string(),
-                                        description: None,
+                                        notes: None,
                                         outcome: None,
                                         focus: None,
                                         interruptions: None,
@@ -149,31 +194,33 @@ impl App {
                                 }
                                 Err(e) => eprintln!("{e}"),
                             }
+
+                            self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
                             self.screen = Screen::Main;
                         }
                         _ => {}
                     },
                 }
             }
-            Screen::StoppingSession(form) => match key {
+            Screen::EndSession(form) => match key {
                 KeyCode::Char(c) => form.notes.push(c),
                 KeyCode::Backspace => {
                     form.notes.pop();
                 }
                 KeyCode::Enter | KeyCode::Esc => {
-                    let notes = if form.notes.is_empty() {
-                        None
-                    } else {
-                        Some(form.notes.clone())
-                    };
-
                     if let Some(session) = self.active_session.take() {
-                        let desc = notes.as_deref();
-                        if let Err(e) = self.db.complete_session(session.id, desc, None, None, None)
-                        {
+                        // Append end-of-session note if provided
+                        if !form.notes.is_empty() {
+                            if let Err(e) = self.db.append_note(session.id, &form.notes) {
+                                eprintln!("{e}");
+                            }
+                        }
+
+                        if let Err(e) = self.db.complete_session(session.id, None, None, None) {
                             eprintln!("{e}");
                             self.active_session = Some(session);
                         }
+                        self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
                     }
                     self.screen = Screen::Main;
                 }
@@ -188,46 +235,80 @@ impl App {
 
         match &self.screen {
             Screen::Main => self.draw_main(frame, area),
-            Screen::NewSession(form) => self.draw_new_session(frame, area, form),
-            Screen::StoppingSession(form) => {
+            Screen::StartSession(form) => self.draw_start_session(frame, area, form),
+            Screen::EndSession(form) => {
                 let lines = vec![
                     Line::from(format!("Notes: {}", form.notes)),
                     Line::from(""),
-                    Line::from("(Enter or Esc to confirm stop)"),
+                    Line::from("(Enter or Esc to confirm end)"),
                 ];
                 let paragraph =
-                    Paragraph::new(lines).block(Block::default().title(" Stop session "));
+                    Paragraph::new(lines).block(Block::default().title(" End session "));
+                frame.render_widget(paragraph, area);
+            }
+            Screen::AddNote(form) => {
+                let mut lines: Vec<Line> = vec![];
+
+                if let Some(session) = &self.active_session {
+                    let parts = [
+                        session.project.as_deref().unwrap_or(""),
+                        session.task.as_deref().unwrap_or(""),
+                        &session.activity,
+                    ]
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+
+                    lines.push(Line::from(parts));
+                    if let Some(notes) = &session.notes {
+                        if !notes.is_empty() {
+                            lines.push(Line::from(""));
+                            for line in notes.lines() {
+                                lines.push(Line::from(format!("  • {line}")));
+                            }
+                        }
+                    }
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(format!("> {}", form.input)));
+                lines.push(Line::from(""));
+                lines.push(Line::from("(Enter to save, Esc to cancel)"));
+
+                let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
                 frame.render_widget(paragraph, area);
             }
         }
     }
 
     fn draw_main(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let lines: Vec<Line> = if let Some(session) = &self.active_session {
+        let mut lines: Vec<Line> = vec![Line::from("JIARY — TODAY")];
+
+        // Active session
+        if let Some(session) = &self.active_session {
             let elapsed = Utc::now() - session.started_at;
             let h = elapsed.num_hours();
             let m = elapsed.num_minutes() % 60;
             let s = elapsed.num_seconds() % 60;
 
-            let mut lines = vec![
-                Line::from("JIARY — TODAY"),
-                Line::from(""),
-                Line::from(format!(
-                    "Project:  {}",
-                    session.project.as_deref().unwrap_or("(none)")
-                )),
-                Line::from(format!(
-                    "Task:     {}",
-                    session.task.as_deref().unwrap_or("(none)")
-                )),
-                Line::from(format!("Activity: {}", session.activity)),
-            ];
+            lines.push(Line::from(""));
+            lines.push(Line::from("ACTIVE"));
+            lines.push(Line::from(format!(
+                "Project:  {}",
+                session.project.as_deref().unwrap_or("(none)")
+            )));
+            lines.push(Line::from(format!(
+                "Task:     {}",
+                session.task.as_deref().unwrap_or("(none)")
+            )));
+            lines.push(Line::from(format!("Activity: {}", session.activity)));
 
-            // Show notes from previous sessions with same project+task
             if let (Some(project), Some(task)) = (&session.project, &session.task) {
                 if let Ok(notes) = self.db.recent_notes(project, task) {
                     if !notes.is_empty() {
-                        lines.push(Line::from("Notes:"));
+                        lines.push(Line::from("Previous notes:"));
                         for note in notes {
                             lines.push(Line::from(format!("  • {note}")));
                         }
@@ -235,30 +316,71 @@ impl App {
                 }
             }
 
+            // Current session's own notes
+            if let Some(notes) = &session.notes {
+                if !notes.is_empty() {
+                    lines.push(Line::from("Session notes:"));
+                    for line in notes.lines() {
+                        lines.push(Line::from(format!("  • {line}")));
+                    }
+                }
+            }
+
             lines.push(Line::from(""));
             lines.push(Line::from(format!("{h:02}:{m:02}:{s:02}")));
-            lines.push(Line::from(""));
-            lines.push(Line::from("[n] new session  [s] stop  [q] quit"));
-
-            lines
         } else {
-            vec![
-                Line::from("JIARY — TODAY"),
-                Line::from(""),
-                Line::from("No active session."),
-                Line::from(""),
-                Line::from("[n] new session  [q] quit"),
-            ]
-        };
+            lines.push(Line::from(""));
+            lines.push(Line::from("No active session."));
+        }
+
+        // Completed sessions timeline
+        if !self.today_sessions.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from("─────────────────────────────"));
+
+            for session in &self.today_sessions {
+                let start = fmt_time(&session.started_at);
+                let end = session
+                    .ended_at
+                    .as_ref()
+                    .map(fmt_time)
+                    .unwrap_or_else(|| "??:??".to_string());
+
+                lines.push(Line::from(format!("{} ────── {}", start, end)));
+                let parts = [
+                    session.project.as_deref().unwrap_or(""),
+                    session.task.as_deref().unwrap_or(""),
+                    &session.activity,
+                ]
+                .iter()
+                .filter(|s| !s.is_empty())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ");
+
+                lines.push(Line::from(format!("     {parts}")));
+
+                if let Some(nts) = &session.notes {
+                    for line in nts.lines() {
+                        lines.push(Line::from(format!("     • {line}")));
+                    }
+                }
+                lines.push(Line::from(""));
+            }
+        }
+
+        // Footer
+        lines.push(Line::from("[s] start  [e] end  [n] note  [q] quit"));
 
         let paragraph = Paragraph::new(lines).block(Block::default().title(" Jiary "));
         frame.render_widget(paragraph, area);
     }
-    fn draw_new_session(
+
+    fn draw_start_session(
         &self,
         frame: &mut Frame,
         area: ratatui::layout::Rect,
-        form: &NewSessionForm,
+        form: &StartSessionForm,
     ) {
         match &form.step {
             Step::Activity => {
@@ -282,7 +404,7 @@ impl App {
                     Line::from("(Enter to confirm, Esc to cancel)"),
                 ];
                 let paragraph =
-                    Paragraph::new(lines).block(Block::default().title(" New session "));
+                    Paragraph::new(lines).block(Block::default().title(" Start session "));
                 frame.render_widget(paragraph, area);
             }
             Step::Task => {
@@ -301,9 +423,13 @@ impl App {
                     Line::from("(Enter to start, Esc to cancel)"),
                 ];
                 let paragraph =
-                    Paragraph::new(lines).block(Block::default().title(" New session "));
+                    Paragraph::new(lines).block(Block::default().title(" Start session "));
                 frame.render_widget(paragraph, area);
             }
         }
     }
+}
+
+fn fmt_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
+    dt.with_timezone(&chrono::Local).format("%H:%M").to_string()
 }
