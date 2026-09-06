@@ -13,9 +13,3 @@ pub struct Session {
     pub focus: Option<i32>,
     pub interruptions: Option<i32>,
 }
-
-impl Session {
-    pub fn is_active(&self) -> bool {
-        self.ended_at.is_none()
-    }
-}

@@ -625,7 +625,7 @@ impl App {
 
         // Footer
         lines.push(Line::from(
-            "[s] start  [e] end  [n] note  [i] int  [d] disrupt  [r] resume  [q] quit",
+            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [q] quit",
         ));
         let paragraph = Paragraph::new(lines).block(Block::default().title(" Jiary "));
         frame.render_widget(paragraph, area);
