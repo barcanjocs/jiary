@@ -52,6 +52,7 @@ struct StartSessionForm {
     task_query: String,
     project_selection: usize,
     task_selection: usize,
+    task_candidates: Vec<String>,
 }
 
 enum Step {
@@ -181,6 +182,7 @@ impl App {
                         task_query: String::new(),
                         project_selection: 0,
                         task_selection: 0,
+                        task_candidates: Vec::new(),
                     });
                 }
                 KeyCode::Char('n') => {
@@ -272,18 +274,32 @@ impl App {
                             }
                             KeyCode::Tab => {
                                 if !suggestions.is_empty() {
-                                    form.project_selection =
-                                        (form.project_selection + 1) % suggestions.len();
+                                    if form.project_input.is_empty() {
+                                        form.project_selection = 0;
+                                    } else {
+                                        form.project_selection =
+                                            (form.project_selection + 1) % suggestions.len();
+                                    }
                                     form.project_input =
                                         suggestions[form.project_selection].clone();
                                 }
                             }
-                            KeyCode::Enter => form.step = Step::Task,
+                            KeyCode::Enter => {
+                                let candidates = if form.project_input.is_empty() {
+                                    self.tasks.clone()
+                                } else {
+                                    self.db
+                                        .tasks_for_project(&form.project_input)
+                                        .unwrap_or_default()
+                                };
+                                form.task_candidates = candidates;
+                                form.step = Step::Task;
+                            }
                             _ => {}
                         }
                     }
                     Step::Task => {
-                        let suggestions = fuzzy_filter(&form.task_query, &self.tasks);
+                        let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
                         match key {
                             KeyCode::Char(c) => {
                                 form.task_input.push(c);
@@ -307,8 +323,12 @@ impl App {
                             }
                             KeyCode::Tab => {
                                 if !suggestions.is_empty() {
-                                    form.task_selection =
-                                        (form.task_selection + 1) % suggestions.len();
+                                    if form.task_input.is_empty() {
+                                        form.task_selection = 0;
+                                    } else {
+                                        form.task_selection =
+                                            (form.task_selection + 1) % suggestions.len();
+                                    }
                                     form.task_input = suggestions[form.task_selection].clone();
                                 }
                             }
@@ -357,6 +377,8 @@ impl App {
 
                                 self.today_sessions =
                                     self.db.sessions_for_today().unwrap_or_default();
+                                self.projects = self.db.distinct_projects().unwrap_or_default();
+                                self.tasks = self.db.distinct_tasks().unwrap_or_default();
                                 self.screen = Screen::Main;
                             }
                             _ => {}
@@ -599,7 +621,7 @@ impl App {
                 frame.render_widget(paragraph, area);
             }
             Step::Task => {
-                let suggestions = fuzzy_filter(&form.task_query, &self.tasks);
+                let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
                 let mut lines = vec![
                     Line::from(format!("Task: {}", form.task_input)),
                     Line::from(""),
@@ -639,7 +661,7 @@ fn fmt_duration(
 }
 fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
     if query.is_empty() {
-        return vec![];
+        return candidates.to_vec();
     }
     let matcher = SkimMatcherV2::default();
     let mut scored: Vec<(i64, &String)> = candidates

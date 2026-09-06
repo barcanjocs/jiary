@@ -210,6 +210,22 @@ notes: row.get(6)?,
         Ok(())
     }
 
+    pub fn tasks_for_project(&self, project: &str) -> Result<Vec<String>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT task FROM sessions
+         WHERE project = ?1 AND task IS NOT NULL AND task != ''
+         ORDER BY task",
+            )
+            .map_err(DbError::Sqlite)?;
+
+        let rows = stmt
+            .query_map(params![project], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
     pub fn latest_non_disruption(
         &self,
     ) -> Result<Option<(String, Option<String>, Option<String>)>, DbError> {
