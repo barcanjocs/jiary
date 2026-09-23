@@ -283,9 +283,9 @@ impl App {
                             }
                             KeyCode::Tab => {
                                 if !suggestions.is_empty() {
-                                    if form.project_input.is_empty() {
-                                        form.project_selection = 0;
-                                    } else {
+                                    // Accept the highlighted suggestion; advance to the
+                                    // next one only if it was already accepted.
+                                    if form.project_input == *suggestions[form.project_selection] {
                                         form.project_selection =
                                             (form.project_selection + 1) % suggestions.len();
                                     }
@@ -332,9 +332,9 @@ impl App {
                             }
                             KeyCode::Tab => {
                                 if !suggestions.is_empty() {
-                                    if form.task_input.is_empty() {
-                                        form.task_selection = 0;
-                                    } else {
+                                    // Accept the highlighted suggestion; advance to the
+                                    // next one only if it was already accepted.
+                                    if form.task_input == *suggestions[form.task_selection] {
                                         form.task_selection =
                                             (form.task_selection + 1) % suggestions.len();
                                     }
