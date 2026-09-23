@@ -152,6 +152,48 @@ impl App {
         self.previous_notes = notes;
     }
 
+    /// Closes the currently active session, if any. Returns true on success
+    /// (or when there was nothing to close) and clears the error line; on
+    /// failure restores the session, records the error, and returns false so
+    /// the caller can abort (e.g. not start a replacement session).
+    fn close_active_session(&mut self) -> bool {
+        match self.active_session.take() {
+            None => true,
+            Some(session) => match self.db.complete_session(session.id, None) {
+                Ok(()) => {
+                    self.clear_error();
+                    true
+                }
+                Err(e) => {
+                    self.set_error(e);
+                    self.active_session = Some(session);
+                    false
+                }
+            },
+        }
+    }
+
+    /// Appends a note to the active session (db plus in-memory mirror). No-op
+    /// if there is no active session.
+    fn append_active_note(&mut self, note: &str) {
+        let Some(id) = self.active_session.as_ref().map(|s| s.id) else {
+            return;
+        };
+        match self.db.append_note(id, note) {
+            Err(e) => self.set_error(e),
+            Ok(()) => {
+                self.clear_error();
+                if let Some(session) = &mut self.active_session {
+                    // Newline-terminated, same convention as the db.
+                    session.notes = Some(match &session.notes {
+                        None => format!("{note}\n"),
+                        Some(existing) => format!("{existing}{note}\n"),
+                    });
+                }
+            }
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
         // Returns true if the app should quit
         match &mut self.screen {
@@ -182,14 +224,8 @@ impl App {
                         return false;
                     }
 
-                    if let Some(session) = self.active_session.take() {
-                        if let Err(e) = self.db.complete_session(session.id, None) {
-                            self.set_error(e);
-                            self.active_session = Some(session);
-                            return false;
-                        } else {
-                            self.clear_error();
-                        }
+                    if !self.close_active_session() {
+                        return false;
                     }
 
                     let combo = match self.db.latest_non_disruption() {
@@ -230,32 +266,25 @@ impl App {
                 }
 
                 KeyCode::Char('d') => {
-                    if let Some(old) = self.active_session.take() {
-                        match self.db.complete_session(old.id, None) {
-                            Err(e) => {
-                                self.set_error(e);
-                                self.active_session = Some(old);
-                            }
-                            Ok(()) => {
+                    // Only start a Disruption if there was a session to interrupt.
+                    let had_active = self.active_session.is_some();
+                    if had_active && self.close_active_session() {
+                        match self.db.create_session("Disruption", None, None) {
+                            Ok(id) => {
                                 self.clear_error();
-                                match self.db.create_session("Disruption", None, None) {
-                                    Ok(id) => {
-                                        self.clear_error();
-                                        self.active_session = Some(Session {
-                                            id,
-                                            started_at: Utc::now(),
-                                            ended_at: None,
-                                            project: None,
-                                            task: None,
-                                            activity: "Disruption".to_string(),
-                                            notes: None,
-                                            focus: None,
-                                            interruptions: None,
-                                        });
-                                    }
-                                    Err(e) => self.set_error(e),
-                                }
+                                self.active_session = Some(Session {
+                                    id,
+                                    started_at: Utc::now(),
+                                    ended_at: None,
+                                    project: None,
+                                    task: None,
+                                    activity: "Disruption".to_string(),
+                                    notes: None,
+                                    focus: None,
+                                    interruptions: None,
+                                });
                             }
+                            Err(e) => self.set_error(e),
                         }
                     }
                     self.refresh_after_session_change();
@@ -280,14 +309,12 @@ impl App {
                         });
                     }
                 }
-                KeyCode::Char('e') => {
-                    if self.active_session.is_some() {
-                        self.screen = Screen::EndSession(EndSessionForm {
-                            notes: String::new(),
-                            step: EndStep::Notes,
-                            focus: None,
-                        });
-                    }
+                KeyCode::Char('e') if self.active_session.is_some() => {
+                    self.screen = Screen::EndSession(EndSessionForm {
+                        notes: String::new(),
+                        step: EndStep::Notes,
+                        focus: None,
+                    });
                 }
                 _ => {}
             },
@@ -299,23 +326,7 @@ impl App {
                 KeyCode::Enter | KeyCode::Esc => {
                     if !form.input.is_empty() {
                         let note = form.input.clone();
-                        let id = self.active_session.as_ref().map(|s| s.id);
-                        match id {
-                            Some(id) => match self.db.append_note(id, &note) {
-                                Err(e) => self.set_error(e),
-                                Ok(()) => {
-                                    self.clear_error();
-                                    if let Some(session) = &mut self.active_session {
-                                        // Newline-terminated, same convention as the db.
-                                        session.notes = Some(match &session.notes {
-                                            None => format!("{note}\n"),
-                                            Some(existing) => format!("{existing}{note}\n"),
-                                        });
-                                    }
-                                }
-                            },
-                            None => {}
-                        }
+                        self.append_active_note(&note);
                     }
                     self.screen = Screen::Main;
                 }
@@ -434,24 +445,19 @@ impl App {
                                 }
                             }
                             KeyCode::Enter => {
+                                // Copy everything out of `form` before any call that
+                                // needs &mut self, so the screen borrow is dead.
+                                let activity = ACTIVITIES[form.activity_index];
+                                let project = form.project_input.clone();
+                                let task = form.task_input.clone();
+
                                 // Auto-stop any currently active session. If that fails,
                                 // abort: creating anyway would leave two active sessions
                                 // (the db trigger rejects it, but failing early surfaces
                                 // the real error instead of the generic one).
-                                // No clear on success here: `form` is used below, which
-                                // would conflict with the &mut self borrow. The create
-                                // that follows clears on its own success.
-                                if let Some(old) = self.active_session.take() {
-                                    if let Err(e) = self.db.complete_session(old.id, None) {
-                                        self.set_error(e);
-                                        self.active_session = Some(old);
-                                        return false;
-                                    }
+                                if !self.close_active_session() {
+                                    return false;
                                 }
-
-                                let activity = ACTIVITIES[form.activity_index];
-                                let project = form.project_input.clone();
-                                let task = form.task_input.clone();
 
                                 match self.db.create_session(
                                     activity,
@@ -503,31 +509,14 @@ impl App {
                         form.notes.pop();
                     }
                     KeyCode::Enter | KeyCode::Esc => {
-                        // Use `form` before any call that needs &mut self, so the
-                        // screen borrow is dead by the time set_error may run.
+                        // Clone notes out of `form` before calling into self.
                         let notes = form.notes.clone();
                         if key != KeyCode::Esc {
                             form.step = EndStep::Focus;
                         }
 
                         if !notes.is_empty() {
-                            let id = self.active_session.as_ref().map(|s| s.id);
-                            match id {
-                                Some(id) => match self.db.append_note(id, &notes) {
-                                    Err(e) => self.set_error(e),
-                                    Ok(()) => {
-                                        self.clear_error();
-                                        if let Some(session) = &mut self.active_session {
-                                            // Newline-terminated, same convention as the db.
-                                            session.notes = Some(match &session.notes {
-                                                None => format!("{notes}\n"),
-                                                Some(existing) => format!("{existing}{notes}\n"),
-                                            });
-                                        }
-                                    }
-                                },
-                                None => {}
-                            }
+                            self.append_active_note(&notes);
                         }
 
                         if key == KeyCode::Esc {
@@ -546,7 +535,7 @@ impl App {
                     _ => {}
                 },
                 EndStep::Focus => match key {
-                    KeyCode::Char(c) if c >= '1' && c <= '3' => {
+                    KeyCode::Char(c) if ('1'..='3').contains(&c) => {
                         form.focus = Some(c as i32 - '0' as i32);
                         if let Some(session) = self.active_session.take() {
                             if let Err(e) = self.db.complete_session(session.id, form.focus) {
@@ -617,12 +606,12 @@ impl App {
                     .join(" · ");
 
                     lines.push(Line::from(parts));
-                    if let Some(notes) = &session.notes {
-                        if !notes.is_empty() {
-                            lines.push(Line::from(""));
-                            for line in notes.lines() {
-                                lines.push(Line::from(format!("  • {line}")));
-                            }
+                    if let Some(notes) = &session.notes
+                        && !notes.is_empty()
+                    {
+                        lines.push(Line::from(""));
+                        for line in notes.lines() {
+                            lines.push(Line::from(format!("  • {line}")));
                         }
                     }
                 }
@@ -640,14 +629,14 @@ impl App {
         // Simple error display: a plain line pinned to the bottom row. This is
         // the only place errors are rendered — replace this block when the UI
         // gets a real layout.
-        if let Some(err) = &self.error {
-            if area.height > 0 {
-                let y = area.y + area.height - 1;
-                frame.render_widget(
-                    Paragraph::new(Line::from(format!("ERROR: {err}"))),
-                    Rect::new(area.x, y, area.width, 1),
-                );
-            }
+        if let Some(err) = &self.error
+            && area.height > 0
+        {
+            let y = area.y + area.height - 1;
+            frame.render_widget(
+                Paragraph::new(Line::from(format!("ERROR: {err}"))),
+                Rect::new(area.x, y, area.width, 1),
+            );
         }
     }
 
@@ -682,12 +671,12 @@ impl App {
             }
 
             // Current session's own notes
-            if let Some(notes) = &session.notes {
-                if !notes.is_empty() {
-                    lines.push(Line::from("Session notes:"));
-                    for line in notes.lines() {
-                        lines.push(Line::from(format!("  • {line}")));
-                    }
+            if let Some(notes) = &session.notes
+                && !notes.is_empty()
+            {
+                lines.push(Line::from("Session notes:"));
+                for line in notes.lines() {
+                    lines.push(Line::from(format!("  • {line}")));
                 }
             }
 
@@ -851,6 +840,6 @@ fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|c| matcher.fuzzy_match(c, query).map(|s| (s, c)))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|a| std::cmp::Reverse(a.0));
     scored.into_iter().take(5).map(|(_, c)| c.clone()).collect()
 }

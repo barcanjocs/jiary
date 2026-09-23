@@ -40,12 +40,11 @@ fn run(db: db::Db) -> io::Result<()> {
     loop {
         terminal.draw(|frame| app.draw(frame))?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if app.handle_key(key.code) {
-                    break;
-                }
-            }
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+            && app.handle_key(key.code)
+        {
+            break;
         }
     }
     disable_raw_mode()?;

@@ -5,6 +5,10 @@ use rusqlite::{Connection, params};
 
 use crate::session::Session;
 
+/// The (activity, project, task) of a session, as returned by
+/// [`Db::latest_non_disruption`] for resuming work.
+type SessionCombo = (String, Option<String>, Option<String>);
+
 pub struct Db {
     conn: Connection,
 }
@@ -241,9 +245,7 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
     }
 
-    pub fn latest_non_disruption(
-        &self,
-    ) -> Result<Option<(String, Option<String>, Option<String>)>, DbError> {
+    pub fn latest_non_disruption(&self) -> Result<Option<SessionCombo>, DbError> {
         let result = self.conn.query_row(
             "SELECT activity, project, task FROM sessions
          WHERE activity != 'Disruption' AND ended_at IS NOT NULL
