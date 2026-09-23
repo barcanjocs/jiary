@@ -21,9 +21,9 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: refactor phase complete. `handle_key`/`draw` split into per-screen
-  methods (`bce0213`); `start_session`/`complete_active` helpers extracted and
-  fuzzy/tab-completion tests added (`5fcc757`). 15 tests, all green.
+- State: development pipeline in place — session protocol at the top of this
+  file (`99dcaaa`) and one-command `./check` verification (`872a4d3`). Refactor
+  phase complete (`bce0213`, `5fcc757`); 15 tests, all green.
 - Next: choose a feature from the backlog below (suggested order C → B → A → D).
 - Blockers / open questions: none.
 
