@@ -51,6 +51,27 @@ from its scope note alone, without re-deriving context.
       next launch shows a "live" timer that actually started before today.
       Detect `started_at` before local midnight and mark it clearly (e.g.
       "since yesterday"); make sure `e` still ends it sensibly.
+- [ ] **E. Single-instance lock** (small). Nothing prevents two jiary
+      processes from running at once and interleaving writes. At startup,
+      before opening the db, acquire an exclusive `flock` on a dedicated
+      lock file in the data dir (e.g. `jiary.lock`); on contention exit(1)
+      with "already running (pid N)" — same philosophy as the unopenable-db
+      exit (our own pid written into the lockfile, best-effort). flock is
+      kernel-managed: released on crash/kill, no stale-lock logic, and a
+      separate namespace from SQLite's POSIX locks. Dep: `fs2` or raw libc.
+      Test headlessly by holding the lock and asserting a second acquire
+      fails. Touches: main.rs startup, new error path, README.
+- [ ] **F. Relaunch-as-focus** (small-medium, builds on E). Re-running
+      `jiary` while an instance is live should focus its terminal window
+      instead of erroring: the first instance records pid + `$WINDOWID` in
+      the lockfile; the second reads it on lock failure and activates the
+      window (X11 only, e.g. `wmctrl -ia <id>`), then exits 0. No
+      `$WINDOWID` or non-X → fall back to E's "already running" message.
+      The global-key part stays in the user's environment (desktop
+      shortcut / terminal keybind that runs `jiary`); no in-process global
+      hotkey registration — Wayland forbids it and it breaks the
+      no-system-deps property. Touches: E's lockfile format, one X11
+      activation helper, README.
 - [ ] **Nits** (tiny, do whenever):
   - In-memory `started_at` (`Utc::now()` in `start_session`) differs from the
     db's by microseconds; have `create_session` return (or re-read) the stored
