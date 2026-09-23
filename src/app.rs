@@ -173,6 +173,47 @@ impl App {
         }
     }
 
+    /// Creates a new session in the db and mirrors it in memory as the active
+    /// session. On failure records the error and leaves the active session
+    /// unchanged.
+    fn start_session(&mut self, activity: &str, project: Option<String>, task: Option<String>) {
+        match self
+            .db
+            .create_session(activity, project.as_deref(), task.as_deref())
+        {
+            Ok(id) => {
+                self.clear_error();
+                self.active_session = Some(Session {
+                    id,
+                    started_at: Utc::now(),
+                    ended_at: None,
+                    project,
+                    task,
+                    activity: activity.to_string(),
+                    notes: None,
+                    focus: None,
+                    interruptions: None,
+                });
+            }
+            Err(e) => self.set_error(e),
+        }
+    }
+
+    /// Ends the active session with the given focus rating (if any) and
+    /// refreshes the main screen lists. On failure restores the session and
+    /// records the error. No-op if there is no active session.
+    fn complete_active(&mut self, focus: Option<i32>) {
+        if let Some(session) = self.active_session.take() {
+            if let Err(e) = self.db.complete_session(session.id, focus) {
+                self.set_error(e);
+                self.active_session = Some(session);
+            } else {
+                self.clear_error();
+            }
+            self.refresh_after_session_change();
+        }
+    }
+
     /// Appends a note to the active session (db plus in-memory mirror). No-op
     /// if there is no active session.
     fn append_active_note(&mut self, note: &str) {
@@ -250,26 +291,7 @@ impl App {
                 };
 
                 let (activity, project, task) = combo;
-                match self
-                    .db
-                    .create_session(&activity, project.as_deref(), task.as_deref())
-                {
-                    Ok(id) => {
-                        self.clear_error();
-                        self.active_session = Some(Session {
-                            id,
-                            started_at: Utc::now(),
-                            ended_at: None,
-                            project,
-                            task,
-                            activity,
-                            notes: None,
-                            focus: None,
-                            interruptions: None,
-                        });
-                    }
-                    Err(e) => self.set_error(e),
-                }
+                self.start_session(&activity, project, task);
 
                 self.refresh_after_session_change();
             }
@@ -278,23 +300,7 @@ impl App {
                 // Only start a Disruption if there was a session to interrupt.
                 let had_active = self.active_session.is_some();
                 if had_active && self.close_active_session() {
-                    match self.db.create_session("Disruption", None, None) {
-                        Ok(id) => {
-                            self.clear_error();
-                            self.active_session = Some(Session {
-                                id,
-                                started_at: Utc::now(),
-                                ended_at: None,
-                                project: None,
-                                task: None,
-                                activity: "Disruption".to_string(),
-                                notes: None,
-                                focus: None,
-                                interruptions: None,
-                            });
-                        }
-                        Err(e) => self.set_error(e),
-                    }
+                    self.start_session("Disruption", None, None);
                 }
                 self.refresh_after_session_change();
             }
@@ -463,10 +469,19 @@ impl App {
             }
             KeyCode::Enter => {
                 // Copy everything out of `form` before any call that
-                // needs &mut self, so the screen borrow is dead.
+                // needs &mut self, so the screen borrow is dead. Empty fields
+                // become None so the db stores NULL, not "".
                 let activity = ACTIVITIES[form.activity_index];
-                let project = form.project_input.clone();
-                let task = form.task_input.clone();
+                let project = if form.project_input.is_empty() {
+                    None
+                } else {
+                    Some(form.project_input.clone())
+                };
+                let task = if form.task_input.is_empty() {
+                    None
+                } else {
+                    Some(form.task_input.clone())
+                };
 
                 // Auto-stop any currently active session. If that fails,
                 // abort: creating anyway would leave two active sessions
@@ -476,35 +491,7 @@ impl App {
                     return;
                 }
 
-                match self.db.create_session(
-                    activity,
-                    if project.is_empty() {
-                        None
-                    } else {
-                        Some(&project)
-                    },
-                    if task.is_empty() { None } else { Some(&task) },
-                ) {
-                    Ok(id) => {
-                        self.clear_error();
-                        self.active_session = Some(Session {
-                            id,
-                            started_at: Utc::now(),
-                            ended_at: None,
-                            project: if project.is_empty() {
-                                None
-                            } else {
-                                Some(project)
-                            },
-                            task: if task.is_empty() { None } else { Some(task) },
-                            activity: activity.to_string(),
-                            notes: None,
-                            focus: None,
-                            interruptions: None,
-                        });
-                    }
-                    Err(e) => self.set_error(e),
-                }
+                self.start_session(activity, project, task);
 
                 self.refresh_after_session_change();
                 self.projects = self.db.distinct_projects().unwrap_or_default();
@@ -552,15 +539,7 @@ impl App {
                 }
 
                 if key == KeyCode::Esc {
-                    if let Some(session) = self.active_session.take() {
-                        if let Err(e) = self.db.complete_session(session.id, None) {
-                            self.set_error(e);
-                            self.active_session = Some(session);
-                        } else {
-                            self.clear_error();
-                        }
-                        self.refresh_after_session_change();
-                    }
+                    self.complete_active(None);
                     self.screen = Screen::Main;
                 }
             }
@@ -575,27 +554,15 @@ impl App {
         match key {
             KeyCode::Char(c) if ('1'..='3').contains(&c) => {
                 form.focus = Some(c as i32 - '0' as i32);
-                if let Some(session) = self.active_session.take() {
-                    if let Err(e) = self.db.complete_session(session.id, form.focus) {
-                        self.set_error(e);
-                        self.active_session = Some(session);
-                    } else {
-                        self.clear_error();
-                    }
-                    self.refresh_after_session_change();
-                }
+                // Copy out of `form` before calling into self.
+                let focus = form.focus;
+                self.complete_active(focus);
                 self.screen = Screen::Main;
             }
             KeyCode::Enter | KeyCode::Esc => {
-                if let Some(session) = self.active_session.take() {
-                    if let Err(e) = self.db.complete_session(session.id, form.focus) {
-                        self.set_error(e);
-                        self.active_session = Some(session);
-                    } else {
-                        self.clear_error();
-                    }
-                    self.refresh_after_session_change();
-                }
+                // Copy out of `form` before calling into self.
+                let focus = form.focus;
+                self.complete_active(focus);
                 self.screen = Screen::Main;
             }
             _ => {}
@@ -906,4 +873,162 @@ fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
         .collect();
     scored.sort_by_key(|a| std::cmp::Reverse(a.0));
     scored.into_iter().take(5).map(|(_, c)| c.clone()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    /// An [`App`] backed by a throwaway db. The `app` field is declared first so
+    /// its `Db` connection drops before the directory is removed.
+    struct TestApp {
+        app: App,
+        dir: std::path::PathBuf,
+    }
+
+    impl TestApp {
+        fn new() -> Self {
+            // Distinct prefix from db.rs's tests: both counters start at 0 in
+            // the same process, and a shared dir would let one test delete the
+            // other's live database.
+            let dir = std::env::temp_dir().join(format!(
+                "jiary-app-test-{}-{}",
+                std::process::id(),
+                TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let db = Db::open_at(&dir.join("jiary.db")).unwrap();
+            Self {
+                app: App::new(db),
+                dir,
+            }
+        }
+
+        /// Puts the app on the Project step of the start-session form.
+        fn on_project_step(
+            mut self,
+            projects: Vec<String>,
+            input: &str,
+            query: &str,
+            selection: usize,
+        ) -> Self {
+            self.app.projects = projects;
+            self.app.screen = Screen::StartSession(StartSessionForm {
+                step: Step::Project,
+                activity_index: 0,
+                project_input: input.to_string(),
+                task_input: String::new(),
+                project_query: query.to_string(),
+                task_query: String::new(),
+                project_selection: selection,
+                task_selection: 0,
+                task_candidates: Vec::new(),
+            });
+            self
+        }
+
+        fn form(&self) -> &StartSessionForm {
+            match &self.app.screen {
+                Screen::StartSession(f) => f,
+                _ => panic!("expected start-session screen"),
+            }
+        }
+    }
+
+    impl Drop for TestApp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    // --- fuzzy_filter -------------------------------------------------
+
+    #[test]
+    fn fuzzy_filter_empty_query_returns_all_in_order() {
+        let c = vec!["a".into(), "b".into(), "c".into()];
+        assert_eq!(fuzzy_filter("", &c), c);
+    }
+
+    #[test]
+    fn fuzzy_filter_matches_subsequences() {
+        let c = vec!["programming".into(), "reading".into()];
+        // 'pg' is a subsequence of "programming" but not of "reading".
+        assert_eq!(fuzzy_filter("pg", &c), vec!["programming".to_string()]);
+    }
+
+    #[test]
+    fn fuzzy_filter_ranks_contiguous_match_higher() {
+        let c = vec!["xaybz".into(), "abc".into()];
+        assert_eq!(fuzzy_filter("ab", &c)[0], "abc");
+    }
+
+    #[test]
+    fn fuzzy_filter_caps_results_at_five() {
+        let c: Vec<String> = (0..10).map(|i| format!("item{}", i)).collect();
+        assert_eq!(fuzzy_filter("item", &c).len(), 5);
+    }
+
+    // --- Tab completion -----------------------------------------------
+
+    #[test]
+    fn tab_accepts_first_suggestion() {
+        let mut t = TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "", "", 0);
+        t.app.handle_key(KeyCode::Tab);
+        let f = t.form();
+        assert_eq!(f.project_input, "alpha");
+        assert_eq!(f.project_selection, 0);
+    }
+
+    #[test]
+    fn tab_advances_when_input_matches_highlighted() {
+        // Input already equals the highlighted suggestion, so Tab moves on.
+        let mut t =
+            TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "alpha", "", 0);
+        t.app.handle_key(KeyCode::Tab);
+        let f = t.form();
+        assert_eq!(f.project_input, "beta");
+        assert_eq!(f.project_selection, 1);
+    }
+
+    #[test]
+    fn tab_wraps_around_to_first() {
+        let mut t =
+            TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "beta", "", 1);
+        t.app.handle_key(KeyCode::Tab);
+        let f = t.form();
+        assert_eq!(f.project_input, "alpha");
+        assert_eq!(f.project_selection, 0);
+    }
+
+    #[test]
+    fn tab_after_typing_accepts_highlighted_not_next() {
+        // Regression (61d9181): after typing, selection is 0 and a single Tab
+        // must accept the highlighted suggestion rather than skip past it.
+        let mut t =
+            TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "a", "a", 0);
+        t.app.handle_key(KeyCode::Tab);
+        assert_eq!(t.form().project_input, "alpha");
+    }
+
+    #[test]
+    fn backspace_resets_selection() {
+        let mut t =
+            TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "al", "al", 1);
+        t.app.handle_key(KeyCode::Backspace);
+        let f = t.form();
+        assert_eq!(f.project_input, "a");
+        assert_eq!(f.project_query, "a");
+        assert_eq!(f.project_selection, 0);
+    }
+
+    #[test]
+    fn tab_is_noop_when_no_suggestions() {
+        let mut t = TestApp::new().on_project_step(vec!["alpha".into()], "zzz", "zzz", 0);
+        t.app.handle_key(KeyCode::Tab);
+        assert_eq!(t.form().project_input, "zzz");
+    }
 }
