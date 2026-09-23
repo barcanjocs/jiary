@@ -79,6 +79,10 @@ Press `i` at any time during an active session to log a micro-interruption (phon
 
 Significant interruptions (conversations, meetings) should be captured as Disruption sessions via `d` rather than as interruption counts.
 
+### Errors
+
+Database failures (e.g. a locked or corrupt file) are shown as an `ERROR:` line at the bottom of the screen. The message stays until a newer error replaces it; Jiary keeps running with whatever data it could load. If the database cannot be opened at all, Jiary prints the error to the terminal and exits.
+
 ## Data
 
 All data is stored in a single SQLite file. The schema:

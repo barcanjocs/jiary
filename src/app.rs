@@ -1,5 +1,6 @@
 use chrono::Utc;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
@@ -27,6 +28,9 @@ pub struct App {
     projects: Vec<String>,
     tasks: Vec<String>,
     screen: Screen,
+    /// Last error that occurred, kept as plain data so the UI renders it in
+    /// exactly one place (and a future auto-clear-on-success can too).
+    error: Option<String>,
 }
 
 enum Screen {
@@ -36,6 +40,7 @@ enum Screen {
     AddNote(AddNoteForm),
 }
 
+#[derive(Clone, Copy)]
 enum EndStep {
     Notes,
     Focus,
@@ -62,6 +67,7 @@ struct StartSessionForm {
     task_candidates: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
 enum Step {
     Activity,
     Project,
@@ -70,18 +76,42 @@ enum Step {
 
 impl App {
     pub fn new(db: Db) -> Self {
-        let active_session = db.get_active_session().unwrap_or(None);
-        let today_sessions = db.sessions_for_today().unwrap_or_default();
-        let projects = db.distinct_projects().unwrap_or_default();
-        let tasks = db.distinct_tasks().unwrap_or_default();
-        Self {
+        let mut app = Self {
             db,
-            active_session,
-            today_sessions,
-            projects,
-            tasks,
+            active_session: None,
+            today_sessions: Vec::new(),
+            projects: Vec::new(),
+            tasks: Vec::new(),
             screen: Screen::Main,
+            error: None,
+        };
+
+        // Attempt every load so partial data still shows; failures are recorded
+        // for display instead of being swallowed.
+        match app.db.get_active_session() {
+            Ok(session) => app.active_session = session,
+            Err(e) => app.set_error(e),
         }
+        match app.db.sessions_for_today() {
+            Ok(sessions) => app.today_sessions = sessions,
+            Err(e) => app.set_error(e),
+        }
+        match app.db.distinct_projects() {
+            Ok(projects) => app.projects = projects,
+            Err(e) => app.set_error(e),
+        }
+        match app.db.distinct_tasks() {
+            Ok(tasks) => app.tasks = tasks,
+            Err(e) => app.set_error(e),
+        }
+
+        app
+    }
+
+    /// Records an error for display. Every DB failure must go through this so
+    /// there is a single point to render (and later, clear on success).
+    fn set_error(&mut self, e: impl std::fmt::Display) {
+        self.error = Some(e.to_string());
     }
 
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
@@ -90,11 +120,15 @@ impl App {
             Screen::Main => match key {
                 KeyCode::Char('q') => return true,
                 KeyCode::Char('i') => {
-                    if let Some(session) = &mut self.active_session {
-                        if let Err(e) = self.db.increment_interruptions(session.id) {
-                            eprintln!("{e}");
-                        } else {
-                            session.interruptions = Some(session.interruptions.unwrap_or(0) + 1);
+                    if let Some(id) = self.active_session.as_ref().map(|s| s.id) {
+                        match self.db.increment_interruptions(id) {
+                            Err(e) => self.set_error(e),
+                            Ok(()) => {
+                                if let Some(session) = &mut self.active_session {
+                                    session.interruptions =
+                                        Some(session.interruptions.unwrap_or(0) + 1);
+                                }
+                            }
                         }
                     }
                 }
@@ -111,7 +145,7 @@ impl App {
 
                     if let Some(session) = self.active_session.take() {
                         if let Err(e) = self.db.complete_session(session.id, None, None) {
-                            eprintln!("{e}");
+                            self.set_error(e);
                             self.active_session = Some(session);
                             return false;
                         }
@@ -121,7 +155,7 @@ impl App {
                         Ok(Some(combo)) => combo,
                         Ok(None) => return false,
                         Err(e) => {
-                            eprintln!("{e}");
+                            self.set_error(e);
                             return false;
                         }
                     };
@@ -145,7 +179,7 @@ impl App {
                                 interruptions: None,
                             });
                         }
-                        Err(e) => eprintln!("{e}"),
+                        Err(e) => self.set_error(e),
                     }
 
                     self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
@@ -155,7 +189,7 @@ impl App {
                     if let Some(old) = self.active_session.take() {
                         match self.db.complete_session(old.id, None, None) {
                             Err(e) => {
-                                eprintln!("{e}");
+                                self.set_error(e);
                                 self.active_session = Some(old);
                             }
                             Ok(()) => match self.db.create_session("Disruption", None, None) {
@@ -173,7 +207,7 @@ impl App {
                                         interruptions: None,
                                     });
                                 }
-                                Err(e) => eprintln!("{e}"),
+                                Err(e) => self.set_error(e),
                             },
                         }
                     }
@@ -218,15 +252,22 @@ impl App {
                 KeyCode::Enter | KeyCode::Esc => {
                     if !form.input.is_empty() {
                         let note = form.input.clone();
-                        if let Some(session) = &mut self.active_session {
-                            if let Err(e) = self.db.append_note(session.id, &note) {
-                                eprintln!("{e}");
-                            } else {
-                                session.notes = Some(match &session.notes {
-                                    None => note,
-                                    Some(existing) => format!("{}\n{}", existing, note),
-                                });
-                            }
+                        let id = self.active_session.as_ref().map(|s| s.id);
+                        match id {
+                            Some(id) => match self.db.append_note(id, &note) {
+                                Err(e) => self.set_error(e),
+                                Ok(()) => {
+                                    if let Some(session) = &mut self.active_session {
+                                        session.notes = Some(match &session.notes {
+                                            None => note,
+                                            Some(existing) => {
+                                                format!("{}\n{}", existing, note)
+                                            }
+                                        });
+                                    }
+                                }
+                            },
+                            None => {}
                         }
                     }
                     self.screen = Screen::Main;
@@ -239,7 +280,9 @@ impl App {
                     return false;
                 }
 
-                match &mut form.step {
+                // Match on a copy: matching `&mut form.step` would keep a borrow
+                // of self.screen alive across all arms, blocking &mut self calls.
+                match form.step {
                     Step::Activity => match key {
                         KeyCode::Up => {
                             if form.activity_index > 0 {
@@ -350,7 +393,7 @@ impl App {
                                 // the real error instead of the generic one).
                                 if let Some(old) = self.active_session.take() {
                                     if let Err(e) = self.db.complete_session(old.id, None, None) {
-                                        eprintln!("{e}");
+                                        self.set_error(e);
                                         self.active_session = Some(old);
                                         return false;
                                     }
@@ -387,7 +430,7 @@ impl App {
                                             interruptions: None,
                                         });
                                     }
-                                    Err(e) => eprintln!("{e}"),
+                                    Err(e) => self.set_error(e),
                                 }
 
                                 self.today_sessions =
@@ -401,7 +444,8 @@ impl App {
                     }
                 }
             }
-            Screen::EndSession(form) => match &form.step {
+            // Match on a copy; see the note in the StartSession arm.
+            Screen::EndSession(form) => match form.step {
                 EndStep::Notes => match key {
                     KeyCode::Char(c) => {
                         form.notes.push(c);
@@ -410,31 +454,43 @@ impl App {
                         form.notes.pop();
                     }
                     KeyCode::Enter | KeyCode::Esc => {
-                        if !form.notes.is_empty() {
-                            if let Some(session) = &mut self.active_session {
-                                if let Err(e) = self.db.append_note(session.id, &form.notes) {
-                                    eprintln!("{e}");
-                                } else {
-                                    session.notes = Some(match &session.notes {
-                                        None => form.notes.clone(),
-                                        Some(existing) => format!("{}\n{}", existing, form.notes),
-                                    });
-                                }
+                        // Use `form` before any call that needs &mut self, so the
+                        // screen borrow is dead by the time set_error may run.
+                        let notes = form.notes.clone();
+                        if key != KeyCode::Esc {
+                            form.step = EndStep::Focus;
+                        }
+
+                        if !notes.is_empty() {
+                            let id = self.active_session.as_ref().map(|s| s.id);
+                            match id {
+                                Some(id) => match self.db.append_note(id, &notes) {
+                                    Err(e) => self.set_error(e),
+                                    Ok(()) => {
+                                        if let Some(session) = &mut self.active_session {
+                                            session.notes = Some(match &session.notes {
+                                                None => notes.clone(),
+                                                Some(existing) => {
+                                                    format!("{}\n{}", existing, notes)
+                                                }
+                                            });
+                                        }
+                                    }
+                                },
+                                None => {}
                             }
                         }
 
                         if key == KeyCode::Esc {
                             if let Some(session) = self.active_session.take() {
                                 if let Err(e) = self.db.complete_session(session.id, None, None) {
-                                    eprintln!("{e}");
+                                    self.set_error(e);
                                     self.active_session = Some(session);
                                 }
                                 self.today_sessions =
                                     self.db.sessions_for_today().unwrap_or_default();
                             }
                             self.screen = Screen::Main;
-                        } else {
-                            form.step = EndStep::Focus;
                         }
                     }
                     _ => {}
@@ -444,7 +500,7 @@ impl App {
                         form.focus = Some(c as i32 - '0' as i32);
                         if let Some(session) = self.active_session.take() {
                             if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
-                                eprintln!("{e}");
+                                self.set_error(e);
                                 self.active_session = Some(session);
                             }
                             self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
@@ -454,7 +510,7 @@ impl App {
                     KeyCode::Enter | KeyCode::Esc => {
                         if let Some(session) = self.active_session.take() {
                             if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
-                                eprintln!("{e}");
+                                self.set_error(e);
                                 self.active_session = Some(session);
                             }
                             self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
@@ -524,6 +580,19 @@ impl App {
 
                 let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
                 frame.render_widget(paragraph, area);
+            }
+        }
+
+        // Simple error display: a plain line pinned to the bottom row. This is
+        // the only place errors are rendered — replace this block when the UI
+        // gets a real layout.
+        if let Some(err) = &self.error {
+            if area.height > 0 {
+                let y = area.y + area.height - 1;
+                frame.render_widget(
+                    Paragraph::new(Line::from(format!("ERROR: {err}"))),
+                    Rect::new(area.x, y, area.width, 1),
+                );
             }
         }
     }
