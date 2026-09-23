@@ -96,7 +96,6 @@ CREATE TABLE sessions (
     task TEXT,
     activity TEXT NOT NULL,
     notes TEXT,
-    outcome TEXT,
     focus INTEGER,
     interruptions INTEGER
 );

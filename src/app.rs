@@ -151,7 +151,7 @@ impl App {
                     }
 
                     if let Some(session) = self.active_session.take() {
-                        if let Err(e) = self.db.complete_session(session.id, None, None) {
+                        if let Err(e) = self.db.complete_session(session.id, None) {
                             self.set_error(e);
                             self.active_session = Some(session);
                             return false;
@@ -187,7 +187,6 @@ impl App {
                                 task,
                                 activity,
                                 notes: None,
-                                outcome: None,
                                 focus: None,
                                 interruptions: None,
                             });
@@ -200,7 +199,7 @@ impl App {
 
                 KeyCode::Char('d') => {
                     if let Some(old) = self.active_session.take() {
-                        match self.db.complete_session(old.id, None, None) {
+                        match self.db.complete_session(old.id, None) {
                             Err(e) => {
                                 self.set_error(e);
                                 self.active_session = Some(old);
@@ -218,7 +217,6 @@ impl App {
                                             task: None,
                                             activity: "Disruption".to_string(),
                                             notes: None,
-                                            outcome: None,
                                             focus: None,
                                             interruptions: None,
                                         });
@@ -413,7 +411,7 @@ impl App {
                                 // would conflict with the &mut self borrow. The create
                                 // that follows clears on its own success.
                                 if let Some(old) = self.active_session.take() {
-                                    if let Err(e) = self.db.complete_session(old.id, None, None) {
+                                    if let Err(e) = self.db.complete_session(old.id, None) {
                                         self.set_error(e);
                                         self.active_session = Some(old);
                                         return false;
@@ -447,7 +445,6 @@ impl App {
                                             task: if task.is_empty() { None } else { Some(task) },
                                             activity: activity.to_string(),
                                             notes: None,
-                                            outcome: None,
                                             focus: None,
                                             interruptions: None,
                                         });
@@ -506,7 +503,7 @@ impl App {
 
                         if key == KeyCode::Esc {
                             if let Some(session) = self.active_session.take() {
-                                if let Err(e) = self.db.complete_session(session.id, None, None) {
+                                if let Err(e) = self.db.complete_session(session.id, None) {
                                     self.set_error(e);
                                     self.active_session = Some(session);
                                 } else {
@@ -524,7 +521,7 @@ impl App {
                     KeyCode::Char(c) if c >= '1' && c <= '3' => {
                         form.focus = Some(c as i32 - '0' as i32);
                         if let Some(session) = self.active_session.take() {
-                            if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
+                            if let Err(e) = self.db.complete_session(session.id, form.focus) {
                                 self.set_error(e);
                                 self.active_session = Some(session);
                             } else {
@@ -536,7 +533,7 @@ impl App {
                     }
                     KeyCode::Enter | KeyCode::Esc => {
                         if let Some(session) = self.active_session.take() {
-                            if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
+                            if let Err(e) = self.db.complete_session(session.id, form.focus) {
                                 self.set_error(e);
                                 self.active_session = Some(session);
                             } else {

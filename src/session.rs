@@ -9,7 +9,6 @@ pub struct Session {
     pub task: Option<String>,
     pub activity: String,
     pub notes: Option<String>,
-    pub outcome: Option<String>,
     pub focus: Option<i32>,
     pub interruptions: Option<i32>,
 }

@@ -37,7 +37,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     task TEXT,
     activity TEXT NOT NULL,
     notes TEXT,
-    outcome TEXT,
     focus INTEGER,
     interruptions INTEGER
 );
@@ -89,7 +88,7 @@ impl Db {
         let result = self.conn.query_row(
             // ORDER BY + LIMIT: if duplicate active rows exist (legacy data or
             // external edits), deterministically pick the most recent one.
-            "SELECT id, started_at, ended_at, project, task, activity, notes, outcome, focus, interruptions
+            "SELECT id, started_at, ended_at, project, task, activity, notes, focus, interruptions
              FROM sessions WHERE ended_at IS NULL
              ORDER BY started_at DESC LIMIT 1",
             [],
@@ -97,14 +96,16 @@ impl Db {
                 Ok(Session {
                     id: row.get(0)?,
                     started_at: parse_timestamp(row.get(1)?)?,
-                    ended_at: row.get::<_, Option<String>>(2)?.map(parse_timestamp).transpose()?,
+                    ended_at: row
+                        .get::<_, Option<String>>(2)?
+                        .map(parse_timestamp)
+                        .transpose()?,
                     project: row.get(3)?,
                     task: row.get(4)?,
                     activity: row.get(5)?,
-notes: row.get(6)?,
-                    outcome: row.get(7)?,
-                    focus: row.get(8)?,
-                    interruptions: row.get(9)?,
+                    notes: row.get(6)?,
+                    focus: row.get(7)?,
+                    interruptions: row.get(8)?,
                 })
             },
         );
@@ -116,17 +117,12 @@ notes: row.get(6)?,
         }
     }
 
-    pub fn complete_session(
-        &self,
-        id: i64,
-        outcome: Option<&str>,
-        focus: Option<i32>,
-    ) -> Result<(), DbError> {
+    pub fn complete_session(&self, id: i64, focus: Option<i32>) -> Result<(), DbError> {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
         self.conn
             .execute(
-                "UPDATE sessions SET ended_at = ?1, outcome = ?2, focus = ?3 WHERE id = ?4 AND ended_at IS NULL",
-                params![now, outcome, focus, id],
+                "UPDATE sessions SET ended_at = ?1, focus = ?2 WHERE id = ?3 AND ended_at IS NULL",
+                params![now, focus, id],
             )
             .map_err(DbError::Sqlite)?;
         Ok(())
@@ -137,7 +133,7 @@ notes: row.get(6)?,
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, started_at, ended_at, project, task, activity, notes, outcome, focus, interruptions
+                "SELECT id, started_at, ended_at, project, task, activity, notes, focus, interruptions
                  FROM sessions
                  WHERE date(started_at, 'localtime') = ?1
                  ORDER BY started_at DESC",
@@ -156,9 +152,8 @@ notes: row.get(6)?,
                     task: row.get(4)?,
                     activity: row.get(5)?,
                     notes: row.get(6)?,
-                    outcome: row.get(7)?,
-                    focus: row.get(8)?,
-                    interruptions: row.get(9)?,
+                    focus: row.get(7)?,
+                    interruptions: row.get(8)?,
                 })
             })
             .map_err(DbError::Sqlite)?;
@@ -172,9 +167,9 @@ notes: row.get(6)?,
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT COALESCE(notes, outcome) FROM sessions
+                "SELECT notes FROM sessions
          WHERE project = ?1 AND task = ?2 AND ended_at IS NOT NULL
-           AND (notes IS NOT NULL OR outcome IS NOT NULL)
+           AND notes IS NOT NULL
          ORDER BY started_at DESC LIMIT 5",
             )
             .map_err(DbError::Sqlite)?;
