@@ -196,64 +196,98 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
         // Returns true if the app should quit
-        match &mut self.screen {
-            Screen::Main => match key {
-                KeyCode::Char('q') => return true,
-                KeyCode::Char('i') => {
-                    if let Some(id) = self.active_session.as_ref().map(|s| s.id) {
-                        match self.db.increment_interruptions(id) {
-                            Err(e) => self.set_error(e),
-                            Ok(()) => {
-                                self.clear_error();
-                                if let Some(session) = &mut self.active_session {
-                                    session.interruptions =
-                                        Some(session.interruptions.unwrap_or(0) + 1);
-                                }
+        match &self.screen {
+            Screen::Main => return self.handle_main(key),
+            Screen::StartSession(_) => self.handle_start_session(key),
+            Screen::EndSession(_) => self.handle_end_session(key),
+            Screen::AddNote(_) => self.handle_add_note(key),
+        }
+        false
+    }
+    /// Handles keys for the main screen. Returns true if the app should quit.
+    fn handle_main(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Char('q') => return true,
+            KeyCode::Char('i') => {
+                if let Some(id) = self.active_session.as_ref().map(|s| s.id) {
+                    match self.db.increment_interruptions(id) {
+                        Err(e) => self.set_error(e),
+                        Ok(()) => {
+                            self.clear_error();
+                            if let Some(session) = &mut self.active_session {
+                                session.interruptions =
+                                    Some(session.interruptions.unwrap_or(0) + 1);
                             }
                         }
                     }
                 }
-                KeyCode::Char('r') => {
-                    let should_proceed = match &self.active_session {
-                        None => true,
-                        Some(s) if s.activity == "Disruption" => true,
-                        Some(_) => false,
-                    };
+            }
+            KeyCode::Char('r') => {
+                let should_proceed = match &self.active_session {
+                    None => true,
+                    Some(s) if s.activity == "Disruption" => true,
+                    Some(_) => false,
+                };
 
-                    if !should_proceed {
+                if !should_proceed {
+                    return false;
+                }
+
+                if !self.close_active_session() {
+                    return false;
+                }
+
+                let combo = match self.db.latest_non_disruption() {
+                    Ok(Some(combo)) => {
+                        self.clear_error();
+                        combo
+                    }
+                    Ok(None) => return false,
+                    Err(e) => {
+                        self.set_error(e);
                         return false;
                     }
+                };
 
-                    if !self.close_active_session() {
-                        return false;
+                let (activity, project, task) = combo;
+                match self
+                    .db
+                    .create_session(&activity, project.as_deref(), task.as_deref())
+                {
+                    Ok(id) => {
+                        self.clear_error();
+                        self.active_session = Some(Session {
+                            id,
+                            started_at: Utc::now(),
+                            ended_at: None,
+                            project,
+                            task,
+                            activity,
+                            notes: None,
+                            focus: None,
+                            interruptions: None,
+                        });
                     }
+                    Err(e) => self.set_error(e),
+                }
 
-                    let combo = match self.db.latest_non_disruption() {
-                        Ok(Some(combo)) => {
-                            self.clear_error();
-                            combo
-                        }
-                        Ok(None) => return false,
-                        Err(e) => {
-                            self.set_error(e);
-                            return false;
-                        }
-                    };
+                self.refresh_after_session_change();
+            }
 
-                    let (activity, project, task) = combo;
-                    match self
-                        .db
-                        .create_session(&activity, project.as_deref(), task.as_deref())
-                    {
+            KeyCode::Char('d') => {
+                // Only start a Disruption if there was a session to interrupt.
+                let had_active = self.active_session.is_some();
+                if had_active && self.close_active_session() {
+                    match self.db.create_session("Disruption", None, None) {
                         Ok(id) => {
                             self.clear_error();
                             self.active_session = Some(Session {
                                 id,
                                 started_at: Utc::now(),
                                 ended_at: None,
-                                project,
-                                task,
-                                activity,
+                                project: None,
+                                task: None,
+                                activity: "Disruption".to_string(),
                                 notes: None,
                                 focus: None,
                                 interruptions: None,
@@ -261,310 +295,332 @@ impl App {
                         }
                         Err(e) => self.set_error(e),
                     }
-
-                    self.refresh_after_session_change();
                 }
-
-                KeyCode::Char('d') => {
-                    // Only start a Disruption if there was a session to interrupt.
-                    let had_active = self.active_session.is_some();
-                    if had_active && self.close_active_session() {
-                        match self.db.create_session("Disruption", None, None) {
-                            Ok(id) => {
-                                self.clear_error();
-                                self.active_session = Some(Session {
-                                    id,
-                                    started_at: Utc::now(),
-                                    ended_at: None,
-                                    project: None,
-                                    task: None,
-                                    activity: "Disruption".to_string(),
-                                    notes: None,
-                                    focus: None,
-                                    interruptions: None,
-                                });
-                            }
-                            Err(e) => self.set_error(e),
-                        }
-                    }
-                    self.refresh_after_session_change();
-                }
-                KeyCode::Char('s') => {
-                    self.screen = Screen::StartSession(StartSessionForm {
-                        step: Step::Activity,
-                        activity_index: 0,
-                        project_input: String::new(),
-                        task_input: String::new(),
-                        project_query: String::new(),
-                        task_query: String::new(),
-                        project_selection: 0,
-                        task_selection: 0,
-                        task_candidates: Vec::new(),
+                self.refresh_after_session_change();
+            }
+            KeyCode::Char('s') => {
+                self.screen = Screen::StartSession(StartSessionForm {
+                    step: Step::Activity,
+                    activity_index: 0,
+                    project_input: String::new(),
+                    task_input: String::new(),
+                    project_query: String::new(),
+                    task_query: String::new(),
+                    project_selection: 0,
+                    task_selection: 0,
+                    task_candidates: Vec::new(),
+                });
+            }
+            KeyCode::Char('n') => {
+                if self.active_session.is_some() {
+                    self.screen = Screen::AddNote(AddNoteForm {
+                        input: String::new(),
                     });
-                }
-                KeyCode::Char('n') => {
-                    if self.active_session.is_some() {
-                        self.screen = Screen::AddNote(AddNoteForm {
-                            input: String::new(),
-                        });
-                    }
-                }
-                KeyCode::Char('e') if self.active_session.is_some() => {
-                    self.screen = Screen::EndSession(EndSessionForm {
-                        notes: String::new(),
-                        step: EndStep::Notes,
-                        focus: None,
-                    });
-                }
-                _ => {}
-            },
-            Screen::AddNote(form) => match key {
-                KeyCode::Char(c) => form.input.push(c),
-                KeyCode::Backspace => {
-                    form.input.pop();
-                }
-                KeyCode::Enter | KeyCode::Esc => {
-                    if !form.input.is_empty() {
-                        let note = form.input.clone();
-                        self.append_active_note(&note);
-                    }
-                    self.screen = Screen::Main;
-                }
-                _ => {}
-            },
-            Screen::StartSession(form) => {
-                if key == KeyCode::Esc {
-                    self.screen = Screen::Main;
-                    return false;
-                }
-
-                // Match on a copy: matching `&mut form.step` would keep a borrow
-                // of self.screen alive across all arms, blocking &mut self calls.
-                match form.step {
-                    Step::Activity => match key {
-                        KeyCode::Up => {
-                            if form.activity_index > 0 {
-                                form.activity_index -= 1;
-                            }
-                        }
-                        KeyCode::Down => {
-                            if form.activity_index < ACTIVITIES.len() - 1 {
-                                form.activity_index += 1;
-                            }
-                        }
-                        KeyCode::Char(c)
-                            if c >= '1' && (c as usize - '1' as usize) < ACTIVITIES.len() =>
-                        {
-                            form.activity_index = c as usize - '1' as usize;
-                            form.step = Step::Project;
-                        }
-                        KeyCode::Enter => form.step = Step::Project,
-                        _ => {}
-                    },
-                    Step::Project => {
-                        let suggestions = fuzzy_filter(&form.project_query, &self.projects);
-                        match key {
-                            KeyCode::Char(c) => {
-                                form.project_input.push(c);
-                                form.project_query.push(c);
-                                form.project_selection = 0;
-                            }
-                            KeyCode::Backspace => {
-                                form.project_input.pop();
-                                form.project_query.pop();
-                                form.project_selection = 0;
-                            }
-                            KeyCode::Up => {
-                                if form.project_selection > 0 {
-                                    form.project_selection -= 1;
-                                }
-                            }
-                            KeyCode::Down => {
-                                if form.project_selection < suggestions.len().saturating_sub(1) {
-                                    form.project_selection += 1;
-                                }
-                            }
-                            KeyCode::Tab => {
-                                if !suggestions.is_empty() {
-                                    // Accept the highlighted suggestion; advance to the
-                                    // next one only if it was already accepted.
-                                    if form.project_input == *suggestions[form.project_selection] {
-                                        form.project_selection =
-                                            (form.project_selection + 1) % suggestions.len();
-                                    }
-                                    form.project_input =
-                                        suggestions[form.project_selection].clone();
-                                }
-                            }
-                            KeyCode::Enter => {
-                                let candidates = if form.project_input.is_empty() {
-                                    self.tasks.clone()
-                                } else {
-                                    self.db
-                                        .tasks_for_project(&form.project_input)
-                                        .unwrap_or_default()
-                                };
-                                form.task_candidates = candidates;
-                                form.step = Step::Task;
-                            }
-                            _ => {}
-                        }
-                    }
-                    Step::Task => {
-                        let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
-                        match key {
-                            KeyCode::Char(c) => {
-                                form.task_input.push(c);
-                                form.task_query.push(c);
-                                form.task_selection = 0;
-                            }
-                            KeyCode::Backspace => {
-                                form.task_input.pop();
-                                form.task_query.pop();
-                                form.task_selection = 0;
-                            }
-                            KeyCode::Up => {
-                                if form.task_selection > 0 {
-                                    form.task_selection -= 1;
-                                }
-                            }
-                            KeyCode::Down => {
-                                if form.task_selection < suggestions.len().saturating_sub(1) {
-                                    form.task_selection += 1;
-                                }
-                            }
-                            KeyCode::Tab => {
-                                if !suggestions.is_empty() {
-                                    // Accept the highlighted suggestion; advance to the
-                                    // next one only if it was already accepted.
-                                    if form.task_input == *suggestions[form.task_selection] {
-                                        form.task_selection =
-                                            (form.task_selection + 1) % suggestions.len();
-                                    }
-                                    form.task_input = suggestions[form.task_selection].clone();
-                                }
-                            }
-                            KeyCode::Enter => {
-                                // Copy everything out of `form` before any call that
-                                // needs &mut self, so the screen borrow is dead.
-                                let activity = ACTIVITIES[form.activity_index];
-                                let project = form.project_input.clone();
-                                let task = form.task_input.clone();
-
-                                // Auto-stop any currently active session. If that fails,
-                                // abort: creating anyway would leave two active sessions
-                                // (the db trigger rejects it, but failing early surfaces
-                                // the real error instead of the generic one).
-                                if !self.close_active_session() {
-                                    return false;
-                                }
-
-                                match self.db.create_session(
-                                    activity,
-                                    if project.is_empty() {
-                                        None
-                                    } else {
-                                        Some(&project)
-                                    },
-                                    if task.is_empty() { None } else { Some(&task) },
-                                ) {
-                                    Ok(id) => {
-                                        self.clear_error();
-                                        self.active_session = Some(Session {
-                                            id,
-                                            started_at: Utc::now(),
-                                            ended_at: None,
-                                            project: if project.is_empty() {
-                                                None
-                                            } else {
-                                                Some(project)
-                                            },
-                                            task: if task.is_empty() { None } else { Some(task) },
-                                            activity: activity.to_string(),
-                                            notes: None,
-                                            focus: None,
-                                            interruptions: None,
-                                        });
-                                    }
-                                    Err(e) => self.set_error(e),
-                                }
-
-                                self.refresh_after_session_change();
-                                self.projects = self.db.distinct_projects().unwrap_or_default();
-                                self.tasks = self.db.distinct_tasks().unwrap_or_default();
-                                self.screen = Screen::Main;
-                            }
-                            _ => {}
-                        }
-                    }
                 }
             }
-            // Match on a copy; see the note in the StartSession arm.
-            Screen::EndSession(form) => match form.step {
-                EndStep::Notes => match key {
-                    KeyCode::Char(c) => {
-                        form.notes.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        form.notes.pop();
-                    }
-                    KeyCode::Enter | KeyCode::Esc => {
-                        // Clone notes out of `form` before calling into self.
-                        let notes = form.notes.clone();
-                        if key != KeyCode::Esc {
-                            form.step = EndStep::Focus;
-                        }
-
-                        if !notes.is_empty() {
-                            self.append_active_note(&notes);
-                        }
-
-                        if key == KeyCode::Esc {
-                            if let Some(session) = self.active_session.take() {
-                                if let Err(e) = self.db.complete_session(session.id, None) {
-                                    self.set_error(e);
-                                    self.active_session = Some(session);
-                                } else {
-                                    self.clear_error();
-                                }
-                                self.refresh_after_session_change();
-                            }
-                            self.screen = Screen::Main;
-                        }
-                    }
-                    _ => {}
-                },
-                EndStep::Focus => match key {
-                    KeyCode::Char(c) if ('1'..='3').contains(&c) => {
-                        form.focus = Some(c as i32 - '0' as i32);
-                        if let Some(session) = self.active_session.take() {
-                            if let Err(e) = self.db.complete_session(session.id, form.focus) {
-                                self.set_error(e);
-                                self.active_session = Some(session);
-                            } else {
-                                self.clear_error();
-                            }
-                            self.refresh_after_session_change();
-                        }
-                        self.screen = Screen::Main;
-                    }
-                    KeyCode::Enter | KeyCode::Esc => {
-                        if let Some(session) = self.active_session.take() {
-                            if let Err(e) = self.db.complete_session(session.id, form.focus) {
-                                self.set_error(e);
-                                self.active_session = Some(session);
-                            } else {
-                                self.clear_error();
-                            }
-                            self.refresh_after_session_change();
-                        }
-                        self.screen = Screen::Main;
-                    }
-                    _ => {}
-                },
-            },
-        }
+            KeyCode::Char('e') if self.active_session.is_some() => {
+                self.screen = Screen::EndSession(EndSessionForm {
+                    notes: String::new(),
+                    step: EndStep::Notes,
+                    focus: None,
+                });
+            }
+            _ => {}
+        };
         false
+    }
+
+    /// Handles keys while starting a session (activity → project → task).
+    fn handle_start_session(&mut self, key: KeyCode) {
+        if key == KeyCode::Esc {
+            self.screen = Screen::Main;
+            return;
+        }
+
+        // Read the step by copy so the borrow of self.screen drops before the
+        // per-step handler takes &mut self.
+        let step = match &self.screen {
+            Screen::StartSession(form) => form.step,
+            _ => return,
+        };
+        match step {
+            Step::Activity => self.start_activity_key(key),
+            Step::Project => self.start_project_key(key),
+            Step::Task => self.start_task_key(key),
+        }
+    }
+
+    fn start_activity_key(&mut self, key: KeyCode) {
+        let Screen::StartSession(form) = &mut self.screen else {
+            return;
+        };
+        match key {
+            KeyCode::Up => {
+                if form.activity_index > 0 {
+                    form.activity_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if form.activity_index < ACTIVITIES.len() - 1 {
+                    form.activity_index += 1;
+                }
+            }
+            KeyCode::Char(c) if c >= '1' && (c as usize - '1' as usize) < ACTIVITIES.len() => {
+                form.activity_index = c as usize - '1' as usize;
+                form.step = Step::Project;
+            }
+            KeyCode::Enter => form.step = Step::Project,
+            _ => {}
+        }
+    }
+
+    fn start_project_key(&mut self, key: KeyCode) {
+        let Screen::StartSession(form) = &mut self.screen else {
+            return;
+        };
+        let suggestions = fuzzy_filter(&form.project_query, &self.projects);
+        match key {
+            KeyCode::Char(c) => {
+                form.project_input.push(c);
+                form.project_query.push(c);
+                form.project_selection = 0;
+            }
+            KeyCode::Backspace => {
+                form.project_input.pop();
+                form.project_query.pop();
+                form.project_selection = 0;
+            }
+            KeyCode::Up => {
+                if form.project_selection > 0 {
+                    form.project_selection -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if form.project_selection < suggestions.len().saturating_sub(1) {
+                    form.project_selection += 1;
+                }
+            }
+            KeyCode::Tab => {
+                if !suggestions.is_empty() {
+                    // Accept the highlighted suggestion; advance to the
+                    // next one only if it was already accepted.
+                    if form.project_input == *suggestions[form.project_selection] {
+                        form.project_selection = (form.project_selection + 1) % suggestions.len();
+                    }
+                    form.project_input = suggestions[form.project_selection].clone();
+                }
+            }
+            KeyCode::Enter => {
+                let candidates = if form.project_input.is_empty() {
+                    self.tasks.clone()
+                } else {
+                    self.db
+                        .tasks_for_project(&form.project_input)
+                        .unwrap_or_default()
+                };
+                form.task_candidates = candidates;
+                form.step = Step::Task;
+            }
+            _ => {}
+        }
+    }
+
+    fn start_task_key(&mut self, key: KeyCode) {
+        let Screen::StartSession(form) = &mut self.screen else {
+            return;
+        };
+        let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
+        match key {
+            KeyCode::Char(c) => {
+                form.task_input.push(c);
+                form.task_query.push(c);
+                form.task_selection = 0;
+            }
+            KeyCode::Backspace => {
+                form.task_input.pop();
+                form.task_query.pop();
+                form.task_selection = 0;
+            }
+            KeyCode::Up => {
+                if form.task_selection > 0 {
+                    form.task_selection -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if form.task_selection < suggestions.len().saturating_sub(1) {
+                    form.task_selection += 1;
+                }
+            }
+            KeyCode::Tab => {
+                if !suggestions.is_empty() {
+                    // Accept the highlighted suggestion; advance to the
+                    // next one only if it was already accepted.
+                    if form.task_input == *suggestions[form.task_selection] {
+                        form.task_selection = (form.task_selection + 1) % suggestions.len();
+                    }
+                    form.task_input = suggestions[form.task_selection].clone();
+                }
+            }
+            KeyCode::Enter => {
+                // Copy everything out of `form` before any call that
+                // needs &mut self, so the screen borrow is dead.
+                let activity = ACTIVITIES[form.activity_index];
+                let project = form.project_input.clone();
+                let task = form.task_input.clone();
+
+                // Auto-stop any currently active session. If that fails,
+                // abort: creating anyway would leave two active sessions
+                // (the db trigger rejects it, but failing early surfaces
+                // the real error instead of the generic one).
+                if !self.close_active_session() {
+                    return;
+                }
+
+                match self.db.create_session(
+                    activity,
+                    if project.is_empty() {
+                        None
+                    } else {
+                        Some(&project)
+                    },
+                    if task.is_empty() { None } else { Some(&task) },
+                ) {
+                    Ok(id) => {
+                        self.clear_error();
+                        self.active_session = Some(Session {
+                            id,
+                            started_at: Utc::now(),
+                            ended_at: None,
+                            project: if project.is_empty() {
+                                None
+                            } else {
+                                Some(project)
+                            },
+                            task: if task.is_empty() { None } else { Some(task) },
+                            activity: activity.to_string(),
+                            notes: None,
+                            focus: None,
+                            interruptions: None,
+                        });
+                    }
+                    Err(e) => self.set_error(e),
+                }
+
+                self.refresh_after_session_change();
+                self.projects = self.db.distinct_projects().unwrap_or_default();
+                self.tasks = self.db.distinct_tasks().unwrap_or_default();
+                self.screen = Screen::Main;
+            }
+            _ => {}
+        }
+    }
+
+    /// Handles keys while ending a session (notes, then focus rating).
+    fn handle_end_session(&mut self, key: KeyCode) {
+        // Read the step by copy so the borrow of self.screen drops before the
+        // per-step handler takes &mut self.
+        let step = match &self.screen {
+            Screen::EndSession(form) => form.step,
+            _ => return,
+        };
+        match step {
+            EndStep::Notes => self.end_notes_key(key),
+            EndStep::Focus => self.end_focus_key(key),
+        }
+    }
+
+    fn end_notes_key(&mut self, key: KeyCode) {
+        let Screen::EndSession(form) = &mut self.screen else {
+            return;
+        };
+        match key {
+            KeyCode::Char(c) => {
+                form.notes.push(c);
+            }
+            KeyCode::Backspace => {
+                form.notes.pop();
+            }
+            KeyCode::Enter | KeyCode::Esc => {
+                // Clone notes out of `form` before calling into self.
+                let notes = form.notes.clone();
+                if key != KeyCode::Esc {
+                    form.step = EndStep::Focus;
+                }
+
+                if !notes.is_empty() {
+                    self.append_active_note(&notes);
+                }
+
+                if key == KeyCode::Esc {
+                    if let Some(session) = self.active_session.take() {
+                        if let Err(e) = self.db.complete_session(session.id, None) {
+                            self.set_error(e);
+                            self.active_session = Some(session);
+                        } else {
+                            self.clear_error();
+                        }
+                        self.refresh_after_session_change();
+                    }
+                    self.screen = Screen::Main;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn end_focus_key(&mut self, key: KeyCode) {
+        let Screen::EndSession(form) = &mut self.screen else {
+            return;
+        };
+        match key {
+            KeyCode::Char(c) if ('1'..='3').contains(&c) => {
+                form.focus = Some(c as i32 - '0' as i32);
+                if let Some(session) = self.active_session.take() {
+                    if let Err(e) = self.db.complete_session(session.id, form.focus) {
+                        self.set_error(e);
+                        self.active_session = Some(session);
+                    } else {
+                        self.clear_error();
+                    }
+                    self.refresh_after_session_change();
+                }
+                self.screen = Screen::Main;
+            }
+            KeyCode::Enter | KeyCode::Esc => {
+                if let Some(session) = self.active_session.take() {
+                    if let Err(e) = self.db.complete_session(session.id, form.focus) {
+                        self.set_error(e);
+                        self.active_session = Some(session);
+                    } else {
+                        self.clear_error();
+                    }
+                    self.refresh_after_session_change();
+                }
+                self.screen = Screen::Main;
+            }
+            _ => {}
+        }
+    }
+
+    /// Handles keys while adding a note to the active session.
+    fn handle_add_note(&mut self, key: KeyCode) {
+        let Screen::AddNote(form) = &mut self.screen else {
+            return;
+        };
+        match key {
+            KeyCode::Char(c) => form.input.push(c),
+            KeyCode::Backspace => {
+                form.input.pop();
+            }
+            KeyCode::Enter | KeyCode::Esc => {
+                if !form.input.is_empty() {
+                    let note = form.input.clone();
+                    self.append_active_note(&note);
+                }
+                self.screen = Screen::Main;
+            }
+            _ => {}
+        }
     }
 
     pub fn draw(&self, frame: &mut Frame) {
@@ -573,57 +629,8 @@ impl App {
         match &self.screen {
             Screen::Main => self.draw_main(frame, area),
             Screen::StartSession(form) => self.draw_start_session(frame, area, form),
-            Screen::EndSession(form) => {
-                let lines = match &form.step {
-                    EndStep::Notes => vec![
-                        Line::from(format!("Notes: {}", form.notes)),
-                        Line::from(""),
-                        Line::from("(Enter continue · Esc skip)"),
-                    ],
-                    EndStep::Focus => vec![
-                        Line::from("Focus:"),
-                        Line::from(""),
-                        Line::from("(1 bad · 2 ok · 3 good · Enter skip)"),
-                    ],
-                };
-                let paragraph =
-                    Paragraph::new(lines).block(Block::default().title(" End session "));
-                frame.render_widget(paragraph, area);
-            }
-            Screen::AddNote(form) => {
-                let mut lines: Vec<Line> = vec![];
-
-                if let Some(session) = &self.active_session {
-                    let parts = [
-                        session.project.as_deref().unwrap_or(""),
-                        session.task.as_deref().unwrap_or(""),
-                        &session.activity,
-                    ]
-                    .iter()
-                    .filter(|s| !s.is_empty())
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-
-                    lines.push(Line::from(parts));
-                    if let Some(notes) = &session.notes
-                        && !notes.is_empty()
-                    {
-                        lines.push(Line::from(""));
-                        for line in notes.lines() {
-                            lines.push(Line::from(format!("  • {line}")));
-                        }
-                    }
-                }
-
-                lines.push(Line::from(""));
-                lines.push(Line::from(format!("> {}", form.input)));
-                lines.push(Line::from(""));
-                lines.push(Line::from("(Enter to save, Esc to cancel)"));
-
-                let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
-                frame.render_widget(paragraph, area);
-            }
+            Screen::EndSession(form) => self.draw_end_session(frame, area, form),
+            Screen::AddNote(form) => self.draw_add_note(frame, area, form),
         }
 
         // Simple error display: a plain line pinned to the bottom row. This is
@@ -812,6 +819,63 @@ impl App {
                 frame.render_widget(paragraph, area);
             }
         }
+    }
+
+    fn draw_end_session(
+        &self,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        form: &EndSessionForm,
+    ) {
+        let lines = match &form.step {
+            EndStep::Notes => vec![
+                Line::from(format!("Notes: {}", form.notes)),
+                Line::from(""),
+                Line::from("(Enter continue · Esc skip)"),
+            ],
+            EndStep::Focus => vec![
+                Line::from("Focus:"),
+                Line::from(""),
+                Line::from("(1 bad · 2 ok · 3 good · Enter skip)"),
+            ],
+        };
+        let paragraph = Paragraph::new(lines).block(Block::default().title(" End session "));
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_add_note(&self, frame: &mut Frame, area: ratatui::layout::Rect, form: &AddNoteForm) {
+        let mut lines: Vec<Line> = vec![];
+
+        if let Some(session) = &self.active_session {
+            let parts = [
+                session.project.as_deref().unwrap_or(""),
+                session.task.as_deref().unwrap_or(""),
+                &session.activity,
+            ]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" · ");
+
+            lines.push(Line::from(parts));
+            if let Some(notes) = &session.notes
+                && !notes.is_empty()
+            {
+                lines.push(Line::from(""));
+                for line in notes.lines() {
+                    lines.push(Line::from(format!("  • {line}")));
+                }
+            }
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(format!("> {}", form.input)));
+        lines.push(Line::from(""));
+        lines.push(Line::from("(Enter to save, Esc to cancel)"));
+
+        let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
+        frame.render_widget(paragraph, area);
     }
 }
 
