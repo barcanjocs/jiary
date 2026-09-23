@@ -109,9 +109,15 @@ impl App {
     }
 
     /// Records an error for display. Every DB failure must go through this so
-    /// there is a single point to render (and later, clear on success).
+    /// there is a single point to render; successful operations call `clear_error`.
     fn set_error(&mut self, e: impl std::fmt::Display) {
         self.error = Some(e.to_string());
+    }
+
+    /// Clears the displayed error. Called after successful database operations,
+    /// so the line reflects the outcome of the most recent one.
+    fn clear_error(&mut self) {
+        self.error = None;
     }
 
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
@@ -124,6 +130,7 @@ impl App {
                         match self.db.increment_interruptions(id) {
                             Err(e) => self.set_error(e),
                             Ok(()) => {
+                                self.clear_error();
                                 if let Some(session) = &mut self.active_session {
                                     session.interruptions =
                                         Some(session.interruptions.unwrap_or(0) + 1);
@@ -148,11 +155,16 @@ impl App {
                             self.set_error(e);
                             self.active_session = Some(session);
                             return false;
+                        } else {
+                            self.clear_error();
                         }
                     }
 
                     let combo = match self.db.latest_non_disruption() {
-                        Ok(Some(combo)) => combo,
+                        Ok(Some(combo)) => {
+                            self.clear_error();
+                            combo
+                        }
                         Ok(None) => return false,
                         Err(e) => {
                             self.set_error(e);
@@ -166,6 +178,7 @@ impl App {
                         .create_session(&activity, project.as_deref(), task.as_deref())
                     {
                         Ok(id) => {
+                            self.clear_error();
                             self.active_session = Some(Session {
                                 id,
                                 started_at: Utc::now(),
@@ -192,23 +205,27 @@ impl App {
                                 self.set_error(e);
                                 self.active_session = Some(old);
                             }
-                            Ok(()) => match self.db.create_session("Disruption", None, None) {
-                                Ok(id) => {
-                                    self.active_session = Some(Session {
-                                        id,
-                                        started_at: Utc::now(),
-                                        ended_at: None,
-                                        project: None,
-                                        task: None,
-                                        activity: "Disruption".to_string(),
-                                        notes: None,
-                                        outcome: None,
-                                        focus: None,
-                                        interruptions: None,
-                                    });
+                            Ok(()) => {
+                                self.clear_error();
+                                match self.db.create_session("Disruption", None, None) {
+                                    Ok(id) => {
+                                        self.clear_error();
+                                        self.active_session = Some(Session {
+                                            id,
+                                            started_at: Utc::now(),
+                                            ended_at: None,
+                                            project: None,
+                                            task: None,
+                                            activity: "Disruption".to_string(),
+                                            notes: None,
+                                            outcome: None,
+                                            focus: None,
+                                            interruptions: None,
+                                        });
+                                    }
+                                    Err(e) => self.set_error(e),
                                 }
-                                Err(e) => self.set_error(e),
-                            },
+                            }
                         }
                     }
                     self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
@@ -257,6 +274,7 @@ impl App {
                             Some(id) => match self.db.append_note(id, &note) {
                                 Err(e) => self.set_error(e),
                                 Ok(()) => {
+                                    self.clear_error();
                                     if let Some(session) = &mut self.active_session {
                                         session.notes = Some(match &session.notes {
                                             None => note,
@@ -391,6 +409,9 @@ impl App {
                                 // abort: creating anyway would leave two active sessions
                                 // (the db trigger rejects it, but failing early surfaces
                                 // the real error instead of the generic one).
+                                // No clear on success here: `form` is used below, which
+                                // would conflict with the &mut self borrow. The create
+                                // that follows clears on its own success.
                                 if let Some(old) = self.active_session.take() {
                                     if let Err(e) = self.db.complete_session(old.id, None, None) {
                                         self.set_error(e);
@@ -413,6 +434,7 @@ impl App {
                                     if task.is_empty() { None } else { Some(&task) },
                                 ) {
                                     Ok(id) => {
+                                        self.clear_error();
                                         self.active_session = Some(Session {
                                             id,
                                             started_at: Utc::now(),
@@ -467,6 +489,7 @@ impl App {
                                 Some(id) => match self.db.append_note(id, &notes) {
                                     Err(e) => self.set_error(e),
                                     Ok(()) => {
+                                        self.clear_error();
                                         if let Some(session) = &mut self.active_session {
                                             session.notes = Some(match &session.notes {
                                                 None => notes.clone(),
@@ -486,6 +509,8 @@ impl App {
                                 if let Err(e) = self.db.complete_session(session.id, None, None) {
                                     self.set_error(e);
                                     self.active_session = Some(session);
+                                } else {
+                                    self.clear_error();
                                 }
                                 self.today_sessions =
                                     self.db.sessions_for_today().unwrap_or_default();
@@ -502,6 +527,8 @@ impl App {
                             if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
                                 self.set_error(e);
                                 self.active_session = Some(session);
+                            } else {
+                                self.clear_error();
                             }
                             self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
                         }
@@ -512,6 +539,8 @@ impl App {
                             if let Err(e) = self.db.complete_session(session.id, None, form.focus) {
                                 self.set_error(e);
                                 self.active_session = Some(session);
+                            } else {
+                                self.clear_error();
                             }
                             self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
                         }
