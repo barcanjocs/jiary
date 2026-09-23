@@ -274,11 +274,10 @@ impl App {
                                 Ok(()) => {
                                     self.clear_error();
                                     if let Some(session) = &mut self.active_session {
+                                        // Newline-terminated, same convention as the db.
                                         session.notes = Some(match &session.notes {
-                                            None => note,
-                                            Some(existing) => {
-                                                format!("{}\n{}", existing, note)
-                                            }
+                                            None => format!("{note}\n"),
+                                            Some(existing) => format!("{existing}{note}\n"),
                                         });
                                     }
                                 }
@@ -488,11 +487,10 @@ impl App {
                                     Ok(()) => {
                                         self.clear_error();
                                         if let Some(session) = &mut self.active_session {
+                                            // Newline-terminated, same convention as the db.
                                             session.notes = Some(match &session.notes {
-                                                None => notes.clone(),
-                                                Some(existing) => {
-                                                    format!("{}\n{}", existing, notes)
-                                                }
+                                                None => format!("{notes}\n"),
+                                                Some(existing) => format!("{existing}{notes}\n"),
                                             });
                                         }
                                     }
