@@ -28,6 +28,9 @@ pub struct App {
     projects: Vec<String>,
     tasks: Vec<String>,
     screen: Screen,
+    /// "Previous notes" for the active session's project/task. Cached because
+    /// draw() runs ~10x/second; refreshed when the active session changes.
+    previous_notes: Vec<String>,
     /// Last error that occurred, kept as plain data so the UI renders it in
     /// exactly one place (and a future auto-clear-on-success can too).
     error: Option<String>,
@@ -83,6 +86,7 @@ impl App {
             projects: Vec::new(),
             tasks: Vec::new(),
             screen: Screen::Main,
+            previous_notes: Vec::new(),
             error: None,
         };
 
@@ -92,10 +96,7 @@ impl App {
             Ok(session) => app.active_session = session,
             Err(e) => app.set_error(e),
         }
-        match app.db.sessions_for_today() {
-            Ok(sessions) => app.today_sessions = sessions,
-            Err(e) => app.set_error(e),
-        }
+        app.refresh_after_session_change();
         match app.db.distinct_projects() {
             Ok(projects) => app.projects = projects,
             Err(e) => app.set_error(e),
@@ -118,6 +119,37 @@ impl App {
     /// so the line reflects the outcome of the most recent one.
     fn clear_error(&mut self) {
         self.error = None;
+    }
+
+    /// Reloads the lists shown on the main screen. Called whenever the active
+    /// session changes.
+    fn refresh_after_session_change(&mut self) {
+        match self.db.sessions_for_today() {
+            Ok(sessions) => self.today_sessions = sessions,
+            Err(e) => self.set_error(e),
+        }
+        self.refresh_previous_notes();
+    }
+
+    /// Refreshes the cached "previous notes" for the active session. The list
+    /// is static during a session (the query excludes the active session
+    /// itself), so it only needs updating when the session changes.
+    fn refresh_previous_notes(&mut self) {
+        let key = self
+            .active_session
+            .as_ref()
+            .map(|s| (s.project.clone(), s.task.clone()));
+        let notes = match key {
+            Some((Some(project), Some(task))) => match self.db.recent_notes(&project, &task) {
+                Ok(notes) => notes,
+                Err(e) => {
+                    self.set_error(e);
+                    Vec::new()
+                }
+            },
+            _ => Vec::new(),
+        };
+        self.previous_notes = notes;
     }
 
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
@@ -194,7 +226,7 @@ impl App {
                         Err(e) => self.set_error(e),
                     }
 
-                    self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                    self.refresh_after_session_change();
                 }
 
                 KeyCode::Char('d') => {
@@ -226,7 +258,7 @@ impl App {
                             }
                         }
                     }
-                    self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                    self.refresh_after_session_change();
                 }
                 KeyCode::Char('s') => {
                     self.screen = Screen::StartSession(StartSessionForm {
@@ -451,8 +483,7 @@ impl App {
                                     Err(e) => self.set_error(e),
                                 }
 
-                                self.today_sessions =
-                                    self.db.sessions_for_today().unwrap_or_default();
+                                self.refresh_after_session_change();
                                 self.projects = self.db.distinct_projects().unwrap_or_default();
                                 self.tasks = self.db.distinct_tasks().unwrap_or_default();
                                 self.screen = Screen::Main;
@@ -507,8 +538,7 @@ impl App {
                                 } else {
                                     self.clear_error();
                                 }
-                                self.today_sessions =
-                                    self.db.sessions_for_today().unwrap_or_default();
+                                self.refresh_after_session_change();
                             }
                             self.screen = Screen::Main;
                         }
@@ -525,7 +555,7 @@ impl App {
                             } else {
                                 self.clear_error();
                             }
-                            self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                            self.refresh_after_session_change();
                         }
                         self.screen = Screen::Main;
                     }
@@ -537,7 +567,7 @@ impl App {
                             } else {
                                 self.clear_error();
                             }
-                            self.today_sessions = self.db.sessions_for_today().unwrap_or_default();
+                            self.refresh_after_session_change();
                         }
                         self.screen = Screen::Main;
                     }
@@ -643,14 +673,11 @@ impl App {
             )));
             lines.push(Line::from(format!("Activity: {}", session.activity)));
 
-            if let (Some(project), Some(task)) = (&session.project, &session.task) {
-                if let Ok(notes) = self.db.recent_notes(project, task) {
-                    if !notes.is_empty() {
-                        lines.push(Line::from("Previous notes:"));
-                        for note in notes {
-                            lines.push(Line::from(format!("  • {note}")));
-                        }
-                    }
+            // Cached; refreshed whenever the active session changes.
+            if !self.previous_notes.is_empty() {
+                lines.push(Line::from("Previous notes:"));
+                for note in &self.previous_notes {
+                    lines.push(Line::from(format!("  • {note}")));
                 }
             }
 
