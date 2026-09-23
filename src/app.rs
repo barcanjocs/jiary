@@ -251,8 +251,10 @@ impl App {
                                 form.activity_index += 1;
                             }
                         }
-                        KeyCode::Char(c) if c >= '1' && c <= '7' => {
-                            form.activity_index = (c as u8 - b'1') as usize;
+                        KeyCode::Char(c)
+                            if c >= '1' && (c as usize - '1' as usize) < ACTIVITIES.len() =>
+                        {
+                            form.activity_index = c as usize - '1' as usize;
                             form.step = Step::Project;
                         }
                         KeyCode::Enter => form.step = Step::Project,
@@ -648,8 +650,10 @@ impl App {
                     })
                     .collect();
 
-                let list = List::new(items)
-                    .block(Block::default().title(" Activity (↑↓ or 1-6, Enter, Esc) "));
+                let list = List::new(items).block(Block::default().title(format!(
+                    " Activity (↑↓ or 1-{}, Enter, Esc) ",
+                    ACTIVITIES.len()
+                )));
                 frame.render_widget(list, area);
             }
             Step::Project => {
