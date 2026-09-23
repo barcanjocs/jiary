@@ -14,6 +14,11 @@ pub enum DbError {
     NoDataDir,
     Io(std::io::Error),
     Sqlite(rusqlite::Error),
+    /// A timestamp stored in the database is not valid RFC 3339.
+    BadTimestamp {
+        value: String,
+        parse: chrono::ParseError,
+    },
 }
 
 impl std::fmt::Display for DbError {
@@ -22,6 +27,9 @@ impl std::fmt::Display for DbError {
             DbError::NoDataDir => write!(f, "Could not determine application data directory."),
             DbError::Io(e) => write!(f, "Could not open Jiary database: {e}"),
             DbError::Sqlite(e) => write!(f, "Database error: {e}"),
+            DbError::BadTimestamp { value, parse } => {
+                write!(f, "Bad timestamp in database: {value} ({parse})")
+            }
         }
     }
 }
@@ -93,13 +101,10 @@ impl Db {
              ORDER BY started_at DESC LIMIT 1",
             [],
             |row| {
-                Ok(Session {
+                Ok(SessionRow {
                     id: row.get(0)?,
-                    started_at: parse_timestamp(row.get(1)?)?,
-                    ended_at: row
-                        .get::<_, Option<String>>(2)?
-                        .map(parse_timestamp)
-                        .transpose()?,
+                    started_at: row.get(1)?,
+                    ended_at: row.get(2)?,
                     project: row.get(3)?,
                     task: row.get(4)?,
                     activity: row.get(5)?,
@@ -111,7 +116,7 @@ impl Db {
         );
 
         match result {
-            Ok(session) => Ok(Some(session)),
+            Ok(row) => Ok(Some(row_to_session(row)?)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(DbError::Sqlite(e)),
         }
@@ -141,13 +146,10 @@ impl Db {
             .map_err(DbError::Sqlite)?;
         let rows = stmt
             .query_map(params![today], |row| {
-                Ok(Session {
+                Ok(SessionRow {
                     id: row.get(0)?,
-                    started_at: parse_timestamp(row.get(1)?)?,
-                    ended_at: row
-                        .get::<_, Option<String>>(2)?
-                        .map(parse_timestamp)
-                        .transpose()?,
+                    started_at: row.get(1)?,
+                    ended_at: row.get(2)?,
                     project: row.get(3)?,
                     task: row.get(4)?,
                     activity: row.get(5)?,
@@ -157,10 +159,10 @@ impl Db {
                 })
             })
             .map_err(DbError::Sqlite)?;
-        let sessions = rows
+        let rows = rows
             .collect::<Result<Vec<_>, _>>()
             .map_err(DbError::Sqlite)?;
-        Ok(sessions)
+        rows.into_iter().map(row_to_session).collect()
     }
 
     pub fn recent_notes(&self, project: &str, task: &str) -> Result<Vec<String>, DbError> {
@@ -258,14 +260,53 @@ impl Db {
     }
 }
 
-fn parse_timestamp(s: String) -> Result<DateTime<Utc>, rusqlite::Error> {
+/// A session row with timestamps still as raw strings. Row mappers can only
+/// report [`rusqlite::Error`], so conversion to a [`Session`] (which parses
+/// timestamps) happens in [`row_to_session`] instead.
+struct SessionRow {
+    id: i64,
+    started_at: String,
+    ended_at: Option<String>,
+    project: Option<String>,
+    task: Option<String>,
+    activity: String,
+    notes: Option<String>,
+    focus: Option<i32>,
+    interruptions: Option<i32>,
+}
+
+fn row_to_session(row: SessionRow) -> Result<Session, DbError> {
+    let SessionRow {
+        id,
+        started_at,
+        ended_at,
+        project,
+        task,
+        activity,
+        notes,
+        focus,
+        interruptions,
+    } = row;
+    Ok(Session {
+        id,
+        started_at: parse_timestamp(started_at)?,
+        ended_at: match ended_at {
+            Some(s) => Some(parse_timestamp(s)?),
+            None => None,
+        },
+        project,
+        task,
+        activity,
+        notes,
+        focus,
+        interruptions,
+    })
+}
+
+fn parse_timestamp(s: String) -> Result<DateTime<Utc>, DbError> {
     DateTime::parse_from_rfc3339(&s)
         .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| {
-            rusqlite::Error::InvalidPath(std::path::PathBuf::from(format!(
-                "Bad timestamp in database: {s} ({e})"
-            )))
-        })
+        .map_err(|parse| DbError::BadTimestamp { value: s, parse })
 }
 
 fn data_dir() -> Option<PathBuf> {
@@ -345,6 +386,23 @@ mod tests {
         }
         let active = tmp.db.get_active_session().unwrap().unwrap();
         assert_eq!(active.activity, "Writing");
+    }
+
+    #[test]
+    fn unparseable_timestamp_yields_dedicated_error() {
+        let tmp = TmpDb::new();
+        tmp.db
+            .conn
+            .execute(
+                "INSERT INTO sessions (started_at, activity) VALUES ('not-a-timestamp', 'Reading')",
+                [],
+            )
+            .unwrap();
+        let err = tmp.db.get_active_session().unwrap_err();
+        assert!(
+            matches!(err, DbError::BadTimestamp { .. }),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
