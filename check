@@ -1,0 +1,8 @@
+#!/bin/sh
+# One-command verification: formatting, lints, build, tests.
+# Must be green before committing (see DEVELOPMENT.md).
+set -e
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo build
+cargo test
