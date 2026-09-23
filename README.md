@@ -98,7 +98,7 @@ CREATE TABLE sessions (
 );
 ```
 
-Timestamps are stored as UTC RFC 3339 strings (e.g. `2026-09-04T09:15:00Z`) and displayed in local time.
+Timestamps are stored as UTC RFC 3339 strings with an explicit offset (e.g. `2026-09-04T09:15:00+00:00`) and displayed in local time.
 
 To inspect your data directly:
 

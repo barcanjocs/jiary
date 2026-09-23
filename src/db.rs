@@ -47,7 +47,10 @@ impl Db {
     pub fn open() -> Result<Self, DbError> {
         let dir = data_dir().ok_or(DbError::NoDataDir)?;
         std::fs::create_dir_all(&dir).map_err(DbError::Io)?;
-        let path = dir.join("jiary.db");
+        Self::open_at(&dir.join("jiary.db"))
+    }
+
+    pub(crate) fn open_at(path: &std::path::Path) -> Result<Self, DbError> {
         let conn = Connection::open(path).map_err(DbError::Sqlite)?;
         conn.execute_batch(SCHEMA).map_err(DbError::Sqlite)?;
         Ok(Self { conn })
@@ -59,7 +62,9 @@ impl Db {
         project: Option<&str>,
         task: Option<&str>,
     ) -> Result<i64, DbError> {
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        // Explicit '+00:00' offset rather than 'Z': SQLite's date functions
+        // parse the former but silently ignore the latter.
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
         self.conn
             .execute(
                 "INSERT INTO sessions (started_at, project, task, activity)
@@ -104,7 +109,7 @@ notes: row.get(6)?,
         outcome: Option<&str>,
         focus: Option<i32>,
     ) -> Result<(), DbError> {
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
         self.conn
             .execute(
                 "UPDATE sessions SET ended_at = ?1, outcome = ?2, focus = ?3 WHERE id = ?4 AND ended_at IS NULL",
@@ -121,7 +126,7 @@ notes: row.get(6)?,
             .prepare(
                 "SELECT id, started_at, ended_at, project, task, activity, notes, outcome, focus, interruptions
                  FROM sessions
-                 WHERE date(started_at) = ?1
+                 WHERE date(started_at, 'localtime') = ?1
                  ORDER BY started_at DESC",
             )
             .map_err(DbError::Sqlite)?;
@@ -257,4 +262,64 @@ fn parse_timestamp(s: String) -> Result<DateTime<Utc>, rusqlite::Error> {
 
 fn data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("jiary"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct TmpDb {
+        db: Db,
+        dir: PathBuf,
+    }
+
+    impl TmpDb {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "jiary-test-{}-{}",
+                std::process::id(),
+                TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let db = Db::open_at(&dir.join("jiary.db")).unwrap();
+            Self { db, dir }
+        }
+    }
+
+    impl Drop for TmpDb {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn new_sessions_are_stored_with_explicit_utc_offset() {
+        let tmp = TmpDb::new();
+        let id = tmp
+            .db
+            .create_session("Programming", Some("proj"), None)
+            .unwrap();
+        let started_at: String = tmp
+            .db
+            .conn
+            .query_row("SELECT started_at FROM sessions WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(
+            started_at.ends_with("+00:00"),
+            "expected '+00:00' suffix, got {started_at}"
+        );
+    }
+
+    #[test]
+    fn sessions_for_today_includes_current_session() {
+        let tmp = TmpDb::new();
+        tmp.db.create_session("Programming", None, None).unwrap();
+        let sessions = tmp.db.sessions_for_today().unwrap();
+        assert_eq!(sessions.len(), 1);
+    }
 }
