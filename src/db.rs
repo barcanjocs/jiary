@@ -41,6 +41,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     focus INTEGER,
     interruptions INTEGER
 );
+
+-- SQLite UNIQUE constraints ignore NULL values, so a trigger is used to
+-- enforce that at most one session (ended_at IS NULL) is active.
+CREATE TRIGGER IF NOT EXISTS enforce_single_active_session
+BEFORE INSERT ON sessions
+WHEN NEW.ended_at IS NULL
+     AND (SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL) > 0
+BEGIN
+    SELECT RAISE(ABORT, 'another session is already active');
+END;
 ";
 
 impl Db {
@@ -77,8 +87,11 @@ impl Db {
 
     pub fn get_active_session(&self) -> Result<Option<Session>, DbError> {
         let result = self.conn.query_row(
+            // ORDER BY + LIMIT: if duplicate active rows exist (legacy data or
+            // external edits), deterministically pick the most recent one.
             "SELECT id, started_at, ended_at, project, task, activity, notes, outcome, focus, interruptions
-             FROM sessions WHERE ended_at IS NULL",
+             FROM sessions WHERE ended_at IS NULL
+             ORDER BY started_at DESC LIMIT 1",
             [],
             |row| {
                 Ok(Session {
@@ -312,6 +325,42 @@ mod tests {
         assert!(
             started_at.ends_with("+00:00"),
             "expected '+00:00' suffix, got {started_at}"
+        );
+    }
+
+    #[test]
+    fn get_active_session_picks_most_recent_when_duplicates_exist() {
+        let tmp = TmpDb::new();
+        // Bypass the trigger to simulate legacy duplicate active rows.
+        tmp.db
+            .conn
+            .execute("DROP TRIGGER enforce_single_active_session", [])
+            .unwrap();
+        for (ts, activity) in [
+            ("2026-01-01T10:00:00+00:00", "Reading"),
+            ("2026-01-02T10:00:00+00:00", "Writing"),
+        ] {
+            tmp.db
+                .conn
+                .execute(
+                    "INSERT INTO sessions (started_at, activity) VALUES (?1, ?2)",
+                    params![ts, activity],
+                )
+                .unwrap();
+        }
+        let active = tmp.db.get_active_session().unwrap().unwrap();
+        assert_eq!(active.activity, "Writing");
+    }
+
+    #[test]
+    fn only_one_active_session_is_allowed() {
+        let tmp = TmpDb::new();
+        tmp.db.create_session("Programming", None, None).unwrap();
+        let err = tmp.db.create_session("Reading", None, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("another session is already active"),
+            "unexpected error: {err}"
         );
     }
 

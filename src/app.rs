@@ -344,11 +344,15 @@ impl App {
                                 }
                             }
                             KeyCode::Enter => {
-                                // Auto-stop any currently active session
+                                // Auto-stop any currently active session. If that fails,
+                                // abort: creating anyway would leave two active sessions
+                                // (the db trigger rejects it, but failing early surfaces
+                                // the real error instead of the generic one).
                                 if let Some(old) = self.active_session.take() {
                                     if let Err(e) = self.db.complete_session(old.id, None, None) {
                                         eprintln!("{e}");
                                         self.active_session = Some(old);
+                                        return false;
                                     }
                                 }
 
