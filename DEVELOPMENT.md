@@ -1,10 +1,19 @@
 # Development notes
 
 Handoff document for work sessions (human or agent). The repo is the source of
-truth for state: read this file plus `git log --oneline -15` to pick up where
-the last session left off.
+truth for state — this file plus `git log` is all that is needed to resume.
 
-**Ritual — before ending a work session:**
+## Session protocol
+
+**Starting a session** (when asked to read this file and continue):
+
+1. Read this file in full, then run `git log --oneline -15`.
+2. Check *Now* below for state and next step; confirm the worktree is clean
+   (`git status`).
+3. Run `./check` to confirm the tree is green before changing anything.
+4. State briefly what you found and what you will do, then proceed.
+
+**Finishing a session** (when told the session is ending):
 
 1. Update *Now* below (state, next step, blockers).
 2. Run `./check` — must be green.
