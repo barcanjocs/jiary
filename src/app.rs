@@ -1186,6 +1186,10 @@ fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::db::Db;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::style::Color;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -1235,6 +1239,12 @@ mod tests {
                 task_selection: 0,
                 task_candidates: Vec::new(),
             });
+            self
+        }
+
+        /// Puts the app on an arbitrary screen (render tests of the chrome).
+        fn on_screen(mut self, screen: Screen) -> Self {
+            self.app.screen = screen;
             self
         }
 
@@ -1337,5 +1347,136 @@ mod tests {
         let mut t = TestApp::new().on_project_step(vec!["alpha".into()], "zzz", "zzz", 0);
         t.app.handle_key(KeyCode::Tab);
         assert_eq!(t.form().project_input, "zzz");
+    }
+
+    // --- render harness ---------------------------------------------------
+
+    /// Fixed size for render tests: wide enough for every status line, tall
+    /// enough that the chrome rows (0 and last) never overlap the content.
+    const RENDER_WIDTH: u16 = 80;
+    const RENDER_HEIGHT: u16 = 24;
+
+    /// Draws the app into a fixed-size [`TestBackend`] and returns the
+    /// resulting buffer so tests can assert on rendered lines.
+    fn render(app: &App) -> Buffer {
+        let backend = TestBackend::new(RENDER_WIDTH, RENDER_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    /// Text of one buffer row, trailing padding trimmed.
+    fn line(buf: &Buffer, y: u16) -> String {
+        let width = buf.area.width as usize;
+        buf.content()
+            .iter()
+            .skip(y as usize * width)
+            .take(width)
+            .map(|c| c.symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    // --- chrome: header ---------------------------------------------------
+
+    #[test]
+    fn header_shows_name_date_and_zero_total() {
+        let t = TestApp::new();
+        let buf = render(&t.app);
+        let date = chrono::Local::now().format("%a %d %b %Y");
+        assert_eq!(line(&buf, 0), format!("JIARY  {date}  ·  0m today"));
+    }
+
+    #[test]
+    fn header_total_includes_completed_sessions() {
+        let mut t = TestApp::new();
+        // A completed 60-minute session. The header only reads in-memory
+        // state (draw must never query the db), so pushing it directly is
+        // the right level of test setup.
+        let now = Utc::now();
+        t.app.today_sessions.push(Session {
+            id: 1,
+            started_at: now - chrono::Duration::minutes(90),
+            ended_at: Some(now - chrono::Duration::minutes(30)),
+            project: None,
+            task: None,
+            activity: "Programming".into(),
+            notes: None,
+            focus: None,
+            interruptions: None,
+        });
+        let buf = render(&t.app);
+        assert!(line(&buf, 0).contains("1h 0m today"));
+    }
+
+    // --- chrome: status line ----------------------------------------------
+
+    #[test]
+    fn status_line_shows_main_screen_hints() {
+        let t = TestApp::new();
+        let buf = render(&t.app);
+        assert_eq!(
+            line(&buf, RENDER_HEIGHT - 1),
+            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [q] quit"
+        );
+    }
+
+    #[test]
+    fn status_line_shows_start_form_hints() {
+        let t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let buf = render(&t.app);
+        assert_eq!(
+            line(&buf, RENDER_HEIGHT - 1),
+            "[Tab] accept  [Enter] next  [Esc] cancel"
+        );
+    }
+
+    #[test]
+    fn status_line_shows_end_notes_hints() {
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: String::new(),
+            step: EndStep::Notes,
+            focus: None,
+        }));
+        let buf = render(&t.app);
+        assert_eq!(
+            line(&buf, RENDER_HEIGHT - 1),
+            "[Enter] continue  [Esc] skip"
+        );
+    }
+
+    #[test]
+    fn status_line_shows_end_focus_hints() {
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: String::new(),
+            step: EndStep::Focus,
+            focus: None,
+        }));
+        let buf = render(&t.app);
+        assert_eq!(
+            line(&buf, RENDER_HEIGHT - 1),
+            "[1] bad  [2] ok  [3] good  [Enter] skip"
+        );
+    }
+
+    #[test]
+    fn status_line_shows_add_note_hints() {
+        let t = TestApp::new().on_screen(Screen::AddNote(AddNoteForm {
+            input: String::new(),
+        }));
+        let buf = render(&t.app);
+        assert_eq!(line(&buf, RENDER_HEIGHT - 1), "[Enter] save  [Esc] cancel");
+    }
+
+    #[test]
+    fn error_line_replaces_hints_in_red() {
+        let mut t = TestApp::new();
+        t.app.set_error("disk full");
+        let buf = render(&t.app);
+        assert_eq!(line(&buf, RENDER_HEIGHT - 1), "✗ disk full");
+        let cell = &buf[(0, RENDER_HEIGHT - 1)];
+        assert_eq!(cell.fg, Color::Red);
+        assert!(cell.modifier.contains(Modifier::BOLD));
     }
 }
