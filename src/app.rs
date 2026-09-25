@@ -1,9 +1,9 @@
 use chrono::Utc;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph};
 
 use crate::db::Db;
 use crate::session::Session;
@@ -689,108 +689,191 @@ impl App {
     }
 
     fn draw_main(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let mut lines: Vec<Line> = vec![Line::from("JIARY — TODAY")];
-
-        // Active session
-        if let Some(session) = &self.active_session {
-            let elapsed = Utc::now() - session.started_at;
-            let h = elapsed.num_hours();
-            let m = elapsed.num_minutes() % 60;
-            let s = elapsed.num_seconds() % 60;
-
-            lines.push(Line::from(""));
-            lines.push(Line::from("ACTIVE"));
-            lines.push(Line::from(format!(
-                "Project:  {}",
-                session.project.as_deref().unwrap_or("(none)")
-            )));
-            lines.push(Line::from(format!(
-                "Task:     {}",
-                session.task.as_deref().unwrap_or("(none)")
-            )));
-            lines.push(Line::from(format!("Activity: {}", session.activity)));
-
-            // Cached; refreshed whenever the active session changes.
-            if !self.previous_notes.is_empty() {
-                lines.push(Line::from("Previous notes:"));
-                for note in &self.previous_notes {
-                    lines.push(Line::from(format!("  • {note}")));
-                }
+        // The active session is a bordered panel; when there is none, a single
+        // centered dimmed line takes its place. Today's timeline fills the rest.
+        let (top, height) = match &self.active_session {
+            Some(session) => {
+                let lines = self.active_panel_lines(session);
+                let height = lines.len() as u16 + 2; // + top/bottom border
+                (
+                    Paragraph::new(lines).block(
+                        Block::bordered()
+                            .border_type(BorderType::Rounded)
+                            .border_style(Style::new().fg(theme::ACCENT))
+                            .title(Line::from(Span::styled(" ACTIVE ", theme::TITLE))),
+                    ),
+                    Constraint::Length(height),
+                )
             }
+            None => (
+                Paragraph::new("No active session.")
+                    .style(theme::DIMMED)
+                    .alignment(Alignment::Center),
+                Constraint::Length(1),
+            ),
+        };
 
-            // Current session's own notes
-            if let Some(notes) = &session.notes
-                && !notes.is_empty()
-            {
-                lines.push(Line::from("Session notes:"));
-                for line in notes.lines() {
-                    lines.push(Line::from(format!("  • {line}")));
-                }
-            }
+        let [top_area, timeline_area] = Layout::vertical([height, Constraint::Min(0)]).areas(area);
+        frame.render_widget(top, top_area);
+        self.draw_timeline(frame, timeline_area);
+    }
 
-            lines.push(Line::from(""));
-            lines.push(Line::from(format!("{h:02}:{m:02}:{s:02}")));
-            lines.push(Line::from(format!(
-                "Interruptions: {}",
-                session.interruptions.unwrap_or(0)
-            )));
-        } else {
-            lines.push(Line::from(""));
-            lines.push(Line::from("No active session."));
-        }
+    /// Lines inside the active-session panel: bold timer, dimmed label/value
+    /// rows, interruptions colored when > 0, notes as dimmed bullets.
+    fn active_panel_lines(&self, session: &Session) -> Vec<Line<'static>> {
+        let elapsed = Utc::now() - session.started_at;
+        let (h, m, s) = (
+            elapsed.num_hours(),
+            elapsed.num_minutes() % 60,
+            elapsed.num_seconds() % 60,
+        );
 
-        // Completed sessions timeline
-        if !self.today_sessions.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from("─────────────────────────────"));
+        let mut lines = vec![
+            Line::from(Span::styled(
+                format!("{h:02}:{m:02}:{s:02}"),
+                Style::new().add_modifier(Modifier::BOLD),
+            )),
+            theme::kv("Project", session.project.as_deref().unwrap_or("(none)")),
+            theme::kv("Task", session.task.as_deref().unwrap_or("(none)")),
+            theme::kv("Activity", session.activity.as_str()),
+        ];
 
-            for session in &self.today_sessions {
-                let start = fmt_time(&session.started_at);
-                let end = session
-                    .ended_at
-                    .as_ref()
-                    .map(fmt_time)
-                    .unwrap_or_else(|| "??:??".to_string());
-                let mut detail = session
-                    .ended_at
-                    .as_ref()
-                    .map(|end| format!("  ({})", fmt_duration(&session.started_at, end)))
-                    .unwrap_or_default();
+        let interruptions = session.interruptions.unwrap_or(0);
+        lines.push(Line::from(vec![
+            Span::styled("Interruptions  ", theme::DIMMED),
+            Span::styled(
+                interruptions.to_string(),
+                if interruptions > 0 {
+                    Style::new().fg(theme::BAD)
+                } else {
+                    Style::new()
+                },
+            ),
+        ]));
 
-                detail.push_str(&match session.focus {
-                    Some(f) => format!(" (F:{f})"),
-                    None => " (F:-)".to_string(),
-                });
-                detail.push_str(&format!(" (I:{})", session.interruptions.unwrap_or(0)));
-
-                lines.push(Line::from(format!("{} ────── {}{}", start, end, detail)));
-                let parts = [
-                    session.project.as_deref().unwrap_or(""),
-                    session.task.as_deref().unwrap_or(""),
-                    &session.activity,
-                ]
-                .iter()
-                .filter(|s| !s.is_empty())
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" · ");
-
-                lines.push(Line::from(format!("     {parts}")));
-
-                if let Some(nts) = &session.notes {
-                    for line in nts.lines() {
-                        lines.push(Line::from(format!("     • {line}")));
-                    }
-                }
-                lines.push(Line::from(""));
+        // Cached; refreshed whenever the active session changes.
+        if !self.previous_notes.is_empty() {
+            lines.push(Line::from(Span::styled("Previous notes:", theme::DIMMED)));
+            for note in &self.previous_notes {
+                lines.push(Line::from(Span::styled(
+                    format!("  • {note}"),
+                    theme::DIMMED,
+                )));
             }
         }
 
-        // Footer
-        lines.push(Line::from(
-            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [q] quit",
-        ));
-        frame.render_widget(Paragraph::new(lines), area);
+        // Current session's own notes.
+        if let Some(notes) = &session.notes
+            && !notes.is_empty()
+        {
+            lines.push(Line::from(Span::styled("Session notes:", theme::DIMMED)));
+            for line in notes.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  • {line}"),
+                    theme::DIMMED,
+                )));
+            }
+        }
+
+        lines
+    }
+
+    /// Today's sessions (completed plus the running one) as a multi-line list:
+    /// bold time range + duration, colored focus badge, bright project·task·
+    /// activity, dimmed notes.
+    fn draw_timeline(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        if self.today_sessions.is_empty() {
+            return;
+        }
+
+        // A dimmed section label anchors the list below the active panel.
+        let [label_area, list_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "TODAY",
+                Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD),
+            ))),
+            label_area,
+        );
+
+        let items = self
+            .today_sessions
+            .iter()
+            .map(|session| ListItem::new(self.timeline_item_lines(session)))
+            .collect::<Vec<_>>();
+        frame.render_widget(List::new(items), list_area);
+    }
+
+    /// One timeline item: time range, duration, focus badge and interruption
+    /// count on the first line, project·task·activity below it, then notes.
+    fn timeline_item_lines(&self, session: &Session) -> Vec<Line<'static>> {
+        let start = fmt_time(&session.started_at);
+        let (range, duration) = match &session.ended_at {
+            Some(end) => (
+                format!("{start} – {}", fmt_time(end)),
+                fmt_duration(&session.started_at, end),
+            ),
+            // The active session appears here too, still running.
+            None => (
+                format!("{start} – now"),
+                fmt_hms(Utc::now() - session.started_at),
+            ),
+        };
+
+        let focus = match session.focus {
+            Some(1) => Span::styled(" F1", Style::new().fg(theme::BAD)),
+            Some(2) => Span::styled(" F2", Style::new().fg(theme::OK)),
+            Some(3) => Span::styled(" F3", Style::new().fg(theme::GOOD)),
+            _ => Span::styled(" F-", theme::DIMMED),
+        };
+
+        let interruptions = session.interruptions.unwrap_or(0);
+        let interruptions_span = Span::styled(
+            format!(" I:{interruptions}"),
+            if interruptions > 0 {
+                Style::new().fg(theme::BAD)
+            } else {
+                theme::DIMMED
+            },
+        );
+
+        let mut lines = vec![Line::from(vec![
+            Span::styled(range, Style::new().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(" ({duration})"),
+                Style::new().add_modifier(Modifier::BOLD),
+            ),
+            focus,
+            interruptions_span,
+        ])];
+
+        let parts = [
+            session.project.as_deref().unwrap_or(""),
+            session.task.as_deref().unwrap_or(""),
+            &session.activity,
+        ]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        if !parts.is_empty() {
+            // Bright: default style.
+            lines.push(Line::from(Span::raw(parts)));
+        }
+
+        if let Some(notes) = &session.notes {
+            for line in notes.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  • {line}"),
+                    theme::DIMMED,
+                )));
+            }
+        }
+
+        lines.push(Line::default()); // spacing between sessions
+        lines
     }
 
     fn draw_start_session(
