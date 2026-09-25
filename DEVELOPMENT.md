@@ -21,10 +21,12 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: TUI beautification planned (item G below); rustup stable 1.98.1
-  installed; tree green, 15 tests.
-- Next: implement G in the listed order of small commits; confirm taste
-  decisions first (accent color, border style, centered modals).
+- State: TUI beautification (item G) in progress — steps 1–2 landed: theme
+  module (`1f204c8`) and header/status layout (`52491b8`); tree green, 16
+  tests. Taste decisions confirmed: cyan accent, rounded borders, centered
+  modals.
+- Next: G step 3 — main screen: active session as bordered panel, today's
+  timeline as styled multi-line List with color-coded focus badges.
 - Blockers / open questions: none.
 
 ## Backlog
