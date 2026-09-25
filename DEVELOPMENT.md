@@ -34,9 +34,10 @@ truth for state — this file plus `git log` is all that is needed to resume.
   (0.30) has no `Frame::hide_cursor`, so `App::cursor_position(size)` is a
   pure fn shared with the renderers via `modal_layout`/`start_modal_layout`;
   main.rs shows/hides the terminal cursor each frame from it.
-- Next: G step 6 — render tests via ratatui `TestBackend` (no feature gate,
-  has `assert_buffer_lines`) covering header/footer/error rows, active vs
-  no-active state, form step tabs and highlight position.
+- Next: G step 6a — render-test harness + chrome tests: a `TestBackend`
+  helper in app.rs's tests (draw into a fixed-size terminal, assert buffer
+  lines) covering the header row, per-screen status-line hints, and the red
+  error row.
 - Blockers / open questions: none.
 
 ## Backlog
@@ -70,8 +71,17 @@ from its scope note alone, without re-deriving context.
       5. End + note forms — same modal/tabs/cursor treatment; focus step as a
          colored `[1] Bad [2] OK [3] Good` line.
       6. Render tests via ratatui `TestBackend` (no feature gate, has
-         `assert_buffer_lines`) covering header/footer/error rows, active vs
-         no-active state, form step tabs and highlight position.
+         `assert_buffer_lines`), split into three commits:
+         a. Harness + chrome — a draw-and-assert helper in app.rs's tests;
+            tests for the header row (name/date/today total), the status
+            line's per-screen key hints, and the red error row replacing
+            them.
+         b. Main screen — active-session panel (accent border/title, timer,
+            kv rows) vs the centered dimmed no-active line; a timeline item's
+            shape (time range + duration, focus badge colors).
+         c. Forms — start/end/note modals: border + title, `Tabs` selected
+            step per form state, picker `>` highlight at the stored selection
+            index, input line text.
       Constraints: no new deps; no db queries from draw; follow existing
       borrow patterns; README unchanged (keys don't change). Open taste
       decisions (defaults in parens): cyan accent (vs green), rounded borders
