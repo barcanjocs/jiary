@@ -45,7 +45,7 @@ enum Screen {
     AddNote(AddNoteForm),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum EndStep {
     Notes,
     Focus,
@@ -617,32 +617,45 @@ impl App {
         frame.render_widget(self.status_line(), status);
     }
 
-    /// Terminal cursor position for the current screen: `Some` only on the
-    /// start form's input steps (project/task), where it sits right after the
-    /// typed text. Pure function of the terminal size and form state —
-    /// `Terminal::draw` discards closure return values, so main.rs calls this
-    /// after drawing to show or hide the cursor.
+    /// Terminal cursor position for the current screen: `Some` on input lines
+    /// (start form's project/task steps, end form's notes step, add-note),
+    /// right after the typed text. Pure function of the terminal size and form
+    /// state — `Terminal::draw` discards closure return values, so main.rs
+    /// calls this after drawing to show or hide the cursor.
     pub fn cursor_position(&self, size: (u16, u16)) -> Option<(u16, u16)> {
-        let (form, step) = match &self.screen {
-            Screen::StartSession(form) => (form, form.step),
-            _ => return None,
-        };
-        let (_, _, body_area) =
-            start_modal_layout(ratatui::layout::Rect::new(0, 0, size.0, size.1));
-        let [input_area, _] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
-        match step {
-            Step::Project => Some(input_cursor(
-                input_area,
-                "Project".len() + 2,
-                form.project_input.len(),
-            )),
-            Step::Task => Some(input_cursor(
-                input_area,
-                "Task".len() + 2,
-                form.task_input.len(),
-            )),
-            Step::Activity => None,
+        let area = ratatui::layout::Rect::new(0, 0, size.0, size.1);
+        match &self.screen {
+            Screen::StartSession(form) => {
+                let (_, _, body_area) = start_modal_layout(area);
+                let [input_area, _] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
+                match form.step {
+                    Step::Project => Some(input_cursor(
+                        input_area,
+                        "Project".len() + 2,
+                        form.project_input.len(),
+                    )),
+                    Step::Task => Some(input_cursor(
+                        input_area,
+                        "Task".len() + 2,
+                        form.task_input.len(),
+                    )),
+                    Step::Activity => None,
+                }
+            }
+            Screen::EndSession(form) if form.step == EndStep::Notes => {
+                let (_, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
+                let [_, body_area] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+                Some(input_cursor(body_area, "Notes".len() + 2, form.notes.len()))
+            }
+            Screen::AddNote(form) => {
+                let (_, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
+                let [_, input_area] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+                Some(input_cursor(input_area, "Note".len() + 2, form.input.len()))
+            }
+            _ => None,
         }
     }
 
@@ -991,23 +1004,64 @@ impl App {
         }
     }
 
+    /// End form: small centered modal with a Notes·Focus `Tabs` row; the notes
+    /// step is an input line (cursor placed by main.rs), the focus step a
+    /// colored `[1] Bad [2] OK [3] Good` line.
     fn draw_end_session(
         &self,
         frame: &mut Frame,
         area: ratatui::layout::Rect,
         form: &EndSessionForm,
     ) {
-        let lines = match &form.step {
-            EndStep::Notes => vec![Line::from(format!("Notes: {}", form.notes))],
-            EndStep::Focus => vec![Line::from("Focus:")],
+        let (modal, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(Line::from(Span::styled(" End session ", theme::TITLE)));
+        frame.render_widget(block, modal);
+
+        let [tabs_area, body_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+        let step_index = match form.step {
+            EndStep::Notes => 0,
+            EndStep::Focus => 1,
         };
-        let paragraph = Paragraph::new(lines).block(Block::default().title(" End session "));
-        frame.render_widget(paragraph, area);
+        frame.render_widget(
+            Tabs::new(["Notes", "Focus"])
+                .select(step_index)
+                .highlight_style(Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            tabs_area,
+        );
+
+        match form.step {
+            EndStep::Notes => {
+                frame.render_widget(
+                    Paragraph::new(theme::kv("Notes", form.notes.clone())),
+                    body_area,
+                );
+            }
+            EndStep::Focus => {
+                let line = Line::from(vec![
+                    Span::styled("[1] Bad  ", Style::new().fg(theme::BAD)),
+                    Span::styled("[2] OK  ", Style::new().fg(theme::OK)),
+                    Span::styled("[3] Good", Style::new().fg(theme::GOOD)),
+                ]);
+                frame.render_widget(Paragraph::new(line), body_area);
+            }
+        }
     }
 
+    /// Add-note form: small centered modal with a dimmed project·task·activity
+    /// context line (the full note history stays on the main screen) and a
+    /// note input line (cursor placed by main.rs).
     fn draw_add_note(&self, frame: &mut Frame, area: ratatui::layout::Rect, form: &AddNoteForm) {
-        let mut lines: Vec<Line> = vec![];
+        let (modal, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(Line::from(Span::styled(" Add note ", theme::TITLE)));
+        frame.render_widget(block, modal);
 
+        let [context_area, input_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
         if let Some(session) = &self.active_session {
             let parts = [
                 session.project.as_deref().unwrap_or(""),
@@ -1019,30 +1073,24 @@ impl App {
             .cloned()
             .collect::<Vec<_>>()
             .join(" · ");
-
-            lines.push(Line::from(parts));
-            if let Some(notes) = &session.notes
-                && !notes.is_empty()
-            {
-                lines.push(Line::from(""));
-                for line in notes.lines() {
-                    lines.push(Line::from(format!("  • {line}")));
-                }
-            }
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(parts, theme::DIMMED))),
+                context_area,
+            );
         }
-
-        lines.push(Line::from(""));
-        lines.push(Line::from(format!("> {}", form.input)));
-
-        let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
-        frame.render_widget(paragraph, area);
+        frame.render_widget(
+            Paragraph::new(theme::kv("Note", form.input.clone())),
+            input_area,
+        );
     }
 }
 
-/// Fixed size of the start-session modal; centered in the content area and
-/// shrunk to fit on tiny terminals (see `centered_rect`).
+/// Fixed size of the modals; centered in the content area and shrunk to fit
+/// on tiny terminals (see `centered_rect`). The start form needs room for the
+/// activity list; end/note forms only hold a tabs/context line plus one input.
 const MODAL_WIDTH: u16 = 40;
-const MODAL_HEIGHT: u16 = 12;
+const START_MODAL_HEIGHT: u16 = 12;
+const SMALL_MODAL_HEIGHT: u16 = 6;
 
 /// A picker `List` with the accent highlight symbol and style.
 fn picker_list<'a>(items: Vec<ListItem<'a>>) -> List<'a> {
@@ -1061,6 +1109,24 @@ fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatu
     ratatui::layout::Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
+/// A centered modal of the given size: (modal rect, content area inside the
+/// border with a one-column padding).
+fn modal_layout(
+    content: ratatui::layout::Rect,
+    width: u16,
+    height: u16,
+) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
+    let modal = centered_rect(width, height, content);
+    let inner = Block::bordered().inner(modal);
+    let padded = ratatui::layout::Rect::new(
+        inner.x.saturating_add(1),
+        inner.y,
+        inner.width.saturating_sub(2),
+        inner.height,
+    );
+    (modal, padded)
+}
+
 /// Layout of the start-session modal: (modal rect, tabs row, body). Shared by
 /// the renderer and `cursor_position` so the two can never disagree.
 fn start_modal_layout(
@@ -1070,17 +1136,9 @@ fn start_modal_layout(
     ratatui::layout::Rect,
     ratatui::layout::Rect,
 ) {
-    let modal = centered_rect(MODAL_WIDTH, MODAL_HEIGHT, content);
-    // One column of padding between the border and the content.
-    let inner = Block::bordered().inner(modal);
-    let padded = ratatui::layout::Rect::new(
-        inner.x.saturating_add(1),
-        inner.y,
-        inner.width.saturating_sub(2),
-        inner.height,
-    );
+    let (modal, inner) = modal_layout(content, MODAL_WIDTH, START_MODAL_HEIGHT);
     let [tabs_area, body_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(padded);
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
     (modal, tabs_area, body_area)
 }
 
