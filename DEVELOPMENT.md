@@ -21,15 +21,18 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: TUI beautification (item G) in progress — steps 1–3 landed: theme
+- State: TUI beautification (item G) in progress — steps 1–4 landed: theme
   module (`1f204c8`), header/status layout (`52491b8`), main screen as
-  bordered active panel + timeline List (`749ea5c`); tree green, 16 tests.
-  Taste decisions confirmed: cyan accent, rounded borders, centered modals.
-- Next: G step 4 — start form: centered fixed-size modal block; `Tabs` for
-  Activity·Project·Task with current step selected; pickers as real `List`s
-  with `highlight_symbol`/`highlight_style`; input lines get the real
-  terminal cursor (`Frame::set_cursor_position`, hidden at startup, shown
-  only on input screens).
+  bordered active panel + timeline List (`749ea5c`), start form as centered
+  40×12 modal with `Tabs` + picker `List`s + real terminal cursor on input
+  steps (`fdb334d`); tree green, 16 tests. Taste decisions confirmed: cyan
+  accent, rounded borders, centered modals.
+  Cursor note: `Terminal::draw` discards closure returns and this ratatui
+  (0.30) has no `Frame::hide_cursor`, so `App::cursor_position(size)` is a
+  pure fn shared with the renderer via `start_modal_layout`; main.rs shows/
+  hides the terminal cursor each frame from it.
+- Next: G step 5 — end + note forms: same modal/tabs/cursor treatment;
+  focus step as a colored `[1] Bad [2] OK [3] Good` line.
 - Blockers / open questions: none.
 
 ## Backlog
