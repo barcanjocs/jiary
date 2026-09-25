@@ -21,21 +21,12 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: G (TUI beautification) fully landed. Steps 1–5 as before; step 6
-  render tests in three commits: harness + chrome (`d2cca27`), main screen
-  (`2411c69`), forms (`5031e1a`) — a `TestBackend` draw-and-assert helper at
-  80×24 plus `line`/`line_from`/`col_of` row extractors (char-based, rows
-  contain multi-byte `│–·`). Cursor bug found via pty run and fixed
-  (`7349d6a`): ratatui's `set_cursor_position` moves but does not show the
-  cursor, so main.rs now calls `show_cursor()` on input screens; the
-  `cursor_position` math is pinned by a unit test. Tree green, 37 tests.
-  Render-test gotchas worth remembering: Tabs default divider is box-drawing
-  `│` with space padding; List content always sits one column right of the
-  highlight symbol (`>alpine`, no space); form modal borders are default
-  color (only titles carry the accent — the main panel's accent border is
-  unique to it); panels render inner text at the border with no padding.
-- Next: user had further changes in mind ("firstly" the cursor) — ask what
-  remains; otherwise continue with backlog item C (free-text activities).
+- State: G (TUI beautification) fully landed (git log `1f204c8..7349d6a`;
+  render-test gotchas now live in IMPLEMENTATION.md). Tree green, 37 tests.
+  New this session: `IMPLEMENTATION.md`, a developer-facing implementation
+  reference (architecture, data layer, state machine, rendering, testing),
+  linked from the file map below.
+- Next: backlog item C (free-text activities).
 - Blockers / open questions: none.
 
 ## Backlog
@@ -137,6 +128,9 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 
 ## File map
 
+- `IMPLEMENTATION.md` — developer-facing implementation details: architecture,
+  data layer, app state, screen state machine, session lifecycle, rendering,
+  testing. Keep in sync when architecture changes.
 - `src/main.rs` — entry point: open db, raw mode + alternate screen, 100 ms
   event loop calling `App::draw` / `App::handle_key`.
 - `src/db.rs` — `Db` over rusqlite; schema + single-active trigger; all SQL
