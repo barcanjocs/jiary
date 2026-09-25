@@ -1249,6 +1249,22 @@ mod tests {
             self
         }
 
+        /// Puts the app on the Activity step of the start-session form.
+        fn on_activity_step(mut self, activity_index: usize) -> Self {
+            self.app.screen = Screen::StartSession(StartSessionForm {
+                step: Step::Activity,
+                activity_index,
+                project_input: String::new(),
+                task_input: String::new(),
+                project_query: String::new(),
+                task_query: String::new(),
+                project_selection: 0,
+                task_selection: 0,
+                task_candidates: Vec::new(),
+            });
+            self
+        }
+
         fn form(&self) -> &StartSessionForm {
             match &self.app.screen {
                 Screen::StartSession(f) => f,
@@ -1385,6 +1401,12 @@ mod tests {
         let row = line(buf, y);
         let byte_idx = row.find(needle).unwrap();
         row[..byte_idx].chars().count() as u16
+    }
+
+    /// Row text starting at char column `x` (rows contain multi-byte chars,
+    /// so byte-index slicing is not safe).
+    fn line_from(buf: &Buffer, y: u16, x: u16) -> String {
+        line(buf, y).chars().skip(x as usize).collect()
     }
 
     /// A running session that started `elapsed` ago, so the panel's timer is
@@ -1629,5 +1651,124 @@ mod tests {
             let col = col_of(&buf, y, badge);
             assert_eq!(buf[(col, y)].fg, *color);
         }
+    }
+
+    // --- forms ------------------------------------------------------------
+
+    /// The start modal is 40×12 centered in the content area: x=20, y=6;
+    /// tabs row at y=7, body from y=8. End/note modals are 40×6: x=20, y=9;
+    /// tabs/context row at y=10, input row at y=11. All inner text starts at
+    /// the padded column 22.
+
+    #[test]
+    fn start_modal_shows_title_and_selected_tab() {
+        let t = TestApp::new().on_activity_step(0);
+        let buf = render(&t.app);
+        // The modal border is default color; only the title carries the accent.
+        assert_eq!(buf[(20, 6)].symbol(), "╭");
+        assert_eq!(buf[(20, 6)].fg, Color::Reset);
+        assert!(line_from(&buf, 6, 20).starts_with("╭ Start session "));
+        let title = &buf[(22, 6)];
+        assert_eq!(title.fg, Color::Cyan);
+        assert!(title.modifier.contains(Modifier::BOLD));
+        // Tabs row: the selected step is highlighted, the others are plain.
+        assert!(line_from(&buf, 7, 22).starts_with(" Activity │ Project │ Task"));
+        assert_eq!(buf[(23, 7)].fg, Color::Cyan); // "Activity" selected
+        assert!(buf[(23, 7)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(34, 7)].fg, Color::Reset); // "Project"
+        assert_eq!(buf[(44, 7)].fg, Color::Reset); // "Task"
+    }
+
+    #[test]
+    fn start_modal_activity_picker_highlights_selected() {
+        let t = TestApp::new().on_activity_step(2); // "Writing"
+        let buf = render(&t.app);
+        // The picker body starts at row 8; the selected item gets a bold
+        // accent `>` and highlighted text (list content always sits one
+        // column right of the symbol).
+        assert!(line_from(&buf, 10, 21).starts_with(" >Writing"));
+        assert_eq!(buf[(22, 10)].fg, Color::Cyan);
+        assert!(buf[(22, 10)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(23, 10)].fg, Color::Cyan);
+        assert!(line_from(&buf, 8, 21).starts_with("  Programming"));
+        assert_eq!(buf[(23, 8)].fg, Color::Reset); // unselected item text
+    }
+
+    #[test]
+    fn start_modal_project_step_shows_input_and_suggestions() {
+        let t = TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "a", "a", 1);
+        let buf = render(&t.app);
+        // The Project tab is now selected.
+        assert_eq!(buf[(34, 7)].fg, Color::Cyan);
+        assert!(buf[(34, 7)].modifier.contains(Modifier::BOLD));
+        // Input row: dimmed label + typed text.
+        assert!(line_from(&buf, 8, 22).starts_with("Project  a"));
+        assert_eq!(buf[(22, 8)].fg, Color::Gray);
+        assert_eq!(buf[(31, 8)].fg, Color::Reset);
+        // Suggestions below; the stored selection is highlighted.
+        assert!(line_from(&buf, 9, 23).starts_with("alpha"));
+        assert!(line_from(&buf, 10, 22).starts_with(">alpine"));
+        assert_eq!(buf[(22, 10)].fg, Color::Cyan);
+    }
+
+    #[test]
+    fn end_modal_notes_step_shows_tab_and_input() {
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: "did stuff".into(),
+            step: EndStep::Notes,
+            focus: None,
+        }));
+        let buf = render(&t.app);
+        assert_eq!(buf[(20, 9)].symbol(), "╭");
+        assert_eq!(buf[(20, 9)].fg, Color::Reset);
+        assert!(line_from(&buf, 9, 20).starts_with("╭ End session "));
+        // Notes tab selected, Focus plain.
+        assert!(line_from(&buf, 10, 22).starts_with(" Notes │ Focus"));
+        assert_eq!(buf[(23, 10)].fg, Color::Cyan);
+        assert!(buf[(23, 10)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(31, 10)].fg, Color::Reset);
+        // Input row: dimmed label + typed text.
+        assert!(line_from(&buf, 11, 22).starts_with("Notes  did stuff"));
+        assert_eq!(buf[(22, 11)].fg, Color::Gray);
+        assert_eq!(buf[(29, 11)].fg, Color::Reset);
+    }
+
+    #[test]
+    fn end_modal_focus_step_shows_colored_ratings() {
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: String::new(),
+            step: EndStep::Focus,
+            focus: None,
+        }));
+        let buf = render(&t.app);
+        // Focus tab selected, Notes plain.
+        assert_eq!(buf[(31, 10)].fg, Color::Cyan);
+        assert!(buf[(31, 10)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(23, 10)].fg, Color::Reset);
+        // Colored rating line.
+        assert!(line_from(&buf, 11, 22).starts_with("[1] Bad  [2] OK  [3] Good"));
+        assert_eq!(buf[(col_of(&buf, 11, "Bad"), 11)].fg, Color::Red);
+        assert_eq!(buf[(col_of(&buf, 11, "OK"), 11)].fg, Color::Yellow);
+        assert_eq!(buf[(col_of(&buf, 11, "Good"), 11)].fg, Color::Green);
+    }
+
+    #[test]
+    fn note_modal_shows_context_and_input() {
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 0));
+        t.app.screen = Screen::AddNote(AddNoteForm {
+            input: "hello".into(),
+        });
+        let buf = render(&t.app);
+        assert_eq!(buf[(20, 9)].symbol(), "╭");
+        assert_eq!(buf[(20, 9)].fg, Color::Reset);
+        assert!(line_from(&buf, 9, 20).starts_with("╭ Add note "));
+        // Dimmed project·task·activity context line.
+        assert!(line_from(&buf, 10, 22).starts_with("alpha · beta · Programming"));
+        assert_eq!(buf[(22, 10)].fg, Color::Gray);
+        // Input row: dimmed label + typed text.
+        assert!(line_from(&buf, 11, 22).starts_with("Note  hello"));
+        assert_eq!(buf[(22, 11)].fg, Color::Gray);
+        assert_eq!(buf[(28, 11)].fg, Color::Reset);
     }
 }
