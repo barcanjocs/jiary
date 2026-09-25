@@ -1,6 +1,9 @@
 mod app;
 mod db;
 mod session;
+// pub (not private) so palette constants aren't dead-code errors while the
+// UI steps land incrementally; tighten to `mod` once everything is used.
+pub mod theme;
 
 use std::io;
 

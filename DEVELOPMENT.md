@@ -157,6 +157,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/db.rs` — `Db` over rusqlite; schema + single-active trigger; all SQL
   lives here. Unit tests at the bottom.
 - `src/session.rs` — `Session` struct: a db row with parsed timestamps.
+- `src/theme.rs` — palette (16 named colors) and shared style helpers; all
+  widgets take their styles from here so the look is tweaked in one place.
 - `src/app.rs` — all UI: `App` state, `Screen` enum, per-screen key handlers
   (`handle_main`, `handle_start_session` + `start_*_key`,
   `handle_end_session` + `end_*_key`, `handle_add_note`), draw methods
