@@ -21,10 +21,10 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: development pipeline in place — session protocol at the top of this
-  file (`99dcaaa`) and one-command `./check` verification (`872a4d3`). Refactor
-  phase complete (`bce0213`, `5fcc757`); 15 tests, all green.
-- Next: choose a feature from the backlog below (suggested order C → B → A → D).
+- State: TUI beautification planned (item G below); rustup stable 1.98.1
+  installed; tree green, 15 tests.
+- Next: implement G in the listed order of small commits; confirm taste
+  decisions first (accent color, border style, centered modals).
 - Blockers / open questions: none.
 
 ## Backlog
@@ -32,6 +32,37 @@ truth for state — this file plus `git log` is all that is needed to resume.
 Ranked by value-per-effort as of 2026-09-23. Each item should be startable
 from its scope note alone, without re-deriving context.
 
+- [ ] **G. TUI beautification** (medium, chosen next). The UI is one
+      full-area Paragraph per screen with manual `>` markers and no colors.
+      Plan, in order of small commits (each keeps `./check` green):
+      1. `src/theme.rs` — palette (16 named colors only: cyan accent,
+         gray/dimmed secondary, green/yellow/red semantics) + style helpers
+         (title, dimmed label/value line builder).
+      2. `draw()` layout skeleton — `Layout::vertical`: header row (name bold,
+         date, today's total time computed from in-memory sessions), content,
+         footer key hints (bold keys, dimmed descriptions), conditional red
+         error row (`✗ …`) replacing the pinned line.
+      3. Main screen — active session as rounded bordered panel (accent
+         border/title, bold timer, interruptions colored when >0, notes as
+         dimmed bullets); no-active state centered and dimmed; today's
+         timeline as multi-line `List` (one item per session: bold time range
+         + duration, focus badge F1 red / F2 yellow / F3 green, project·task
+         bright, notes dimmed).
+      4. Start form — centered fixed-size modal block; `Tabs` for
+         Activity·Project·Task with current step selected; activity picker and
+         suggestions as real `List`s with `highlight_symbol`/`highlight_style`
+         (temp per-frame `ListState` built from the existing index fields);
+         input lines get the real terminal cursor (`Frame::set_cursor_position`,
+         explicit `hide_cursor` at startup, shown only on input screens).
+      5. End + note forms — same modal/tabs/cursor treatment; focus step as a
+         colored `[1] Bad [2] OK [3] Good` line.
+      6. Render tests via ratatui `TestBackend` (no feature gate, has
+         `assert_buffer_lines`) covering header/footer/error rows, active vs
+         no-active state, form step tabs and highlight position.
+      Constraints: no new deps; no db queries from draw; follow existing
+      borrow patterns; README unchanged (keys don't change). Open taste
+      decisions (defaults in parens): cyan accent (vs green), rounded borders
+      (vs double), centered modal dialogs (vs full-screen).
 - [ ] **C. Free-text activities** (small). Activities are a hardcoded list of
       7 (`ACTIVITIES` in app.rs); anything that doesn't fit forces "Other".
       Make the activity step work like project/task: fuzzy autocomplete seeded
