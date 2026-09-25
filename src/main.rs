@@ -43,9 +43,13 @@ fn run(db: db::Db) -> io::Result<()> {
 
     loop {
         terminal.draw(|frame| app.draw(frame))?;
-        // The cursor is only visible on the start form's input steps.
+        // The cursor is only visible on input lines. set_cursor_position
+        // moves the cursor but does not show it, so show it explicitly.
         match app.cursor_position(terminal.size()?.into()) {
-            Some(pos) => terminal.set_cursor_position(pos)?,
+            Some(pos) => {
+                terminal.show_cursor()?;
+                terminal.set_cursor_position(pos)?;
+            }
             None => terminal.hide_cursor()?,
         }
 

@@ -1249,6 +1249,21 @@ mod tests {
             self
         }
 
+        /// A start-session screen at the given step, everything else empty.
+        fn start_form_at(step: Step) -> Screen {
+            Screen::StartSession(StartSessionForm {
+                step,
+                activity_index: 0,
+                project_input: String::new(),
+                task_input: String::new(),
+                project_query: String::new(),
+                task_query: String::new(),
+                project_selection: 0,
+                task_selection: 0,
+                task_candidates: Vec::new(),
+            })
+        }
+
         /// Puts the app on the Activity step of the start-session form.
         fn on_activity_step(mut self, activity_index: usize) -> Self {
             self.app.screen = Screen::StartSession(StartSessionForm {
@@ -1750,6 +1765,43 @@ mod tests {
         assert_eq!(buf[(col_of(&buf, 11, "Bad"), 11)].fg, Color::Red);
         assert_eq!(buf[(col_of(&buf, 11, "OK"), 11)].fg, Color::Yellow);
         assert_eq!(buf[(col_of(&buf, 11, "Good"), 11)].fg, Color::Green);
+    }
+
+    #[test]
+    fn cursor_position_tracks_input_lines() {
+        // 80×24 terminal: the start modal's input row is y=8 (values start at
+        // column 31), the end/note modals' is y=11.
+        let t = TestApp::new().on_project_step(vec![], "", "", 0);
+        assert_eq!(t.app.cursor_position((80, 24)), Some((31, 8)));
+
+        let t = TestApp::new().on_project_step(vec![], "ab", "ab", 0);
+        assert_eq!(t.app.cursor_position((80, 24)), Some((33, 8)));
+
+        let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Task));
+        assert_eq!(t.app.cursor_position((80, 24)), Some((28, 8))); // "Task  "
+
+        let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Activity));
+        assert_eq!(t.app.cursor_position((80, 24)), None); // picker, no input
+
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: "hi".into(),
+            step: EndStep::Notes,
+            focus: None,
+        }));
+        assert_eq!(t.app.cursor_position((80, 24)), Some((31, 11)));
+
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: String::new(),
+            step: EndStep::Focus,
+            focus: None,
+        }));
+        assert_eq!(t.app.cursor_position((80, 24)), None); // rating line, no input
+
+        let t = TestApp::new().on_screen(Screen::AddNote(AddNoteForm { input: "hi".into() }));
+        assert_eq!(t.app.cursor_position((80, 24)), Some((30, 11))); // "Note  hi"
+
+        let t = TestApp::new();
+        assert_eq!(t.app.cursor_position((80, 24)), None); // main screen
     }
 
     #[test]
