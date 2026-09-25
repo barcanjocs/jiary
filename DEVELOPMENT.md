@@ -40,8 +40,9 @@ from its scope note alone, without re-deriving context.
          (title, dimmed label/value line builder).
       2. `draw()` layout skeleton — `Layout::vertical`: header row (name bold,
          date, today's total time computed from in-memory sessions), content,
-         footer key hints (bold keys, dimmed descriptions), conditional red
-         error row (`✗ …`) replacing the pinned line.
+         bottom status line showing either the red error (`✗ …`) or key hints
+         for the current screen (bold keys, dimmed descriptions); inline hint
+         lines removed from forms since the status line is their single home.
       3. Main screen — active session as rounded bordered panel (accent
          border/title, bold timer, interruptions colored when >0, notes as
          dimmed bullets); no-active state centered and dimmed; today's

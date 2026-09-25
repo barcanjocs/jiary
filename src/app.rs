@@ -1,11 +1,13 @@
 use chrono::Utc;
 use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::text::Line;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
 use crate::db::Db;
 use crate::session::Session;
+use crate::theme;
 use crossterm::event::KeyCode;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -593,25 +595,97 @@ impl App {
     pub fn draw(&self, frame: &mut Frame) {
         let area = frame.area();
 
+        // Global chrome: header on top, status line at the bottom, screen
+        // content in between. The rows are fixed (no conditional layout), so
+        // the UI never jumps when an error appears or disappears.
+        let [header, content, status] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+
+        frame.render_widget(self.header_line(), header);
+
         match &self.screen {
-            Screen::Main => self.draw_main(frame, area),
-            Screen::StartSession(form) => self.draw_start_session(frame, area, form),
-            Screen::EndSession(form) => self.draw_end_session(frame, area, form),
-            Screen::AddNote(form) => self.draw_add_note(frame, area, form),
+            Screen::Main => self.draw_main(frame, content),
+            Screen::StartSession(form) => self.draw_start_session(frame, content, form),
+            Screen::EndSession(form) => self.draw_end_session(frame, content, form),
+            Screen::AddNote(form) => self.draw_add_note(frame, content, form),
         }
 
-        // Simple error display: a plain line pinned to the bottom row. This is
-        // the only place errors are rendered — replace this block when the UI
-        // gets a real layout.
-        if let Some(err) = &self.error
-            && area.height > 0
-        {
-            let y = area.y + area.height - 1;
-            frame.render_widget(
-                Paragraph::new(Line::from(format!("ERROR: {err}"))),
-                Rect::new(area.x, y, area.width, 1),
-            );
+        frame.render_widget(self.status_line(), status);
+    }
+
+    /// Top row: name, date, and total time logged today. The total is computed
+    /// from in-memory sessions only — draw runs ~10x/second and must never
+    /// query the db.
+    fn header_line(&self) -> Line<'static> {
+        let date = chrono::Local::now().format("%a %d %b %Y");
+        Line::from(vec![
+            Span::styled("JIARY", theme::TITLE),
+            Span::styled(format!("  {date}"), theme::DIMMED),
+            Span::styled("  ·  ", theme::DIMMED),
+            Span::styled(
+                fmt_hms(self.total_today()),
+                Style::new().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" today", theme::DIMMED),
+        ])
+    }
+
+    /// Total time logged today: completed sessions plus the active session's
+    /// elapsed time (the active one also appears in `today_sessions` without
+    /// an end, so only completed ones are summed there).
+    fn total_today(&self) -> chrono::Duration {
+        let mut total = chrono::Duration::zero();
+        for session in &self.today_sessions {
+            if let Some(end) = session.ended_at {
+                total += end - session.started_at;
+            }
         }
+        if let Some(active) = &self.active_session {
+            total += Utc::now() - active.started_at;
+        }
+        total
+    }
+
+    /// Bottom row: the red error when the last db operation failed, otherwise
+    /// key hints for the current screen. The only place errors and key hints
+    /// are rendered.
+    fn status_line(&self) -> Line<'static> {
+        if let Some(err) = &self.error {
+            return Line::from(Span::styled(format!("✗ {err}"), theme::ERROR));
+        }
+        let hints: &[(&str, &str)] = match &self.screen {
+            Screen::Main => &[
+                ("s", "start"),
+                ("e", "end"),
+                ("n", "note"),
+                ("i", "interrupt"),
+                ("d", "disrupt"),
+                ("r", "resume"),
+                ("q", "quit"),
+            ],
+            Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
+            Screen::EndSession(form) => match form.step {
+                EndStep::Notes => &[("Enter", "continue"), ("Esc", "skip")],
+                EndStep::Focus => &[("1", "bad"), ("2", "ok"), ("3", "good"), ("Enter", "skip")],
+            },
+            Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
+        };
+        let mut spans = Vec::new();
+        for (key, desc) in hints {
+            if !spans.is_empty() {
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(
+                format!("[{key}]"),
+                Style::new().add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(format!(" {desc}"), theme::DIMMED));
+        }
+        Line::from(spans)
     }
 
     fn draw_main(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
@@ -716,8 +790,7 @@ impl App {
         lines.push(Line::from(
             "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [q] quit",
         ));
-        let paragraph = Paragraph::new(lines).block(Block::default().title(" Jiary "));
-        frame.render_widget(paragraph, area);
+        frame.render_widget(Paragraph::new(lines), area);
     }
 
     fn draw_start_session(
@@ -759,9 +832,6 @@ impl App {
                     lines.push(Line::from(format!("  {marker} {s}")));
                 }
 
-                lines.push(Line::from(""));
-                lines.push(Line::from("(Tab accept · Enter confirm · Esc cancel)"));
-
                 let paragraph =
                     Paragraph::new(lines).block(Block::default().title(" Start session "));
                 frame.render_widget(paragraph, area);
@@ -778,9 +848,6 @@ impl App {
                     lines.push(Line::from(format!("  {marker} {s}")));
                 }
 
-                lines.push(Line::from(""));
-                lines.push(Line::from("(Tab accept · Enter confirm · Esc cancel)"));
-
                 let paragraph =
                     Paragraph::new(lines).block(Block::default().title(" Start session "));
                 frame.render_widget(paragraph, area);
@@ -795,16 +862,8 @@ impl App {
         form: &EndSessionForm,
     ) {
         let lines = match &form.step {
-            EndStep::Notes => vec![
-                Line::from(format!("Notes: {}", form.notes)),
-                Line::from(""),
-                Line::from("(Enter continue · Esc skip)"),
-            ],
-            EndStep::Focus => vec![
-                Line::from("Focus:"),
-                Line::from(""),
-                Line::from("(1 bad · 2 ok · 3 good · Enter skip)"),
-            ],
+            EndStep::Notes => vec![Line::from(format!("Notes: {}", form.notes))],
+            EndStep::Focus => vec![Line::from("Focus:")],
         };
         let paragraph = Paragraph::new(lines).block(Block::default().title(" End session "));
         frame.render_widget(paragraph, area);
@@ -838,8 +897,6 @@ impl App {
 
         lines.push(Line::from(""));
         lines.push(Line::from(format!("> {}", form.input)));
-        lines.push(Line::from(""));
-        lines.push(Line::from("(Enter to save, Esc to cancel)"));
 
         let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
         frame.render_widget(paragraph, area);
@@ -853,7 +910,10 @@ fn fmt_duration(
     start: &chrono::DateTime<chrono::Utc>,
     end: &chrono::DateTime<chrono::Utc>,
 ) -> String {
-    let dur = *end - *start;
+    fmt_hms(*end - *start)
+}
+/// "1h 24m" or "9m" — per-session durations and the header total.
+fn fmt_hms(dur: chrono::Duration) -> String {
     let h = dur.num_hours();
     let m = dur.num_minutes() % 60;
     if h > 0 {
