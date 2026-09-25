@@ -21,12 +21,15 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: TUI beautification (item G) in progress — steps 1–2 landed: theme
-  module (`1f204c8`) and header/status layout (`52491b8`); tree green, 16
-  tests. Taste decisions confirmed: cyan accent, rounded borders, centered
-  modals.
-- Next: G step 3 — main screen: active session as bordered panel, today's
-  timeline as styled multi-line List with color-coded focus badges.
+- State: TUI beautification (item G) in progress — steps 1–3 landed: theme
+  module (`1f204c8`), header/status layout (`52491b8`), main screen as
+  bordered active panel + timeline List (`749ea5c`); tree green, 16 tests.
+  Taste decisions confirmed: cyan accent, rounded borders, centered modals.
+- Next: G step 4 — start form: centered fixed-size modal block; `Tabs` for
+  Activity·Project·Task with current step selected; pickers as real `List`s
+  with `highlight_symbol`/`highlight_style`; input lines get the real
+  terminal cursor (`Frame::set_cursor_position`, hidden at startup, shown
+  only on input screens).
 - Blockers / open questions: none.
 
 ## Backlog
