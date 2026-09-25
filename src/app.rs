@@ -1186,6 +1186,7 @@ fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::db::Db;
+    use chrono::TimeZone;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -1378,6 +1379,49 @@ mod tests {
             .to_string()
     }
 
+    /// Column (char count, not byte offset — rows contain multi-byte chars
+    /// like `–` and `·`) of the first occurrence of `needle` in a buffer row.
+    fn col_of(buf: &Buffer, y: u16, needle: &str) -> u16 {
+        let row = line(buf, y);
+        let byte_idx = row.find(needle).unwrap();
+        row[..byte_idx].chars().count() as u16
+    }
+
+    /// A running session that started `elapsed` ago, so the panel's timer is
+    /// deterministic (truncated h/m/s can't shift within the test's runtime).
+    fn running_session(elapsed: chrono::Duration, interruptions: i32) -> Session {
+        Session {
+            id: 1,
+            started_at: Utc::now() - elapsed,
+            ended_at: None,
+            project: Some("alpha".into()),
+            task: Some("beta".into()),
+            activity: "Programming".into(),
+            notes: None,
+            focus: None,
+            interruptions: Some(interruptions),
+        }
+    }
+
+    /// A completed session with a known local-time range.
+    fn finished_session(
+        start: chrono::DateTime<chrono::Local>,
+        end: chrono::DateTime<chrono::Local>,
+        focus: Option<i32>,
+    ) -> Session {
+        Session {
+            id: 1,
+            started_at: start.with_timezone(&Utc),
+            ended_at: Some(end.with_timezone(&Utc)),
+            project: Some("alpha".into()),
+            task: Some("beta".into()),
+            activity: "Programming".into(),
+            notes: None,
+            focus,
+            interruptions: Some(0),
+        }
+    }
+
     // --- chrome: header ---------------------------------------------------
 
     #[test]
@@ -1478,5 +1522,112 @@ mod tests {
         let cell = &buf[(0, RENDER_HEIGHT - 1)];
         assert_eq!(cell.fg, Color::Red);
         assert!(cell.modifier.contains(Modifier::BOLD));
+    }
+
+    // --- main screen ------------------------------------------------------
+
+    #[test]
+    fn main_screen_no_active_shows_centered_dimmed_line() {
+        let t = TestApp::new();
+        let buf = render(&t.app);
+        // 18 chars centered in 80 columns: (80 - 18) / 2 = 31.
+        assert_eq!(
+            line(&buf, 1),
+            format!("{}No active session.", " ".repeat(31))
+        );
+        assert_eq!(buf[(31, 1)].fg, Color::Gray);
+    }
+
+    #[test]
+    fn main_screen_active_panel_has_accent_border_and_title() {
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 0));
+        let buf = render(&t.app);
+        assert_eq!(buf[(0, 1)].symbol(), "╭");
+        assert_eq!(buf[(0, 1)].fg, Color::Cyan);
+        // The title sits on the top border, left-aligned inside it.
+        assert!(line(&buf, 1).starts_with("╭ ACTIVE "));
+        let cell = &buf[(2, 1)];
+        assert_eq!(cell.fg, Color::Cyan);
+        assert!(cell.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn main_screen_active_panel_shows_timer_and_kv_rows() {
+        let mut t = TestApp::new();
+        let elapsed = chrono::Duration::hours(5)
+            + chrono::Duration::minutes(23)
+            + chrono::Duration::seconds(45);
+        t.app.active_session = Some(running_session(elapsed, 0));
+        let buf = render(&t.app);
+        // The panel's inner area starts right at the border (no padding).
+        assert!(line(&buf, 2).starts_with("│05:23:45"));
+        assert!(buf[(1, 2)].modifier.contains(Modifier::BOLD));
+        assert!(line(&buf, 3).starts_with("│Project  alpha"));
+        assert_eq!(buf[(1, 3)].fg, Color::Gray); // dimmed label
+        assert_eq!(buf[(10, 3)].fg, Color::Reset); // plain value
+        assert!(line(&buf, 4).starts_with("│Task  beta"));
+        assert!(line(&buf, 5).starts_with("│Activity  Programming"));
+        assert!(line(&buf, 6).starts_with("│Interruptions  0"));
+    }
+
+    #[test]
+    fn main_screen_active_panel_colors_interruptions_when_positive() {
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 2));
+        let buf = render(&t.app);
+        assert!(line(&buf, 6).starts_with("│Interruptions  2"));
+        let col = col_of(&buf, 6, "2");
+        assert_eq!(buf[(col, 6)].fg, Color::Red);
+    }
+
+    #[test]
+    fn timeline_item_shows_range_duration_and_parts() {
+        let mut t = TestApp::new();
+        let start = chrono::Local
+            .with_ymd_and_hms(2026, 9, 24, 10, 0, 0)
+            .unwrap();
+        let end = chrono::Local
+            .with_ymd_and_hms(2026, 9, 24, 11, 30, 0)
+            .unwrap();
+        t.app
+            .today_sessions
+            .push(finished_session(start, end, None));
+        let buf = render(&t.app);
+        assert_eq!(line(&buf, 2), "TODAY");
+        assert_eq!(line(&buf, 3), "10:00 – 11:30 (1h 30m) F- I:0");
+        assert!(buf[(0, 3)].modifier.contains(Modifier::BOLD)); // time range
+        let dur_col = col_of(&buf, 3, "1h 30m");
+        assert!(buf[(dur_col, 3)].modifier.contains(Modifier::BOLD)); // duration
+        assert_eq!(line(&buf, 4), "alpha · beta · Programming");
+    }
+
+    #[test]
+    fn timeline_focus_badge_uses_semantic_colors() {
+        let mut t = TestApp::new();
+        for focus in [Some(1), Some(2), Some(3), None] {
+            let start = chrono::Local
+                .with_ymd_and_hms(2026, 9, 24, 10, 0, 0)
+                .unwrap();
+            let end = chrono::Local
+                .with_ymd_and_hms(2026, 9, 24, 10, 30, 0)
+                .unwrap();
+            t.app
+                .today_sessions
+                .push(finished_session(start, end, focus));
+        }
+        let buf = render(&t.app);
+        // Items stack three rows apart (range, parts, spacing).
+        let expectations = [
+            ("F1", Color::Red),
+            ("F2", Color::Yellow),
+            ("F3", Color::Green),
+            ("F-", Color::Gray),
+        ];
+        for (i, (badge, color)) in expectations.iter().enumerate() {
+            let y = 3 + 3 * i as u16;
+            let col = col_of(&buf, y, badge);
+            assert_eq!(buf[(col, y)].fg, *color);
+        }
     }
 }
