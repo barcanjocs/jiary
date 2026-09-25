@@ -1,9 +1,7 @@
 mod app;
 mod db;
 mod session;
-// pub (not private) so palette constants aren't dead-code errors while the
-// UI steps land incrementally; tighten to `mod` once everything is used.
-pub mod theme;
+mod theme;
 
 use std::io;
 
@@ -37,11 +35,19 @@ fn run(db: db::Db) -> io::Result<()> {
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    // Hidden at startup; cursor_position() says where the cursor belongs each
+    // frame (only the start form's input steps show it).
+    terminal.hide_cursor()?;
 
     let mut app = app::App::new(db);
 
     loop {
         terminal.draw(|frame| app.draw(frame))?;
+        // The cursor is only visible on the start form's input steps.
+        match app.cursor_position(terminal.size()?.into()) {
+            Some(pos) => terminal.set_cursor_position(pos)?,
+            None => terminal.hide_cursor()?,
+        }
 
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?

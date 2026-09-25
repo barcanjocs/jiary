@@ -24,6 +24,11 @@ pub const TITLE: Style = Style::new().fg(ACCENT).add_modifier(Modifier::BOLD);
 pub const DIMMED: Style = Style::new().fg(MUTED);
 /// Bold red — the error line.
 pub const ERROR: Style = Style::new().fg(BAD).add_modifier(Modifier::BOLD);
+/// Highlight symbol for selected items in picker `List`s: a bold accent `>`.
+pub fn picker_symbol() -> Span<'static> {
+    Span::styled(">", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))
+}
+pub const PICKER_HIGHLIGHT: Style = Style::new().fg(ACCENT);
 
 /// A "label: value" line with a dimmed label and plain value.
 pub fn kv(label: &str, value: impl Into<String>) -> Line<'static> {

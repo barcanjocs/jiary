@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Tabs};
 
 use crate::db::Db;
 use crate::session::Session;
@@ -617,6 +617,35 @@ impl App {
         frame.render_widget(self.status_line(), status);
     }
 
+    /// Terminal cursor position for the current screen: `Some` only on the
+    /// start form's input steps (project/task), where it sits right after the
+    /// typed text. Pure function of the terminal size and form state —
+    /// `Terminal::draw` discards closure return values, so main.rs calls this
+    /// after drawing to show or hide the cursor.
+    pub fn cursor_position(&self, size: (u16, u16)) -> Option<(u16, u16)> {
+        let (form, step) = match &self.screen {
+            Screen::StartSession(form) => (form, form.step),
+            _ => return None,
+        };
+        let (_, _, body_area) =
+            start_modal_layout(ratatui::layout::Rect::new(0, 0, size.0, size.1));
+        let [input_area, _] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
+        match step {
+            Step::Project => Some(input_cursor(
+                input_area,
+                "Project".len() + 2,
+                form.project_input.len(),
+            )),
+            Step::Task => Some(input_cursor(
+                input_area,
+                "Task".len() + 2,
+                form.task_input.len(),
+            )),
+            Step::Activity => None,
+        }
+    }
+
     /// Top row: name, date, and total time logged today. The total is computed
     /// from in-memory sessions only — draw runs ~10x/second and must never
     /// query the db.
@@ -876,64 +905,88 @@ impl App {
         lines
     }
 
+    /// The start form is a centered fixed-size modal: a `Tabs` row for
+    /// Activity·Project·Task with the current step selected, then the step's
+    /// content (a picker `List`, or an input line plus suggestion `List`).
     fn draw_start_session(
         &self,
         frame: &mut Frame,
         area: ratatui::layout::Rect,
         form: &StartSessionForm,
     ) {
-        match &form.step {
-            Step::Activity => {
-                let items: Vec<ListItem> = ACTIVITIES
-                    .iter()
-                    .enumerate()
-                    .map(|(i, a)| {
-                        let marker = if i == form.activity_index { ">" } else { " " };
-                        ListItem::new(format!("{} {} {}", i + 1, marker, a))
-                    })
-                    .collect();
+        let (modal, tabs_area, body_area) = start_modal_layout(area);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(Line::from(Span::styled(" Start session ", theme::TITLE)));
+        frame.render_widget(block, modal);
 
-                let list = List::new(items).block(Block::default().title(format!(
-                    " Activity (↑↓ or 1-{}, Enter, Esc) ",
-                    ACTIVITIES.len()
-                )));
-                frame.render_widget(list, area);
+        let step_index = match form.step {
+            Step::Activity => 0,
+            Step::Project => 1,
+            Step::Task => 2,
+        };
+        frame.render_widget(
+            Tabs::new(["Activity", "Project", "Task"])
+                .select(step_index)
+                .highlight_style(Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            tabs_area,
+        );
+
+        match form.step {
+            Step::Activity => {
+                let items = ACTIVITIES
+                    .iter()
+                    .map(|a| ListItem::new(*a))
+                    .collect::<Vec<_>>();
+                frame.render_stateful_widget(
+                    picker_list(items),
+                    body_area,
+                    &mut ListState::default().with_selected(Some(form.activity_index)),
+                );
             }
             Step::Project => {
+                let [input_area, list_area] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
+
+                frame.render_widget(
+                    Paragraph::new(theme::kv("Project", form.project_input.clone())),
+                    input_area,
+                );
+
                 let suggestions = fuzzy_filter(&form.project_query, &self.projects);
-                let mut lines = vec![
-                    Line::from(format!("Project: {}", form.project_input)),
-                    Line::from(""),
-                ];
-
-                for (i, s) in suggestions.iter().enumerate() {
-                    let marker = if i == form.project_selection {
-                        ">"
-                    } else {
-                        " "
-                    };
-                    lines.push(Line::from(format!("  {marker} {s}")));
+                if !suggestions.is_empty() {
+                    let items = suggestions
+                        .iter()
+                        .map(|s| ListItem::new(s.clone()))
+                        .collect::<Vec<_>>();
+                    frame.render_stateful_widget(
+                        picker_list(items),
+                        list_area,
+                        &mut ListState::default().with_selected(Some(form.project_selection)),
+                    );
                 }
-
-                let paragraph =
-                    Paragraph::new(lines).block(Block::default().title(" Start session "));
-                frame.render_widget(paragraph, area);
             }
             Step::Task => {
+                let [input_area, list_area] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
+
+                frame.render_widget(
+                    Paragraph::new(theme::kv("Task", form.task_input.clone())),
+                    input_area,
+                );
+
                 let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
-                let mut lines = vec![
-                    Line::from(format!("Task: {}", form.task_input)),
-                    Line::from(""),
-                ];
-
-                for (i, s) in suggestions.iter().enumerate() {
-                    let marker = if i == form.task_selection { ">" } else { " " };
-                    lines.push(Line::from(format!("  {marker} {s}")));
+                if !suggestions.is_empty() {
+                    let items = suggestions
+                        .iter()
+                        .map(|s| ListItem::new(s.clone()))
+                        .collect::<Vec<_>>();
+                    frame.render_stateful_widget(
+                        picker_list(items),
+                        list_area,
+                        &mut ListState::default().with_selected(Some(form.task_selection)),
+                    );
                 }
-
-                let paragraph =
-                    Paragraph::new(lines).block(Block::default().title(" Start session "));
-                frame.render_widget(paragraph, area);
             }
         }
     }
@@ -984,6 +1037,59 @@ impl App {
         let paragraph = Paragraph::new(lines).block(Block::default().title(" Add note "));
         frame.render_widget(paragraph, area);
     }
+}
+
+/// Fixed size of the start-session modal; centered in the content area and
+/// shrunk to fit on tiny terminals (see `centered_rect`).
+const MODAL_WIDTH: u16 = 40;
+const MODAL_HEIGHT: u16 = 12;
+
+/// A picker `List` with the accent highlight symbol and style.
+fn picker_list<'a>(items: Vec<ListItem<'a>>) -> List<'a> {
+    List::new(items)
+        .highlight_symbol(theme::picker_symbol())
+        .highlight_style(theme::PICKER_HIGHLIGHT)
+}
+
+/// A fixed-size rect centered in `area`, shrunk to fit when the area is too
+/// small so tiny terminals don't break the layout.
+fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height) / 2);
+    ratatui::layout::Rect::new(x, y, width.min(area.width), height.min(area.height))
+}
+
+/// Layout of the start-session modal: (modal rect, tabs row, body). Shared by
+/// the renderer and `cursor_position` so the two can never disagree.
+fn start_modal_layout(
+    content: ratatui::layout::Rect,
+) -> (
+    ratatui::layout::Rect,
+    ratatui::layout::Rect,
+    ratatui::layout::Rect,
+) {
+    let modal = centered_rect(MODAL_WIDTH, MODAL_HEIGHT, content);
+    // One column of padding between the border and the content.
+    let inner = Block::bordered().inner(modal);
+    let padded = ratatui::layout::Rect::new(
+        inner.x.saturating_add(1),
+        inner.y,
+        inner.width.saturating_sub(2),
+        inner.height,
+    );
+    let [tabs_area, body_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(padded);
+    (modal, tabs_area, body_area)
+}
+
+/// Cursor position for an input line rendered as `prefix + text`: right after
+/// the visible text, clamped to the last column so it stays on the line when
+/// the text overflows (Paragraph truncates rather than wraps).
+fn input_cursor(area: ratatui::layout::Rect, prefix_len: usize, text_len: usize) -> (u16, u16) {
+    let col = (prefix_len + text_len).min(area.width.saturating_sub(1) as usize);
+    (area.x + col as u16, area.y)
 }
 
 fn fmt_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
