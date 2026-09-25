@@ -21,23 +21,21 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: TUI beautification (item G) in progress — steps 1–5 landed: theme
-  module (`1f204c8`), header/status layout (`52491b8`), main screen as
-  bordered active panel + timeline List (`749ea5c`), start form as centered
-  40×12 modal with `Tabs` + picker `List`s + real terminal cursor on input
-  steps (`fdb334d`), end + note forms as centered 40×6 modals with `Tabs`
-  (Notes·Focus) / dimmed context line, colored `[1] Bad [2] OK [3] Good`
-  focus line, and cursor on their input lines (`72a1b37`); tree green, 16
-  tests. Taste decisions confirmed: cyan accent, rounded borders, centered
-  modals.
-  Cursor note: `Terminal::draw` discards closure returns and this ratatui
-  (0.30) has no `Frame::hide_cursor`, so `App::cursor_position(size)` is a
-  pure fn shared with the renderers via `modal_layout`/`start_modal_layout`;
-  main.rs shows/hides the terminal cursor each frame from it.
-- Next: G step 6a — render-test harness + chrome tests: a `TestBackend`
-  helper in app.rs's tests (draw into a fixed-size terminal, assert buffer
-  lines) covering the header row, per-screen status-line hints, and the red
-  error row.
+- State: G (TUI beautification) fully landed. Steps 1–5 as before; step 6
+  render tests in three commits: harness + chrome (`d2cca27`), main screen
+  (`2411c69`), forms (`5031e1a`) — a `TestBackend` draw-and-assert helper at
+  80×24 plus `line`/`line_from`/`col_of` row extractors (char-based, rows
+  contain multi-byte `│–·`). Cursor bug found via pty run and fixed
+  (`7349d6a`): ratatui's `set_cursor_position` moves but does not show the
+  cursor, so main.rs now calls `show_cursor()` on input screens; the
+  `cursor_position` math is pinned by a unit test. Tree green, 37 tests.
+  Render-test gotchas worth remembering: Tabs default divider is box-drawing
+  `│` with space padding; List content always sits one column right of the
+  highlight symbol (`>alpine`, no space); form modal borders are default
+  color (only titles carry the accent — the main panel's accent border is
+  unique to it); panels render inner text at the border with no padding.
+- Next: user had further changes in mind ("firstly" the cursor) — ask what
+  remains; otherwise continue with backlog item C (free-text activities).
 - Blockers / open questions: none.
 
 ## Backlog
@@ -45,47 +43,11 @@ truth for state — this file plus `git log` is all that is needed to resume.
 Ranked by value-per-effort as of 2026-09-23. Each item should be startable
 from its scope note alone, without re-deriving context.
 
-- [ ] **G. TUI beautification** (medium, chosen next). The UI is one
-      full-area Paragraph per screen with manual `>` markers and no colors.
-      Plan, in order of small commits (each keeps `./check` green):
-      1. `src/theme.rs` — palette (16 named colors only: cyan accent,
-         gray/dimmed secondary, green/yellow/red semantics) + style helpers
-         (title, dimmed label/value line builder).
-      2. `draw()` layout skeleton — `Layout::vertical`: header row (name bold,
-         date, today's total time computed from in-memory sessions), content,
-         bottom status line showing either the red error (`✗ …`) or key hints
-         for the current screen (bold keys, dimmed descriptions); inline hint
-         lines removed from forms since the status line is their single home.
-      3. Main screen — active session as rounded bordered panel (accent
-         border/title, bold timer, interruptions colored when >0, notes as
-         dimmed bullets); no-active state centered and dimmed; today's
-         timeline as multi-line `List` (one item per session: bold time range
-         + duration, focus badge F1 red / F2 yellow / F3 green, project·task
-         bright, notes dimmed).
-      4. Start form — centered fixed-size modal block; `Tabs` for
-         Activity·Project·Task with current step selected; activity picker and
-         suggestions as real `List`s with `highlight_symbol`/`highlight_style`
-         (temp per-frame `ListState` built from the existing index fields);
-         input lines get the real terminal cursor (`Frame::set_cursor_position`,
-         explicit `hide_cursor` at startup, shown only on input screens).
-      5. End + note forms — same modal/tabs/cursor treatment; focus step as a
-         colored `[1] Bad [2] OK [3] Good` line.
-      6. Render tests via ratatui `TestBackend` (no feature gate, has
-         `assert_buffer_lines`), split into three commits:
-         a. Harness + chrome — a draw-and-assert helper in app.rs's tests;
-            tests for the header row (name/date/today total), the status
-            line's per-screen key hints, and the red error row replacing
-            them.
-         b. Main screen — active-session panel (accent border/title, timer,
-            kv rows) vs the centered dimmed no-active line; a timeline item's
-            shape (time range + duration, focus badge colors).
-         c. Forms — start/end/note modals: border + title, `Tabs` selected
-            step per form state, picker `>` highlight at the stored selection
-            index, input line text.
-      Constraints: no new deps; no db queries from draw; follow existing
-      borrow patterns; README unchanged (keys don't change). Open taste
-      decisions (defaults in parens): cyan accent (vs green), rounded borders
-      (vs double), centered modal dialogs (vs full-screen).
+- [x] **G. TUI beautification** — done 2026-09-25: theme module, header/
+      status chrome, main panel + timeline, start/end/note modals with tabs,
+      pickers and terminal cursor on input lines, plus the full render-test
+      suite (harness/chrome/main/forms). Taste decisions landed: cyan accent,
+      rounded borders, centered modals. See git log `1f204c8..7349d6a`.
 - [ ] **C. Free-text activities** (small). Activities are a hardcoded list of
       7 (`ACTIVITIES` in app.rs); anything that doesn't fit forces "Other".
       Make the activity step work like project/task: fuzzy autocomplete seeded
