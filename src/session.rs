@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 
-#[derive(Debug)]
 pub struct Session {
     pub id: i64,
     pub started_at: DateTime<Utc>,

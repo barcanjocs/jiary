@@ -6,8 +6,7 @@ use ratatui::widgets::{Block, List, ListItem, Paragraph};
 use crate::db::Db;
 use crate::session::Session;
 use crossterm::event::KeyCode;
-use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 
 const ACTIVITIES: &[&str] = &[
     "Programming",
