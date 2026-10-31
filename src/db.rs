@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Row, params};
 
 use crate::session::Session;
 
@@ -64,6 +64,11 @@ BEGIN
 END;
 ";
 
+/// Columns read into a [`SessionRow`], in the order [`read_session_row`]
+/// expects.
+const SESSION_COLUMNS: &str =
+    "id, started_at, ended_at, project, task, activity, notes, focus, interruptions";
+
 impl Db {
     pub fn open() -> Result<Self, DbError> {
         let dir = data_dir().ok_or(DbError::NoDataDir)?;
@@ -100,23 +105,12 @@ impl Db {
         let result = self.conn.query_row(
             // ORDER BY + LIMIT: if duplicate active rows exist (legacy data or
             // external edits), deterministically pick the most recent one.
-            "SELECT id, started_at, ended_at, project, task, activity, notes, focus, interruptions
-             FROM sessions WHERE ended_at IS NULL
-             ORDER BY started_at DESC LIMIT 1",
+            &format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions WHERE ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1"
+            ),
             [],
-            |row| {
-                Ok(SessionRow {
-                    id: row.get(0)?,
-                    started_at: row.get(1)?,
-                    ended_at: row.get(2)?,
-                    project: row.get(3)?,
-                    task: row.get(4)?,
-                    activity: row.get(5)?,
-                    notes: row.get(6)?,
-                    focus: row.get(7)?,
-                    interruptions: row.get(8)?,
-                })
-            },
+            read_session_row,
         );
 
         match result {
@@ -141,27 +135,14 @@ impl Db {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT id, started_at, ended_at, project, task, activity, notes, focus, interruptions
-                 FROM sessions
+            .prepare(&format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions
                  WHERE date(started_at, 'localtime') = ?1
-                 ORDER BY started_at DESC",
-            )
+                 ORDER BY started_at DESC"
+            ))
             .map_err(DbError::Sqlite)?;
         let rows = stmt
-            .query_map(params![today], |row| {
-                Ok(SessionRow {
-                    id: row.get(0)?,
-                    started_at: row.get(1)?,
-                    ended_at: row.get(2)?,
-                    project: row.get(3)?,
-                    task: row.get(4)?,
-                    activity: row.get(5)?,
-                    notes: row.get(6)?,
-                    focus: row.get(7)?,
-                    interruptions: row.get(8)?,
-                })
-            })
+            .query_map(params![today], read_session_row)
             .map_err(DbError::Sqlite)?;
         let rows = rows
             .collect::<Result<Vec<_>, _>>()
@@ -275,6 +256,21 @@ struct SessionRow {
     notes: Option<String>,
     focus: Option<i32>,
     interruptions: Option<i32>,
+}
+
+/// Reads a row selected with [`SESSION_COLUMNS`].
+fn read_session_row(row: &Row) -> rusqlite::Result<SessionRow> {
+    Ok(SessionRow {
+        id: row.get(0)?,
+        started_at: row.get(1)?,
+        ended_at: row.get(2)?,
+        project: row.get(3)?,
+        task: row.get(4)?,
+        activity: row.get(5)?,
+        notes: row.get(6)?,
+        focus: row.get(7)?,
+        interruptions: row.get(8)?,
+    })
 }
 
 fn row_to_session(row: SessionRow) -> Result<Session, DbError> {
