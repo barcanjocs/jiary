@@ -60,7 +60,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 - **`captions.rs`** — the sentences shown under the cat, one list per
   `Mood` plus optional per-activity lists for work sessions, and
   `caption(mood, activity, seed)` to pick one. Adding a caption means adding
-  a sentence to a list.
+  a sentence to a list. Two fixed lines take over for a moment: `FLINCH`
+  ("oups!") while the cat flinches at `i`, after which `resample_caption`
+  picks a different sentence, and `RATING` during the rating window.
 - **`idle.rs`** — `system_idle()`: time since the last keyboard or mouse
   input system-wide, from `ioreg -c IOHIDSystem` on macOS or `xprintidle` on
   Linux, `None` elsewhere or when the tool fails.

@@ -702,6 +702,7 @@ impl App {
                                 session.interruptions =
                                     Some(session.interruptions.unwrap_or(0) + 1);
                             }
+                            self.resample_caption();
                             self.react(Reaction::Flinch);
                         }
                     }
@@ -1518,11 +1519,26 @@ impl App {
     /// The caption under the cat for the current mood and session
     /// activity, if its list has any.
     fn caption(&self) -> Option<&'static str> {
+        if matches!(self.current_reaction(), Some((Reaction::Flinch, _))) {
+            return Some(captions::FLINCH);
+        }
         if self.rating_open() {
             return Some(captions::RATING);
         }
         let activity = self.active_session.as_ref().map(|s| s.activity.as_str());
         captions::caption(self.mood(), activity, self.caption_seed)
+    }
+
+    /// Picks another sentence for the caption: a different one when the
+    /// list has more than one (a few tries; seeds come from the clock).
+    fn resample_caption(&mut self) {
+        let before = self.caption();
+        for _ in 0..8 {
+            self.caption_seed = fresh_seed();
+            if self.caption() != before {
+                break;
+            }
+        }
     }
 
     /// Starts a one-off reaction, replacing any still playing.
@@ -3412,6 +3428,22 @@ mod tests {
                 row.trim().to_string()
             })
             .collect()
+    }
+
+    #[test]
+    fn an_interruption_says_oups_then_picks_another_sentence() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.app.caption_seed = 0;
+        let before = t.app.caption().unwrap();
+        t.key(KeyCode::Char('i'));
+        assert_eq!(caption_rows(&render(&t.app)), ["oups!", ""]);
+
+        // Once the flinch is over, a different sentence from the list.
+        t.app.reaction = None;
+        let after = t.app.caption().unwrap();
+        assert_ne!(after, before);
+        assert_eq!(caption_rows(&render(&t.app)).join(" ").trim(), after);
     }
 
     #[test]

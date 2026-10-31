@@ -32,6 +32,10 @@ const MEETING: &[&str] = &["teams, am I right?"];
 /// A disruption.
 const GAMING: &[&str] = &["probably footabling with Jimmy"];
 
+/// While the cat flinches at an interruption (`i`); a new sentence from
+/// the mood's list follows.
+pub const FLINCH: &str = "oups!";
+
 /// While the session that just ended can be rated (a few seconds), the cat
 /// asks for it instead.
 pub const RATING: &str = "how was your focus?";
