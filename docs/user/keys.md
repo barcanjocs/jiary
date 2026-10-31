@@ -45,6 +45,17 @@ See [The main screen](main-screen.md), which also covers the mouse.
 | `Enter` | Confirm the step (an empty project or task skips it) |
 | `Esc` | Close the form |
 
+## Renaming (`/rename`)
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` / `Tab` | Pick activity, project or task (first step) |
+| `Tab` / `↓`, `↑` | Pick a suggestion (other steps) |
+| `Enter` | Next step, then apply |
+| `Esc` | Cancel; nothing is written before the last `Enter` |
+
+See [Renaming and merging names](recording.md#renaming-and-merging-names).
+
 ## Back from an absence
 
 | Key | Action |

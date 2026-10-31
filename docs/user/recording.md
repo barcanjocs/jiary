@@ -101,6 +101,36 @@ followed by a break (`m`, then `b`) still resumes your work. A meeting you
 start with `s` is a detour too, so `r` never resumes into a meeting.
 Pressing a detour's key during that same detour does nothing.
 
+## Renaming and merging names
+
+Activities, projects and tasks are whatever you typed, so a typo
+("Progamming") keeps being suggested for as long as a session uses it.
+`/rename` fixes that everywhere at once:
+
+1. **What**: pick Activity, Project or Task.
+2. **Project** (tasks only): the project the task belongs to. Leave it
+   blank for tasks without a project. Task names repeat across projects,
+   so a task is only renamed within one.
+3. **From**: the name to change, picked from the names in use.
+4. **To**: the new name. Pick a name already in use to **merge** the two,
+   or type a new one.
+
+Jiary then asks before writing anything, with the numbers:
+`Rename "jiry" to "jiary" in 2 sessions?`, or
+`Merge "Progamming" into "Programming" (3 sessions; it has 41)?`. `Enter`
+applies it and `Esc` cancels; there's no undo afterwards.
+
+Your sessions keep their times and notes; only the name changes, the
+running session's included, and the old name stops being suggested. A
+few things to know:
+
+- Disruption, Break and Meeting can't be renamed, and nothing can be
+  renamed to them: Jiary recognizes detours by those names.
+- The new name can't be blank. Changing only its case ("programming" to
+  "Programming") works.
+- Notes aren't changed, even if they mention the old name.
+- Merged projects keep the color of whichever was used first.
+
 ## Fixing the times
 
 **Started late?** `[` moves the running session's start 5 minutes earlier,

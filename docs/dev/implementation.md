@@ -88,8 +88,8 @@ next frame shows the result. No event bus, no async, no shared state:
   - `mod.rs`: `App`, `Screen`, the session lifecycle, and the `handle_key` /
     `draw` dispatch on `Screen`.
   - One file per screen: `main_screen.rs`, `forms.rs` (start and note
-    forms, `Autocomplete`, `fuzzy_filter`), `palette.rs`, `period_view.rs`,
-    `away.rs`, `help.rs`.
+    forms, `Autocomplete`, `fuzzy_filter`), `rename.rs`, `palette.rs`,
+    `period_view.rs`, `away.rs`, `help.rs`.
   - Shared pieces: `sections.rs` (main-screen geometry, scrolling, mouse),
     `chrome.rs` (header, status line, cursor), `cat.rs` (mood, reactions,
     caption), `modal.rs` (modal geometry, `WrappedInput`, picker list),
@@ -122,7 +122,8 @@ CREATE TABLE sessions (
 No other tables, by design: projects, tasks and activities are free-text
 labels, not managed objects, and their "lists" are queries over history
 (`distinct_projects`, `tasks_for_project`, `recent_activities`,
-`projects_by_first_use`, `recent_combos`). The schema, with the trigger
+`projects_by_first_use`, `recent_combos`), and renaming one rewrites the
+rows that use it (`rename_label`). The schema, with the trigger
 below, is one `SCHEMA` string run on every open (`CREATE ... IF NOT
 EXISTS`), so opening an old db also brings it up to date.
 
@@ -215,6 +216,7 @@ enum Screen {
     AddNote(AddNoteForm),
     Palette(PaletteForm),
     Period(PeriodView),
+    Rename(Box<RenameForm>),             // boxed too
     Away(DateTime<Utc>),                 // back from an absence: since when
 }
 ```
@@ -278,6 +280,34 @@ other keys on.
 One wrapped input. Enter appends the note (when not blank) and returns to
 Main; Esc discards it.
 
+### Rename form
+
+`/rename` (`rename.rs`) opens `Screen::Rename(Box<RenameForm>)`, built on
+the start form's pieces: the same modal layout, `Autocomplete` fields and
+`draw_suggestions`, with tabs What · From · To (and Project before From
+for tasks). `RenameStep` runs What → (Project →) From → To → Confirm:
+
+- **What** picks a `db::Label` from `KINDS` with ↑↓ / Tab.
+- **Project** (tasks only): task names repeat across projects, so a task is
+  renamed within one. Blank means no project; NULL and `""` are one group
+  in the db (`IFNULL(project, '')`).
+- **From** takes only a name in use (`Autocomplete::offers`); **To** any
+  non-blank name other than From. Candidates come from the db at each step
+  (`labels_in_use`), with the detour activities left out.
+- **Confirm** shows the counts (`db.count_label` for both names: a new
+  name in use means a merge) before anything is written; Enter runs
+  `db.rename_label`, one `UPDATE`. There is no undo, by design: the
+  confirmation is the safety, and `u` keeps meaning the last start or end.
+
+A refused Enter sets `notice`, shown in red in place of the list until the
+next key: a name not in use, a blank or unchanged new name, or a detour
+activity on either side. Detours are recognized by name (`is_detour`), so
+renaming one, or renaming to one, would change what counts as a break,
+disruption or meeting. After a rename `apply_rename` reloads everything
+`draw` reads: the active session, today, the suggestions and project
+order, the previous notes. Merged projects keep the earlier first use, so
+colors can shift. Notes aren't touched.
+
 ### Command palette
 
 `/` opens `Screen::Palette`; its input starts as the `/` itself, so
@@ -288,7 +318,7 @@ name, a description and its `Action`:
   returns to Main and calls `handle_main` with that key, so a command can't
   drift from its key, and one can quit.
 - `Action::View`: a view with no key of its own (`/weekly`, `/monthly`,
-  `/yearly`), listed first.
+  `/yearly`), listed first; `Action::Rename` opens the rename form.
 
 `palette_matches` filters by fuzzy score on the name (everything, in order,
 for an empty query; ties keep the order). The modal reuses the start form's
@@ -520,14 +550,14 @@ failures go to the error line and the in-memory layout carries on.
 
 ### Modals and inputs
 
-The start form, the note form, the palette and the away question are
-centered modals, `MODAL_WIDTH` (40) wide:
+The start form, the note form, the rename form, the palette and the away
+question are centered modals, `MODAL_WIDTH` (40) wide:
 
 - `centered_rect` centers a size in the content area and shrinks it to fit
   tiny terminals. `modal_layout` gives the modal and its inner area (the
   border plus a column of padding each side).
 - `start_modal_layout(content, input_rows)` (tabs, input, list;
-  `START_MODAL_HEIGHT` 12, also the palette's) and
+  `START_MODAL_HEIGHT` 12, also the palette's and the rename form's) and
   `small_modal_layout(content, body_rows)` (a context row, then the body;
   `SMALL_MODAL_HEIGHT` 6) grow by a row for each input row past the first.
   The renderers and `cursor_position` share them, so they can't disagree

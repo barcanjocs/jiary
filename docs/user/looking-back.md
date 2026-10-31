@@ -10,8 +10,9 @@ what it does and its key.
 - `Esc` (or Backspace past the `/`) closes the palette.
 
 A command does exactly what its key does, so the palette is also a way to
-learn the keys. It's also how you open the longer views, which have no key
-of their own.
+learn the keys. It's also how you open what has no key of its own: the
+longer views below, and `/rename` (see
+[Renaming and merging names](recording.md#renaming-and-merging-names)).
 
 ## Weeks and months
 

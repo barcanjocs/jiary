@@ -3,7 +3,8 @@
 The [README](../../README.md) gets you started. This manual covers the rest.
 
 - [Recording your day](recording.md): starting and ending sessions,
-  rating focus, notes, interruptions, detours, undo, and fixing the times.
+  rating focus, notes, interruptions, detours, undo, renaming names, and
+  fixing the times.
 - [The main screen](main-screen.md): its three sections, the cat, colors,
   resizing and the mouse.
 - [Looking back](looking-back.md): the command palette, and the week, month
