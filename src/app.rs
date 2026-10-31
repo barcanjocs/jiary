@@ -790,9 +790,11 @@ impl App {
         // Cached; refreshed whenever the active session changes.
         if !self.previous_notes.is_empty() {
             lines.push(Line::from(Span::styled("Previous notes:", theme::DIMMED)));
-            for note in &self.previous_notes {
+            // Each entry is one session's notes: newline-separated, one
+            // bullet per line.
+            for line in self.previous_notes.iter().flat_map(|notes| notes.lines()) {
                 lines.push(Line::from(Span::styled(
-                    format!("  • {note}"),
+                    format!("  • {line}"),
                     theme::DIMMED,
                 )));
             }
@@ -1651,6 +1653,30 @@ mod tests {
         assert!(line(&buf, 6).starts_with("│Interruptions  2"));
         let col = col_of(&buf, 6, "2");
         assert_eq!(buf[(col, 6)].fg, Color::Red);
+    }
+
+    #[test]
+    fn previous_notes_render_one_bullet_per_line() {
+        let mut t = TestApp::new();
+        let start = |t: &mut TestApp| {
+            t.app
+                .start_session("Reading", Some("alpha".into()), Some("beta".into()));
+            t.app.refresh_after_session_change();
+        };
+        start(&mut t);
+        t.app.append_active_note("first");
+        t.app.append_active_note("second");
+        t.app.complete_active(None);
+        start(&mut t);
+
+        let buf = render(&t.app);
+        let rows: Vec<String> = (0..RENDER_HEIGHT).map(|y| line(&buf, y)).collect();
+        let at = rows
+            .iter()
+            .position(|r| r.starts_with("│Previous notes:"))
+            .expect("previous notes shown");
+        assert!(rows[at + 1].starts_with("│  • first"));
+        assert!(rows[at + 2].starts_with("│  • second"));
     }
 
     #[test]
