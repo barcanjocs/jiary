@@ -1,3 +1,4 @@
+use super::cat::{DROWSY_AFTER_MINUTES, caption_lines, fresh_seed};
 use super::forms::{AddNoteForm, Autocomplete, StartSessionForm, Step, fuzzy_filter};
 use super::graphs::{
     focus_grid, focus_legend, focus_row, half_cells, hour_labels, item_width, share_row,
@@ -10,6 +11,7 @@ use super::text::{fmt_time, wrap_text};
 use super::*;
 use crate::db::Db;
 use crate::idle;
+use crate::mascot::Mood;
 use crate::period::Period;
 use chrono::TimeZone;
 use ratatui::Terminal;
