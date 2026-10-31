@@ -8,7 +8,7 @@
 //!
 //! The main screen's day is laid out backwards from now, so run it during
 //! the day (its first session starts six hours ago and must fall on
-//! today's date). The longer views get about 400 days of history before
+//! today's date). The longer views get about two years of history before
 //! today, from a fixed seed.
 
 use std::fmt::Write;
@@ -179,13 +179,12 @@ fn screenshots_of_the_longer_views() {
     let db = Db::open_at(&dir.join("jiary.db")).unwrap();
     let mut app = App::new(db, None);
 
-    // Complete periods look best: last week and last month, and this year
-    // once it is half gone.
-    let year = if Local::now().month() >= 7 { 0 } else { -1 };
+    // Complete periods look best: last week, last month and last year
+    // (this year's grid would end at today).
     for (period, offset, name) in [
         (Period::Week, -1, "weekly"),
         (Period::Month, -1, "monthly"),
-        (Period::Year, year, "yearly"),
+        (Period::Year, -1, "yearly"),
     ] {
         // Tall enough to show the whole view without scrolling.
         app.set_size((WIDTH, HEIGHT));
@@ -264,7 +263,7 @@ const PROJECTS: &[(&str, u32, u32, &[&str])] = &[
     ("infra", 9, 12, &["backups", "ci"]),
 ];
 
-/// Writes about 400 days of made-up work days before today straight into
+/// Writes about two years of made-up work days before today straight into
 /// the db file, in one transaction (thousands of single inserts would take
 /// a while).
 fn write_history(path: &std::path::Path) {
@@ -272,7 +271,7 @@ fn write_history(path: &std::path::Path) {
     let tx = conn.transaction().unwrap();
     let mut rng = Rng(0x5eed_1234_abcd_9876);
     let today = Local::now().date_naive();
-    let mut day = today - Duration::days(400);
+    let mut day = today - Duration::days(800);
     while day < today {
         for s in work_day(&mut rng, day) {
             tx.execute(
@@ -526,17 +525,30 @@ fn to_svg(buf: &Buffer) -> String {
         let mut run = String::new();
         let mut run_start = 0;
         let mut run_style = String::new();
+        // Each word on its own, at its own column: viewers may collapse
+        // runs of spaces, which would pull the words of a run out of place.
         let flush = |out: &mut String, run: &mut String, start: u16, style: &str| {
-            if !run.trim().is_empty() {
-                let len = run.chars().count() as f64 * CELL_W;
+            let chars = run.chars().collect::<Vec<_>>();
+            let mut i = 0;
+            while i < chars.len() {
+                if chars[i] == ' ' {
+                    i += 1;
+                    continue;
+                }
+                let end = (i..chars.len())
+                    .find(|&j| chars[j] == ' ')
+                    .unwrap_or(chars.len());
+                let word = chars[i..end].iter().collect::<String>();
                 writeln!(
                     out,
-                    r#"<text x="{}" y="{}" textLength="{len}" lengthAdjust="spacingAndGlyphs" xml:space="preserve"{style}>{}</text>"#,
-                    PAD + start as f64 * CELL_W,
+                    r#"<text x="{}" y="{}" textLength="{}" lengthAdjust="spacingAndGlyphs"{style}>{}</text>"#,
+                    PAD + (start as usize + i) as f64 * CELL_W,
                     top + CELL_H * 0.74,
-                    escape(run)
+                    (end - i) as f64 * CELL_W,
+                    escape(&word)
                 )
                 .unwrap();
+                i = end;
             }
             run.clear();
         };

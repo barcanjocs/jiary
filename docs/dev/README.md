@@ -40,9 +40,9 @@ never touch the real data directory: each opens its own throwaway database.
 The pictures in `docs/images/` are drawn by the real UI code: ignored tests
 (`src/app/screenshot.rs`) fill throwaway databases with made-up data, render
 a screen into a test buffer and write the buffer out as an SVG. The main
-screen gets a made-up day; the week, month and year views get about 400 days
-of history from a fixed seed, so they come out the same every run (bar the
-dates). Regenerate them after changing how these screens look:
+screen gets a made-up day; the week, month and year views get about two
+years of history from a fixed seed and show last week, last month and last
+year, so they're complete and come out the same every run (bar the dates). Regenerate them after changing how these screens look:
 
 ```sh
 cargo test screenshot -- --ignored

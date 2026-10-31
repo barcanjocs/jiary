@@ -710,11 +710,12 @@ colors, and keep 80×24: wide enough for every status line, tall enough that
 the chrome never overlaps content.
 
 **The docs' pictures.** `app/screenshot.rs` holds ignored tests that fill
-a throwaway db (a made-up day, or about 400 days of seeded history written
-in one transaction), draw a screen into a `TestBackend` and write the
-buffer to `docs/images/*.svg`: block and box-drawing characters become
-shapes, text runs are stretched to exact column widths, and the 16 named
-colors use a fixed dark palette. `cargo test screenshot -- --ignored`
+a throwaway db (a made-up day, or about two years of seeded history
+written in one transaction), draw a screen into a `TestBackend` and write
+the buffer to `docs/images/*.svg`: block and box-drawing characters become
+shapes, each word is its own `<text>` at its column, stretched to its exact
+width (viewers may collapse runs of spaces, so the gaps can't be spaces),
+and the 16 named colors use a fixed dark palette. `cargo test screenshot -- --ignored`
 regenerates them.
 
 ## Design decisions
