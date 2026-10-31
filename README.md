@@ -40,7 +40,7 @@ On first run, a database is created at:
 ### Starting a session
 
 1. **Activity** — navigate with ↑/↓ or press 1–7, confirm with Enter
-2. **Project** — type to filter suggestions (fuzzy match), Tab to cycle, Enter to confirm
+2. **Project** — type to filter suggestions (fuzzy match), Tab or ↑/↓ to pick one, Enter to confirm
 3. **Task** — same as project (suggestions filtered by selected project)
 
 All fields after activity are optional; press Enter on an empty field to skip.
@@ -49,7 +49,7 @@ All fields after activity are optional; press Enter on an empty field to skip.
 
 Project and task fields show all previous values as soon as the field is active. As you type, suggestions are filtered using fuzzy matching (subsequence-based, via `SkimMatcherV2`). Task suggestions are further filtered by the selected project.
 
-Tab accepts the first suggestion; subsequent Tabs cycle through options. You can always type a new value that doesn't match any suggestion.
+Tab (or ↓) picks the best suggestion; further Tabs cycle through them, ↑/↓ move between them, and ↑ past the top returns to what you typed. The input line always shows what Enter will submit. Typing after picking a suggestion continues from it. You can always type a new value that doesn't match any suggestion.
 
 ### Notes
 

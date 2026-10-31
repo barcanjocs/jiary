@@ -62,13 +62,73 @@ struct AddNoteForm {
 struct StartSessionForm {
     step: Step,
     activity_index: usize,
-    project_input: String,
-    task_input: String,
-    project_query: String,
-    task_query: String,
-    project_selection: usize,
-    task_selection: usize,
-    task_candidates: Vec<String>,
+    project: Autocomplete,
+    task: Autocomplete,
+}
+
+/// A free-text input with fuzzy suggestions: the start form's project and
+/// task steps. What is shown in the input line is always what Enter submits.
+struct Autocomplete {
+    /// The field's value: what was typed, or the highlighted suggestion.
+    input: String,
+    /// What was typed; suggestions are filtered by this, not by `input`.
+    query: String,
+    /// The highlighted suggestion, if any. `None` means the typed text is
+    /// the value and nothing in the list is highlighted.
+    selection: Option<usize>,
+    candidates: Vec<String>,
+}
+
+impl Autocomplete {
+    fn new(candidates: Vec<String>) -> Self {
+        Self {
+            input: String::new(),
+            query: String::new(),
+            selection: None,
+            candidates,
+        }
+    }
+
+    fn suggestions(&self) -> Vec<String> {
+        fuzzy_filter(&self.query, &self.candidates)
+    }
+
+    /// Tab/↓ select the next suggestion (Tab wraps, ↓ stops at the end), ↑
+    /// the previous one and, past the top, returns to the typed text. Typing
+    /// clears the selection and continues from what the input shows, so
+    /// accepting a suggestion and then typing extends it.
+    fn handle_key(&mut self, key: KeyCode) {
+        let suggestions = self.suggestions();
+        let selection = match (key, self.selection) {
+            (KeyCode::Tab, Some(i)) => Some((i + 1) % suggestions.len()),
+            (KeyCode::Down, Some(i)) => Some((i + 1).min(suggestions.len() - 1)),
+            (KeyCode::Tab | KeyCode::Down, None) if !suggestions.is_empty() => Some(0),
+            (KeyCode::Up, Some(i)) => i.checked_sub(1),
+            (KeyCode::Char(c), _) => {
+                self.input.push(c);
+                self.query = self.input.clone();
+                None
+            }
+            (KeyCode::Backspace, _) => {
+                self.input.pop();
+                self.query = self.input.clone();
+                None
+            }
+            _ => return,
+        };
+        self.selection = selection;
+        self.input = match selection {
+            Some(i) => suggestions[i].clone(),
+            None => self.query.clone(),
+        };
+    }
+
+    /// The submitted value; blank input becomes `None` so the db stores
+    /// NULL, not "".
+    fn value(&self) -> Option<String> {
+        let value = self.input.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -326,13 +386,8 @@ impl App {
                 self.screen = Screen::StartSession(StartSessionForm {
                     step: Step::Activity,
                     activity_index: 0,
-                    project_input: String::new(),
-                    task_input: String::new(),
-                    project_query: String::new(),
-                    task_query: String::new(),
-                    project_selection: 0,
-                    task_selection: 0,
-                    task_candidates: Vec::new(),
+                    project: Autocomplete::new(self.projects.clone()),
+                    task: Autocomplete::new(Vec::new()),
                 });
             }
             KeyCode::Char('n') => {
@@ -401,50 +456,16 @@ impl App {
         let Screen::StartSession(form) = &mut self.screen else {
             return;
         };
-        let suggestions = fuzzy_filter(&form.project_query, &self.projects);
         match key {
-            KeyCode::Char(c) => {
-                form.project_input.push(c);
-                form.project_query.push(c);
-                form.project_selection = 0;
-            }
-            KeyCode::Backspace => {
-                form.project_input.pop();
-                form.project_query.pop();
-                form.project_selection = 0;
-            }
-            KeyCode::Up => {
-                if form.project_selection > 0 {
-                    form.project_selection -= 1;
-                }
-            }
-            KeyCode::Down => {
-                if form.project_selection < suggestions.len().saturating_sub(1) {
-                    form.project_selection += 1;
-                }
-            }
-            KeyCode::Tab => {
-                if !suggestions.is_empty() {
-                    // Accept the highlighted suggestion; advance to the
-                    // next one only if it was already accepted.
-                    if form.project_input == *suggestions[form.project_selection] {
-                        form.project_selection = (form.project_selection + 1) % suggestions.len();
-                    }
-                    form.project_input = suggestions[form.project_selection].clone();
-                }
-            }
             KeyCode::Enter => {
-                let candidates = if form.project_input.is_empty() {
-                    self.tasks.clone()
-                } else {
-                    self.db
-                        .tasks_for_project(&form.project_input)
-                        .unwrap_or_default()
+                let candidates = match form.project.value() {
+                    None => self.tasks.clone(),
+                    Some(project) => self.db.tasks_for_project(&project).unwrap_or_default(),
                 };
-                form.task_candidates = candidates;
+                form.task = Autocomplete::new(candidates);
                 form.step = Step::Task;
             }
-            _ => {}
+            _ => form.project.handle_key(key),
         }
     }
 
@@ -452,71 +473,31 @@ impl App {
         let Screen::StartSession(form) = &mut self.screen else {
             return;
         };
-        let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
-        match key {
-            KeyCode::Char(c) => {
-                form.task_input.push(c);
-                form.task_query.push(c);
-                form.task_selection = 0;
-            }
-            KeyCode::Backspace => {
-                form.task_input.pop();
-                form.task_query.pop();
-                form.task_selection = 0;
-            }
-            KeyCode::Up => {
-                if form.task_selection > 0 {
-                    form.task_selection -= 1;
-                }
-            }
-            KeyCode::Down => {
-                if form.task_selection < suggestions.len().saturating_sub(1) {
-                    form.task_selection += 1;
-                }
-            }
-            KeyCode::Tab => {
-                if !suggestions.is_empty() {
-                    // Accept the highlighted suggestion; advance to the
-                    // next one only if it was already accepted.
-                    if form.task_input == *suggestions[form.task_selection] {
-                        form.task_selection = (form.task_selection + 1) % suggestions.len();
-                    }
-                    form.task_input = suggestions[form.task_selection].clone();
-                }
-            }
-            KeyCode::Enter => {
-                // Copy everything out of `form` before any call that
-                // needs &mut self, so the screen borrow is dead. Empty fields
-                // become None so the db stores NULL, not "".
-                let activity = ACTIVITIES[form.activity_index];
-                let project = if form.project_input.is_empty() {
-                    None
-                } else {
-                    Some(form.project_input.clone())
-                };
-                let task = if form.task_input.is_empty() {
-                    None
-                } else {
-                    Some(form.task_input.clone())
-                };
-
-                // Auto-stop any currently active session. If that fails,
-                // abort: creating anyway would leave two active sessions
-                // (the db trigger rejects it, but failing early surfaces
-                // the real error instead of the generic one).
-                if !self.close_active_session() {
-                    return;
-                }
-
-                self.start_session(activity, project, task);
-
-                self.refresh_after_session_change();
-                self.projects = self.db.distinct_projects().unwrap_or_default();
-                self.tasks = self.db.distinct_tasks().unwrap_or_default();
-                self.screen = Screen::Main;
-            }
-            _ => {}
+        if key != KeyCode::Enter {
+            form.task.handle_key(key);
+            return;
         }
+
+        // Copy everything out of `form` before any call that needs &mut
+        // self, so the screen borrow is dead.
+        let activity = ACTIVITIES[form.activity_index];
+        let project = form.project.value();
+        let task = form.task.value();
+
+        // Auto-stop any currently active session. If that fails, abort:
+        // creating anyway would leave two active sessions (the db trigger
+        // rejects it, but failing early surfaces the real error instead of
+        // the generic one).
+        if !self.close_active_session() {
+            return;
+        }
+
+        self.start_session(activity, project, task);
+
+        self.refresh_after_session_change();
+        self.projects = self.db.distinct_projects().unwrap_or_default();
+        self.tasks = self.db.distinct_tasks().unwrap_or_default();
+        self.screen = Screen::Main;
     }
 
     /// Handles keys while ending a session (notes, then focus rating). Esc
@@ -639,12 +620,12 @@ impl App {
                     Step::Project => Some(input_cursor(
                         input_area,
                         "Project".len() + 2,
-                        form.project_input.len(),
+                        form.project.input.len(),
                     )),
                     Step::Task => Some(input_cursor(
                         input_area,
                         "Task".len() + 2,
-                        form.task_input.len(),
+                        form.task.input.len(),
                     )),
                     Step::Activity => None,
                 }
@@ -969,50 +950,8 @@ impl App {
                     &mut ListState::default().with_selected(Some(form.activity_index)),
                 );
             }
-            Step::Project => {
-                let [input_area, list_area] =
-                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
-
-                frame.render_widget(
-                    Paragraph::new(theme::kv("Project", form.project_input.clone())),
-                    input_area,
-                );
-
-                let suggestions = fuzzy_filter(&form.project_query, &self.projects);
-                if !suggestions.is_empty() {
-                    let items = suggestions
-                        .iter()
-                        .map(|s| ListItem::new(s.clone()))
-                        .collect::<Vec<_>>();
-                    frame.render_stateful_widget(
-                        picker_list(items),
-                        list_area,
-                        &mut ListState::default().with_selected(Some(form.project_selection)),
-                    );
-                }
-            }
-            Step::Task => {
-                let [input_area, list_area] =
-                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
-
-                frame.render_widget(
-                    Paragraph::new(theme::kv("Task", form.task_input.clone())),
-                    input_area,
-                );
-
-                let suggestions = fuzzy_filter(&form.task_query, &form.task_candidates);
-                if !suggestions.is_empty() {
-                    let items = suggestions
-                        .iter()
-                        .map(|s| ListItem::new(s.clone()))
-                        .collect::<Vec<_>>();
-                    frame.render_stateful_widget(
-                        picker_list(items),
-                        list_area,
-                        &mut ListState::default().with_selected(Some(form.task_selection)),
-                    );
-                }
-            }
+            Step::Project => draw_autocomplete(frame, body_area, "Project", &form.project),
+            Step::Task => draw_autocomplete(frame, body_area, "Task", &form.task),
         }
     }
 
@@ -1109,6 +1048,35 @@ fn picker_list<'a>(items: Vec<ListItem<'a>>) -> List<'a> {
     List::new(items)
         .highlight_symbol(theme::picker_symbol())
         .highlight_style(theme::PICKER_HIGHLIGHT)
+}
+
+/// An autocomplete step: the input line, then the suggestion list with the
+/// selected suggestion (if any) highlighted.
+fn draw_autocomplete(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    label: &'static str,
+    field: &Autocomplete,
+) {
+    let [input_area, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(theme::kv(label, field.input.clone())),
+        input_area,
+    );
+
+    let items = field
+        .suggestions()
+        .into_iter()
+        .map(ListItem::new)
+        .collect::<Vec<_>>();
+    if !items.is_empty() {
+        frame.render_stateful_widget(
+            picker_list(items),
+            list_area,
+            &mut ListState::default().with_selected(field.selection),
+        );
+    }
 }
 
 /// A fixed-size rect centered in `area`, shrunk to fit when the area is too
@@ -1232,25 +1200,15 @@ mod tests {
             }
         }
 
-        /// Puts the app on the Project step of the start-session form.
-        fn on_project_step(
-            mut self,
-            projects: Vec<String>,
-            input: &str,
-            query: &str,
-            selection: usize,
-        ) -> Self {
-            self.app.projects = projects;
+        /// Puts the app on the Project step of the start-session form, with
+        /// `typed` already typed and nothing highlighted.
+        fn on_project_step(mut self, projects: Vec<String>, typed: &str) -> Self {
+            let mut project = Autocomplete::new(projects);
+            project.input = typed.to_string();
+            project.query = typed.to_string();
             self.app.screen = Screen::StartSession(StartSessionForm {
-                step: Step::Project,
-                activity_index: 0,
-                project_input: input.to_string(),
-                task_input: String::new(),
-                project_query: query.to_string(),
-                task_query: String::new(),
-                project_selection: selection,
-                task_selection: 0,
-                task_candidates: Vec::new(),
+                project,
+                ..Self::empty_form(Step::Project)
             });
             self
         }
@@ -1261,35 +1219,38 @@ mod tests {
             self
         }
 
-        /// A start-session screen at the given step, everything else empty.
-        fn start_form_at(step: Step) -> Screen {
-            Screen::StartSession(StartSessionForm {
+        /// A start-session form at the given step, everything else empty.
+        fn empty_form(step: Step) -> StartSessionForm {
+            StartSessionForm {
                 step,
                 activity_index: 0,
-                project_input: String::new(),
-                task_input: String::new(),
-                project_query: String::new(),
-                task_query: String::new(),
-                project_selection: 0,
-                task_selection: 0,
-                task_candidates: Vec::new(),
-            })
+                project: Autocomplete::new(Vec::new()),
+                task: Autocomplete::new(Vec::new()),
+            }
+        }
+
+        /// A start-session screen at the given step, everything else empty.
+        fn start_form_at(step: Step) -> Screen {
+            Screen::StartSession(Self::empty_form(step))
         }
 
         /// Puts the app on the Activity step of the start-session form.
         fn on_activity_step(mut self, activity_index: usize) -> Self {
             self.app.screen = Screen::StartSession(StartSessionForm {
-                step: Step::Activity,
                 activity_index,
-                project_input: String::new(),
-                task_input: String::new(),
-                project_query: String::new(),
-                task_query: String::new(),
-                project_selection: 0,
-                task_selection: 0,
-                task_candidates: Vec::new(),
+                ..Self::empty_form(Step::Activity)
             });
             self
+        }
+
+        fn key(&mut self, code: KeyCode) {
+            self.app.handle_key(press(code));
+        }
+
+        fn typed(&mut self, text: &str) {
+            for c in text.chars() {
+                self.key(KeyCode::Char(c));
+            }
         }
 
         fn form(&self) -> &StartSessionForm {
@@ -1315,14 +1276,14 @@ mod tests {
 
     #[test]
     fn ctrl_c_quits_from_any_screen() {
-        let mut t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let mut t = TestApp::new().on_project_step(vec![], "");
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert!(t.app.handle_key(ctrl_c));
     }
 
     #[test]
     fn key_releases_and_ctrl_combinations_are_ignored() {
-        let mut t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let mut t = TestApp::new().on_project_step(vec![], "");
         let mut release = press(KeyCode::Char('x'));
         release.kind = KeyEventKind::Release;
         assert!(!t.app.handle_key(release));
@@ -1330,11 +1291,11 @@ mod tests {
             !t.app
                 .handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL))
         );
-        assert_eq!(t.form().project_input, "");
+        assert_eq!(t.form().project.input, "");
         // Shift is how uppercase arrives, so it must still type.
         t.app
             .handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
-        assert_eq!(t.form().project_input, "X");
+        assert_eq!(t.form().project.input, "X");
     }
 
     // --- fuzzy_filter -------------------------------------------------
@@ -1364,64 +1325,96 @@ mod tests {
         assert_eq!(fuzzy_filter("item", &c).len(), 5);
     }
 
-    // --- Tab completion -----------------------------------------------
+    // --- autocomplete -------------------------------------------------
 
-    #[test]
-    fn tab_accepts_first_suggestion() {
-        let mut t = TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "", "", 0);
-        t.app.handle_key(press(KeyCode::Tab));
-        let f = t.form();
-        assert_eq!(f.project_input, "alpha");
-        assert_eq!(f.project_selection, 0);
+    fn ab() -> Vec<String> {
+        vec!["alpha".into(), "beta".into()]
     }
 
     #[test]
-    fn tab_advances_when_input_matches_highlighted() {
-        // Input already equals the highlighted suggestion, so Tab moves on.
-        let mut t =
-            TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "alpha", "", 0);
-        t.app.handle_key(press(KeyCode::Tab));
-        let f = t.form();
-        assert_eq!(f.project_input, "beta");
-        assert_eq!(f.project_selection, 1);
+    fn tab_accepts_best_match_first() {
+        // Regression (61d9181): the first Tab must accept the top suggestion,
+        // not skip past it.
+        let mut t = TestApp::new().on_project_step(ab(), "b");
+        t.key(KeyCode::Tab);
+        assert_eq!(t.form().project.input, "beta");
+        assert_eq!(t.form().project.selection, Some(0));
     }
 
     #[test]
-    fn tab_wraps_around_to_first() {
-        let mut t =
-            TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "beta", "", 1);
-        t.app.handle_key(press(KeyCode::Tab));
-        let f = t.form();
-        assert_eq!(f.project_input, "alpha");
-        assert_eq!(f.project_selection, 0);
+    fn tab_cycles_and_wraps_around() {
+        let mut t = TestApp::new().on_project_step(ab(), "");
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            t.key(KeyCode::Tab);
+            seen.push(t.form().project.input.clone());
+        }
+        assert_eq!(seen, ["alpha", "beta", "alpha"]);
     }
 
     #[test]
-    fn tab_after_typing_accepts_highlighted_not_next() {
-        // Regression (61d9181): after typing, selection is 0 and a single Tab
-        // must accept the highlighted suggestion rather than skip past it.
-        let mut t =
-            TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "a", "a", 0);
-        t.app.handle_key(press(KeyCode::Tab));
-        assert_eq!(t.form().project_input, "alpha");
+    fn arrows_select_and_up_past_top_restores_typed_text() {
+        let mut t = TestApp::new().on_project_step(ab(), "");
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Down); // stops at the end
+        assert_eq!(t.form().project.input, "beta");
+        t.key(KeyCode::Up);
+        assert_eq!(t.form().project.input, "alpha");
+        t.key(KeyCode::Up);
+        assert_eq!(t.form().project.input, "");
+        assert_eq!(t.form().project.selection, None);
     }
 
     #[test]
-    fn backspace_resets_selection() {
-        let mut t =
-            TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "al", "al", 1);
-        t.app.handle_key(press(KeyCode::Backspace));
-        let f = t.form();
-        assert_eq!(f.project_input, "a");
-        assert_eq!(f.project_query, "a");
-        assert_eq!(f.project_selection, 0);
+    fn enter_submits_the_highlighted_suggestion() {
+        let mut t = TestApp::new().on_project_step(ab(), "");
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Enter); // project → task step
+        t.key(KeyCode::Enter); // start the session
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.project.as_deref(), Some("beta"));
+    }
+
+    #[test]
+    fn typing_after_accepting_continues_from_the_suggestion() {
+        let mut t = TestApp::new().on_project_step(ab(), "");
+        t.key(KeyCode::Tab);
+        t.typed("2");
+        let f = &t.form().project;
+        assert_eq!(f.input, "alpha2");
+        assert_eq!(f.query, "alpha2"); // suggestions filter on what is shown
+        assert_eq!(f.selection, None);
+    }
+
+    #[test]
+    fn backspace_clears_selection() {
+        let mut t = TestApp::new().on_project_step(ab(), "al");
+        t.key(KeyCode::Tab);
+        t.key(KeyCode::Backspace);
+        let f = &t.form().project;
+        assert_eq!(f.input, "alph");
+        assert_eq!(f.query, "alph");
+        assert_eq!(f.selection, None);
     }
 
     #[test]
     fn tab_is_noop_when_no_suggestions() {
-        let mut t = TestApp::new().on_project_step(vec!["alpha".into()], "zzz", "zzz", 0);
-        t.app.handle_key(press(KeyCode::Tab));
-        assert_eq!(t.form().project_input, "zzz");
+        let mut t = TestApp::new().on_project_step(ab(), "zzz");
+        t.key(KeyCode::Tab);
+        assert_eq!(t.form().project.input, "zzz");
+        assert_eq!(t.form().project.selection, None);
+    }
+
+    #[test]
+    fn blank_fields_are_stored_as_none() {
+        let mut t = TestApp::new().on_project_step(ab(), "   ");
+        t.key(KeyCode::Enter);
+        t.key(KeyCode::Enter);
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.project, None);
+        assert_eq!(active.task, None);
     }
 
     // --- render harness ---------------------------------------------------
@@ -1548,7 +1541,7 @@ mod tests {
 
     #[test]
     fn status_line_shows_start_form_hints() {
-        let t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let t = TestApp::new().on_project_step(vec![], "");
         let buf = render(&t.app);
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
@@ -1752,16 +1745,18 @@ mod tests {
 
     #[test]
     fn start_modal_project_step_shows_input_and_suggestions() {
-        let t = TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "a", "a", 1);
+        let mut t = TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "a");
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Down);
         let buf = render(&t.app);
         // The Project tab is now selected.
         assert_eq!(buf[(34, 7)].fg, Color::Cyan);
         assert!(buf[(34, 7)].modifier.contains(Modifier::BOLD));
-        // Input row: dimmed label + typed text.
-        assert!(line_from(&buf, 8, 22).starts_with("Project  a"));
+        // Input row: dimmed label + the highlighted suggestion.
+        assert!(line_from(&buf, 8, 22).starts_with("Project  alpine"));
         assert_eq!(buf[(22, 8)].fg, Color::Gray);
         assert_eq!(buf[(31, 8)].fg, Color::Reset);
-        // Suggestions below; the stored selection is highlighted.
+        // Suggestions below; the selection is highlighted.
         assert!(line_from(&buf, 9, 23).starts_with("alpha"));
         assert!(line_from(&buf, 10, 22).starts_with(">alpine"));
         assert_eq!(buf[(22, 10)].fg, Color::Cyan);
@@ -1810,10 +1805,10 @@ mod tests {
     fn cursor_position_tracks_input_lines() {
         // 80×24 terminal: the start modal's input row is y=8 (values start at
         // column 31), the end/note modals' is y=11.
-        let t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let t = TestApp::new().on_project_step(vec![], "");
         assert_eq!(t.app.cursor_position((80, 24)), Some((31, 8)));
 
-        let t = TestApp::new().on_project_step(vec![], "ab", "ab", 0);
+        let t = TestApp::new().on_project_step(vec![], "ab");
         assert_eq!(t.app.cursor_position((80, 24)), Some((33, 8)));
 
         let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Task));
