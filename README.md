@@ -40,6 +40,7 @@ On first run, a database is created at:
 | `b` | Stop current session (if any), start a Break session (no-op during one) |
 | `m` | Stop current session (if any), start a Meeting session (no-op during one) |
 | `r` | Resume the last work session (ends a disruption, break or meeting) |
+| `/` | Open the command palette |
 | `?` | Show all keys |
 | `q` / `Ctrl+C` | Quit |
 
@@ -68,6 +69,10 @@ A collapsed section shrinks to one line that still shows a short summary (e.g. `
 With the mouse: drag the line between two sections to resize them (grab either of its two border rows), click a section to focus it, click the title text of Today or Summary (`▾ TODAY …`) to collapse or expand it, and use the wheel to scroll the section under the pointer (notes or today's sessions). A drag never collapses anything, even when it starts on a title. Because Jiary captures the mouse, select text with `Shift` held (in most terminals).
 
 Section sizes and collapsed sections are remembered between runs, in `layout.conf` next to the database.
+
+### Command palette
+
+Press `/` to open the command palette: every action by name, with what it does and its key. Type to filter (fuzzy, so `/und` finds `undo`), `↑`/`↓` to pick, `Tab` to complete the name, `Enter` to run it, `Esc` (or Backspace past the `/`) to close. A command does exactly what its key does, so the palette doubles as a way to learn the keys.
 
 ### Starting a session
 

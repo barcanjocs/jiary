@@ -242,6 +242,7 @@ enum Screen {
     Main,
     StartSession(Box<StartSessionForm>),  // boxed: by far the largest variant
     AddNote(AddNoteForm),
+    Palette(PaletteForm), // the command palette
     Away(DateTime<Utc>),  // back from an absence: since when
 }
 ```
@@ -389,6 +390,22 @@ also calls `came_back`, and that key only brings the question up.
   activity/project/task.
 
 Detours never ask: being away from the computer is what they're for.
+
+### Command palette
+
+`/` opens `Screen::Palette` with a `PaletteForm` whose input starts as the
+`/` itself (so Backspace on the bare `/` closes it). `COMMANDS` lists every
+command: a name, a description and the main-screen key it runs, shown
+beside it. Running one (`handle_palette`, Enter) returns to Main and calls
+`handle_main` with that key, so a command and its key can't drift apart
+and a command can quit (the return value passes through `handle_key`).
+`palette_matches` filters by fuzzy score on the name (all, in list order,
+for an empty query; ties keep the list's order). The modal reuses the
+start form's layout: a dimmed count of the matches in the tabs row, the
+input, then the matches as `name  description  key`, indented two columns
+so names sit under the typed name, with the pick highlighted and kept in
+view by `ListState`. Views with no key of their own (the coming `/weekly`
+and `/monthly`) will need commands that run something other than a key.
 
 ### Add-note form
 

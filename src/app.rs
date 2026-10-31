@@ -133,9 +133,77 @@ enum Screen {
     // Boxed: three autocompletes make it far larger than the other variants.
     StartSession(Box<StartSessionForm>),
     AddNote(AddNoteForm),
+    /// The command palette (`/`).
+    Palette(PaletteForm),
     /// Back after `AWAY_AFTER` or more without touching the computer,
     /// during a work session: what was that time?
     Away(chrono::DateTime<Utc>),
+}
+
+/// The command palette's state: what was typed (always starting with the
+/// `/` that opened it) and the highlighted match.
+struct PaletteForm {
+    input: String,
+    selection: usize,
+}
+
+/// A command the palette offers: its name (typed after `/`), what it does,
+/// and what it runs. Commands for existing actions run their main-screen
+/// key, so a command can never drift from its key.
+struct Command {
+    name: &'static str,
+    description: &'static str,
+    key: KeyCode,
+    /// The key as shown beside the command.
+    key_label: &'static str,
+}
+
+const fn command(
+    name: &'static str,
+    description: &'static str,
+    key: char,
+    key_label: &'static str,
+) -> Command {
+    Command {
+        name,
+        description,
+        key: KeyCode::Char(key),
+        key_label,
+    }
+}
+
+/// Everything the palette offers, in the order it lists them.
+const COMMANDS: &[Command] = &[
+    command("start", "start a session", 's', "s"),
+    command("end", "end the session", 'e', "e"),
+    command("note", "add a note", 'n', "n"),
+    command("interrupt", "count interruption", 'i', "i"),
+    command("disrupt", "start a disruption", 'd', "d"),
+    command("break", "take a break", 'b', "b"),
+    command("meeting", "join a meeting", 'm', "m"),
+    command("resume", "back to work", 'r', "r"),
+    command("undo", "undo start or end", 'u', "u"),
+    command("earlier", "start 5m earlier", '[', "["),
+    command("later", "start 5m later", ']', "]"),
+    command("reset", "reset section sizes", '=', "="),
+    command("help", "show all keys", '?', "?"),
+    command("quit", "quit Jiary", 'q', "q"),
+];
+
+/// The commands matching `query` (fuzzy, on the name), best first; all of
+/// them, in order, for an empty query.
+fn palette_matches(query: &str) -> Vec<&'static Command> {
+    if query.is_empty() {
+        return COMMANDS.iter().collect();
+    }
+    let matcher = SkimMatcherV2::default();
+    let mut scored = COMMANDS
+        .iter()
+        .filter_map(|c| matcher.fuzzy_match(c.name, query).map(|score| (score, c)))
+        .collect::<Vec<_>>();
+    // Stable: ties keep the list's order.
+    scored.sort_by_key(|&(score, _)| std::cmp::Reverse(score));
+    scored.into_iter().map(|(_, c)| c).collect()
 }
 
 struct AddNoteForm {
@@ -495,6 +563,7 @@ impl App {
             Screen::Help => self.screen = Screen::Main, // any key closes it
             Screen::StartSession(_) => self.handle_start_session(key),
             Screen::AddNote(_) => self.handle_add_note(key),
+            Screen::Palette(_) => return self.handle_palette(key),
             Screen::Away(since) => {
                 let since = *since;
                 self.handle_away(key, since);
@@ -666,6 +735,12 @@ impl App {
         match key {
             KeyCode::Char('q') => return true,
             KeyCode::Char('?') => self.screen = Screen::Help,
+            KeyCode::Char('/') => {
+                self.screen = Screen::Palette(PaletteForm {
+                    input: "/".into(),
+                    selection: 0,
+                });
+            }
 
             // Sections: focus, collapse, resize.
             KeyCode::Tab => self.focus = self.focus.next(),
@@ -915,6 +990,46 @@ impl App {
         self.screen = Screen::Main;
     }
 
+    /// Handles keys in the command palette: typing filters, ↑↓ pick, Tab
+    /// completes the pick's name, Enter runs it, Esc (or Backspace on the
+    /// bare `/`) closes. Returns true if the command quits the app.
+    fn handle_palette(&mut self, key: KeyCode) -> bool {
+        let Screen::Palette(form) = &mut self.screen else {
+            return false;
+        };
+        let matches = palette_matches(&form.input[1..]);
+        match key {
+            KeyCode::Esc => self.screen = Screen::Main,
+            KeyCode::Backspace if form.input == "/" => self.screen = Screen::Main,
+            KeyCode::Backspace => {
+                form.input.pop();
+                form.selection = 0;
+            }
+            KeyCode::Char(c) => {
+                form.input.push(c);
+                form.selection = 0;
+            }
+            KeyCode::Up => form.selection = form.selection.saturating_sub(1),
+            KeyCode::Down => {
+                form.selection = (form.selection + 1).min(matches.len().saturating_sub(1));
+            }
+            KeyCode::Tab => {
+                if let Some(command) = matches.get(form.selection) {
+                    form.input = format!("/{}", command.name);
+                    form.selection = 0;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(command) = matches.get(form.selection) {
+                    self.screen = Screen::Main;
+                    return self.handle_main(command.key);
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     /// Handles keys while adding a note to the active session.
     fn handle_add_note(&mut self, key: KeyCode) {
         let Screen::AddNote(form) = &mut self.screen else {
@@ -958,6 +1073,7 @@ impl App {
             Screen::Help => draw_help(frame, content),
             Screen::StartSession(form) => self.draw_start_session(frame, content, form, input),
             Screen::AddNote(_) => self.draw_add_note(frame, content, input),
+            Screen::Palette(form) => draw_palette(frame, content, form, input),
             Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 
@@ -973,7 +1089,9 @@ impl App {
         let [_, content, _] = chrome_layout(ratatui::layout::Rect::new(0, 0, size.0, size.1));
         let input = self.wrapped_input(content)?;
         let input_area = match &self.screen {
-            Screen::StartSession(_) => start_modal_layout(content, input.height()).2,
+            Screen::StartSession(_) | Screen::Palette(_) => {
+                start_modal_layout(content, input.height()).2
+            }
             _ => small_modal_layout(content, input.height()).2,
         };
         Some(input.cursor_in(input_area))
@@ -990,6 +1108,7 @@ impl App {
                 Step::Task => Some((&form.task.input, "type or pick a task (optional)")),
             },
             Screen::AddNote(form) => Some((&form.input, "type a note")),
+            Screen::Palette(form) => Some((&form.input, "")),
             _ => None,
         }
     }
@@ -1000,7 +1119,7 @@ impl App {
     fn wrapped_input(&self, content: ratatui::layout::Rect) -> Option<WrappedInput> {
         let (value, placeholder) = self.text_input()?;
         let base_height = match self.screen {
-            Screen::StartSession(_) => START_MODAL_HEIGHT,
+            Screen::StartSession(_) | Screen::Palette(_) => START_MODAL_HEIGHT,
             _ => SMALL_MODAL_HEIGHT,
         };
         let max_rows = content.height.saturating_sub(base_height - 1).max(1);
@@ -1088,6 +1207,12 @@ impl App {
             },
             Screen::Help => &[("any key", "close")],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
+            Screen::Palette(_) => &[
+                ("↑↓", "select"),
+                ("Tab", "complete"),
+                ("Enter", "run"),
+                ("Esc", "close"),
+            ],
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
             Screen::Away(_) => &[
                 ("k", "keep"),
@@ -2145,6 +2270,61 @@ fn rating_bar(left: std::time::Duration, width: u16) -> Line<'static> {
     ])
 }
 
+/// The command palette: a modal like the start form's, with the matches
+/// under the input as `name  description  key`, the pick highlighted (the
+/// list scrolls to keep it in view), and above them how many match.
+fn draw_palette(frame: &mut Frame, area: Rect, form: &PaletteForm, input: Option<&WrappedInput>) {
+    let rows = input.map_or(1, WrappedInput::height);
+    let (modal, count_area, input_area, list_area) = start_modal_layout(area, rows);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(Line::from(Span::styled(" Commands ", theme::TITLE)));
+    frame.render_widget(block, modal);
+
+    let matches = palette_matches(&form.input[1..]);
+    let count = match matches.len() {
+        0 => "no matching command".to_string(),
+        n if n == COMMANDS.len() => plural(n, "command"),
+        n => format!("{n} of {}", plural(COMMANDS.len(), "command")),
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(count, theme::DIMMED)),
+        count_area,
+    );
+    if let Some(input) = input {
+        frame.render_widget(input.paragraph(), input_area);
+    }
+
+    // Indented two columns so names line up under the typed name (after
+    // "› /"), with the highlight symbol under the "/".
+    let list_area = Rect {
+        x: list_area.x + 2,
+        width: list_area.width.saturating_sub(2),
+        ..list_area
+    };
+    // Name and key columns; the description takes what is left after them
+    // and the highlight symbol's column.
+    let name_width = COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) + 2;
+    let width = (list_area.width as usize).saturating_sub(1);
+    let items = matches
+        .iter()
+        .map(|c| {
+            let description_width = width.saturating_sub(name_width + c.key_label.len() + 1);
+            let description: String = c.description.chars().take(description_width).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:name_width$}", c.name), theme::VALUE),
+                Span::styled(format!("{description:description_width$} "), theme::DIMMED),
+                Span::styled(c.key_label, theme::DIMMED.add_modifier(Modifier::BOLD)),
+            ]))
+        })
+        .collect::<Vec<_>>();
+    frame.render_stateful_widget(
+        picker_list(items),
+        list_area,
+        &mut ListState::default().with_selected((!matches.is_empty()).then_some(form.selection)),
+    );
+}
+
 /// A picker `List` with the accent highlight symbol and style.
 /// The symbol column is always reserved, so items don't shift right when
 /// one gets selected.
@@ -2722,6 +2902,7 @@ fn draw_help(frame: &mut Frame, content: Rect) {
     const LEFT: &[Group] = &[(
         "Sessions",
         &[
+            ("/", "command palette"),
             ("s", "start a session"),
             ("e", "end the session"),
             ("n", "add a note"),
@@ -4566,6 +4747,10 @@ mod tests {
                 Screen::AddNote(AddNoteForm {
                     input: "word ".repeat(50),
                 }),
+                Screen::Palette(PaletteForm {
+                    input: format!("/{}", "x".repeat(100)),
+                    selection: 0,
+                }),
             ]
         };
         for (width, height) in [(0, 0), (1, 1), (5, 3), (12, 6), (30, 10)] {
@@ -5065,6 +5250,114 @@ mod tests {
         assert!(matches!(t.app.screen, Screen::Away(_)));
         // The key only brought the question up.
         assert_eq!(t.app.active_session.as_ref().unwrap().interruptions, None);
+    }
+
+    // --- command palette --------------------------------------------------
+
+    fn palette_input(t: &TestApp) -> &str {
+        match &t.app.screen {
+            Screen::Palette(form) => &form.input,
+            _ => panic!("the palette isn't open"),
+        }
+    }
+
+    #[test]
+    fn slash_opens_the_palette_listing_every_command() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('/'));
+        assert_eq!(palette_input(&t), "/");
+        let buf = render(&t.app);
+        row_with(&buf, "Commands");
+        row_with(&buf, &format!("{} commands", COMMANDS.len()));
+        let first = row_with(&buf, "start");
+        assert!(line(&buf, first).contains("start a session"));
+        // Names line up under the typed text after "› /", the pick marked.
+        assert_eq!(col_of(&buf, first, "start"), col_of(&buf, 8, "/") + 1);
+        assert!(
+            line(&buf, first).contains(">start"),
+            "{}",
+            line(&buf, first)
+        );
+        assert_eq!(
+            line(&buf, RENDER_HEIGHT - 1),
+            "[↑↓] select  [Tab] complete  [Enter] run  [Esc] close"
+        );
+        // The cursor follows the typed "/".
+        assert_eq!(t.app.cursor_position((80, 24)), Some((25, 8)));
+    }
+
+    #[test]
+    fn typing_filters_the_commands_fuzzily() {
+        let names = |q| {
+            palette_matches(q)
+                .iter()
+                .map(|c| c.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("br")[0], "break");
+        assert_eq!(names("und"), ["undo"]);
+        assert_eq!(names("zzz"), Vec::<&str>::new());
+        // Every command has a distinct name.
+        let mut all = names("");
+        all.dedup();
+        assert_eq!(all.len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn enter_runs_the_command_like_its_key() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.key(KeyCode::Char('e'));
+        assert!(t.app.active_session.is_none());
+        t.key(KeyCode::Char('/'));
+        t.typed("und");
+        t.key(KeyCode::Enter);
+        assert!(matches!(t.app.screen, Screen::Main));
+        assert!(t.app.active_session.is_some(), "undone");
+    }
+
+    #[test]
+    fn arrows_pick_and_tab_completes() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('/'));
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Up);
+        t.key(KeyCode::Tab); // the second command: end
+        assert_eq!(palette_input(&t), "/end");
+        t.key(KeyCode::Up); // stays at the top
+        t.key(KeyCode::Enter);
+        assert!(matches!(t.app.screen, Screen::Main));
+    }
+
+    #[test]
+    fn esc_or_backspace_past_the_slash_closes_the_palette() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('/'));
+        t.typed("ab");
+        t.key(KeyCode::Backspace);
+        t.key(KeyCode::Backspace);
+        assert_eq!(palette_input(&t), "/");
+        t.key(KeyCode::Backspace);
+        assert!(matches!(t.app.screen, Screen::Main));
+        t.key(KeyCode::Char('/'));
+        t.typed("star");
+        t.key(KeyCode::Esc);
+        assert!(matches!(t.app.screen, Screen::Main), "nothing run");
+    }
+
+    #[test]
+    fn a_command_can_open_another_screen_or_quit() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('/'));
+        t.typed("start");
+        t.key(KeyCode::Enter);
+        assert!(matches!(t.app.screen, Screen::StartSession(_)));
+
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('/'));
+        t.typed("quit");
+        assert!(t.app.handle_key(press(KeyCode::Enter)));
     }
 
     fn activity(t: &TestApp) -> Option<&str> {
