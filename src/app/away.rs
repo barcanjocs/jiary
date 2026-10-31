@@ -1,5 +1,6 @@
+use super::modal::small_modal_layout;
 use super::text::{fmt_duration, fmt_time};
-use super::{App, Screen, small_modal_layout};
+use super::{App, Screen};
 use crate::session::{self, BREAK, DISRUPTION};
 use crate::theme;
 use chrono::Utc;

@@ -1,4 +1,4 @@
-use super::modal_layout;
+use super::modal::modal_layout;
 use crate::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};

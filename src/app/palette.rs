@@ -1,5 +1,6 @@
+use super::modal::WrappedInput;
 use super::text::plural;
-use super::{App, Screen, WrappedInput, picker_list, start_modal_layout};
+use super::{App, Screen, picker_list, start_modal_layout};
 use crate::period::Period;
 use crate::theme;
 use crossterm::event::KeyCode;
