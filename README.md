@@ -20,6 +20,8 @@ Requires Rust stable. No system dependencies needed (SQLite is bundled).
 jiary
 ```
 
+`jiary --version` prints the version, `jiary --help` a short usage note.
+
 On first run, a database is created at:
 
 - **macOS:** `~/Library/Application Support/jiary/jiary.db`

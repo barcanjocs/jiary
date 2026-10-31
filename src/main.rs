@@ -9,7 +9,7 @@ mod session;
 mod summary;
 mod theme;
 
-use std::io;
+use std::io::{self, IsTerminal};
 use std::sync::mpsc;
 use std::thread;
 
@@ -20,7 +20,38 @@ use crossterm::{
 };
 use ratatui::DefaultTerminal;
 
+const HELP: &str = "\
+jiary: a work diary for the terminal
+
+Usage: jiary [--help | --version]
+
+Run without arguments to open it. Inside, press ? for every key, or / for
+the command palette.";
+
 fn main() {
+    // Flags before anything touches the terminal or the database.
+    match std::env::args().nth(1).as_deref() {
+        None => {}
+        Some("-h" | "--help") => {
+            println!("{HELP}");
+            return;
+        }
+        Some("-V" | "--version") => {
+            println!("jiary {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Some(other) => {
+            eprintln!("jiary: unknown argument {other:?}\n\n{HELP}");
+            std::process::exit(2);
+        }
+    }
+    // A full-screen app needs a terminal to draw in; say so rather than
+    // fail deep in the terminal setup (say, run from a script or a pipe).
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        eprintln!("jiary: needs to run in a terminal");
+        std::process::exit(1);
+    }
+
     let db = match db::Db::open() {
         Ok(db) => db,
         Err(e) => {
@@ -29,12 +60,18 @@ fn main() {
         }
     };
 
-    // init() enters raw mode and the alternate screen, and installs a panic
+    // try_init() enters raw mode and the alternate screen, and installs a panic
     // hook that restores the terminal; ours chains onto it to also show the
     // cursor (hidden outside input lines) and release the mouse. restore()
     // covers every other exit path, so an error never leaves the shell in
     // raw mode or with the mouse captured.
-    let mut terminal = ratatui::init();
+    let mut terminal = match ratatui::try_init() {
+        Ok(terminal) => terminal,
+        Err(e) => {
+            eprintln!("jiary: could not set up the terminal: {e}");
+            std::process::exit(1);
+        }
+    };
     let restore_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(io::stdout(), Show, DisableMouseCapture);
