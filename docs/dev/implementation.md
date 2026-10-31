@@ -1,10 +1,10 @@
 # Implementation details
 
 Developer reference for how jiary works internally. Read this before changing
-code. User-facing behavior (keys, data model, backup) lives in `README.md`;
-current session state, the backlog, and working conventions live in
-`DEVELOPMENT.md`. This document explains *how* and *why*; keep it in sync when
-architecture changes.
+code. User-facing behavior (keys, data model, backup) lives in the user
+manual (`docs/user/`); current session state, the backlog, and working
+conventions live in `DEVELOPMENT.md` at the repo root. This document explains
+*how* and *why*; keep it in sync when architecture changes.
 
 ## Big picture
 
