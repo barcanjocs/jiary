@@ -6,8 +6,8 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-    ScrollbarState, Tabs,
+    Block, BorderType, HighlightSpacing, List, ListItem, ListState, Paragraph, Scrollbar,
+    ScrollbarOrientation, ScrollbarState, Tabs,
 };
 
 use crate::db::Db;
@@ -699,16 +699,20 @@ impl App {
         Some(input.cursor_in(input_area))
     }
 
-    /// The current screen's text input, if it has one: (label, value).
-    fn text_input(&self) -> Option<(&'static str, &str)> {
+    /// The current screen's text input, if it has one: (value, placeholder
+    /// shown while it is empty). Inputs have no label: the tabs row (or the
+    /// note modal's context line) already says what is being typed.
+    fn text_input(&self) -> Option<(&str, &'static str)> {
         match &self.screen {
             Screen::StartSession(form) => match form.step {
-                Step::Project => Some(("Project", &form.project.input)),
-                Step::Task => Some(("Task", &form.task.input)),
-                Step::Activity => Some(("Activity", &form.activity.input)),
+                Step::Activity => Some((&form.activity.input, "type or pick an activity")),
+                Step::Project => Some((&form.project.input, "type or pick a project (optional)")),
+                Step::Task => Some((&form.task.input, "type or pick a task (optional)")),
             },
-            Screen::EndSession(form) if form.step == EndStep::Notes => Some(("Notes", &form.notes)),
-            Screen::AddNote(form) => Some(("Note", &form.input)),
+            Screen::EndSession(form) if form.step == EndStep::Notes => {
+                Some((&form.notes, "what got done? (optional)"))
+            }
+            Screen::AddNote(form) => Some((&form.input, "type a note")),
             _ => None,
         }
     }
@@ -717,15 +721,15 @@ impl App {
     /// most as many rows as the modal can grow to on `content`. Shared by
     /// `draw` and `cursor_position` so the two always agree.
     fn wrapped_input(&self, content: ratatui::layout::Rect) -> Option<WrappedInput> {
-        let (label, value) = self.text_input()?;
+        let (value, placeholder) = self.text_input()?;
         let base_height = match self.screen {
             Screen::StartSession(_) => START_MODAL_HEIGHT,
             _ => SMALL_MODAL_HEIGHT,
         };
         let max_rows = content.height.saturating_sub(base_height - 1).max(1);
         Some(WrappedInput::new(
-            label,
             value,
+            placeholder,
             modal_inner_width(content),
             max_rows,
         ))
@@ -1486,15 +1490,25 @@ const SMALL_MODAL_HEIGHT: u16 = 6;
 const HELP_WIDTH: u16 = 50;
 
 /// A picker `List` with the accent highlight symbol and style.
+/// The symbol column is always reserved, so items don't shift right when
+/// one gets selected.
 fn picker_list<'a>(items: Vec<ListItem<'a>>) -> List<'a> {
     List::new(items)
         .highlight_symbol(theme::picker_symbol())
         .highlight_style(theme::PICKER_HIGHLIGHT)
+        .highlight_spacing(HighlightSpacing::Always)
 }
 
 /// An autocomplete step's suggestion list, with the selected suggestion (if
-/// any) highlighted. The input itself is drawn as a `WrappedInput`.
+/// any) highlighted. The input itself is drawn as a `WrappedInput`; the list
+/// is indented one column so suggestion text lines up under the typed text
+/// (after the `›` prompt) and the `>` marker under the prompt's space.
 fn draw_suggestions(frame: &mut Frame, area: ratatui::layout::Rect, field: &Autocomplete) {
+    let area = Rect {
+        x: area.x + 1,
+        width: area.width.saturating_sub(1),
+        ..area
+    };
     let items = field
         .suggestions()
         .into_iter()
@@ -1597,9 +1611,10 @@ fn modal_inner_width(content: ratatui::layout::Rect) -> u16 {
     MODAL_WIDTH.min(content.width).saturating_sub(4)
 }
 
-/// A text input wrapped to fit its modal: the dimmed label on the first row,
-/// the value word-wrapped beside it with a hanging indent so every row starts
-/// at the same column, and the cursor right after the last character.
+/// A text input wrapped to fit its modal: an accent `›` prompt on the first
+/// row, the value word-wrapped after it with later rows indented to line up,
+/// a dimmed placeholder while empty, and the cursor right after the last
+/// character.
 struct WrappedInput {
     lines: Vec<Line<'static>>,
     /// Cursor (column, row), relative to the input area.
@@ -1607,16 +1622,28 @@ struct WrappedInput {
 }
 
 impl WrappedInput {
-    /// Wraps `value` beside `label` within `width` columns. When that takes
-    /// more than `max_rows` rows, only the last ones are kept: the cursor is
-    /// always on the last row, so it stays visible.
-    fn new(label: &str, value: &str, width: u16, max_rows: u16) -> Self {
-        let indent = label.chars().count() + 2; // as in `theme::kv`
+    /// Wraps `value` after the prompt within `width` columns. When that
+    /// takes more than `max_rows` rows, only the last ones are kept: the
+    /// cursor is always on the last row, so it stays visible.
+    fn new(value: &str, placeholder: &str, width: u16, max_rows: u16) -> Self {
+        const PROMPT: &str = "› ";
+        let indent = PROMPT.chars().count();
         let rows = wrap_text(value, (width as usize).saturating_sub(indent));
         let last = rows.len() - 1;
         let cursor_col = indent + rows[last].chars().count();
 
-        let mut lines = hanging_lines(label, rows);
+        let mut lines = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| match i {
+                0 if value.is_empty() => Line::from(vec![
+                    Span::styled(PROMPT, theme::PROMPT),
+                    Span::styled(placeholder.to_string(), theme::PLACEHOLDER),
+                ]),
+                0 => Line::from(vec![Span::styled(PROMPT, theme::PROMPT), Span::raw(row)]),
+                _ => Line::from(format!("{}{row}", " ".repeat(indent))),
+            })
+            .collect::<Vec<_>>();
         let hidden = lines.len().saturating_sub(max_rows as usize);
         lines.drain(..hidden);
 
@@ -2439,16 +2466,16 @@ mod tests {
             t.key(KeyCode::Down);
         }
         let buf = render(&t.app);
-        // Input row at y=8 shows the selection; suggestions from y=9. The
-        // selected item gets a bold accent `>` and highlighted text (list
-        // content always sits one column right of the symbol).
-        assert!(line_from(&buf, 8, 22).starts_with("Activity  Writing"));
-        assert!(line_from(&buf, 9, 21).starts_with("  Programming"));
-        assert_eq!(buf[(23, 9)].fg, Color::Reset); // unselected item text
-        assert!(line_from(&buf, 11, 21).starts_with(" >Writing"));
-        assert_eq!(buf[(22, 11)].fg, Color::Cyan);
-        assert!(buf[(22, 11)].modifier.contains(Modifier::BOLD));
+        // Input row at y=8 shows the selection after the prompt;
+        // suggestions from y=9, their text aligned with the typed text
+        // (column 24) and the bold accent `>` under the prompt's space.
+        assert!(line_from(&buf, 8, 22).starts_with("› Writing"));
+        assert!(line_from(&buf, 9, 22).starts_with("  Programming"));
+        assert_eq!(buf[(24, 9)].fg, Color::Reset); // unselected item text
+        assert!(line_from(&buf, 11, 22).starts_with(" >Writing"));
         assert_eq!(buf[(23, 11)].fg, Color::Cyan);
+        assert!(buf[(23, 11)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(24, 11)].fg, Color::Cyan);
     }
 
     // --- custom activities ------------------------------------------------
@@ -2513,14 +2540,31 @@ mod tests {
         // The Project tab is now selected.
         assert_eq!(buf[(34, 7)].fg, Color::Cyan);
         assert!(buf[(34, 7)].modifier.contains(Modifier::BOLD));
-        // Input row: dimmed label + the highlighted suggestion.
-        assert!(line_from(&buf, 8, 22).starts_with("Project  alpine"));
-        assert_eq!(buf[(22, 8)].fg, Color::Gray);
-        assert_eq!(buf[(31, 8)].fg, Color::Reset);
-        // Suggestions below; the selection is highlighted.
-        assert!(line_from(&buf, 9, 23).starts_with("alpha"));
-        assert!(line_from(&buf, 10, 22).starts_with(">alpine"));
-        assert_eq!(buf[(22, 10)].fg, Color::Cyan);
+        // Input row: bold accent prompt + the highlighted suggestion.
+        assert!(line_from(&buf, 8, 22).starts_with("› alpine"));
+        assert_eq!(buf[(22, 8)].fg, Color::Cyan);
+        assert!(buf[(22, 8)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(24, 8)].fg, Color::Reset);
+        // Suggestions below, aligned with the value; the selection is
+        // highlighted.
+        assert!(line_from(&buf, 9, 24).starts_with("alpha"));
+        assert!(line_from(&buf, 10, 23).starts_with(">alpine"));
+        assert_eq!(buf[(23, 10)].fg, Color::Cyan);
+    }
+
+    #[test]
+    fn empty_input_shows_a_dimmed_placeholder_not_a_label() {
+        let t = TestApp::new().on_activity_step();
+        let buf = render(&t.app);
+        // The tabs row names the field; the input row doesn't repeat it.
+        assert_eq!(
+            line_from(&buf, 8, 22),
+            "› type or pick an activity           │"
+        );
+        assert_eq!(buf[(24, 8)].fg, Color::Gray);
+        assert!(buf[(24, 8)].modifier.contains(Modifier::ITALIC));
+        // The cursor sits at the start of the placeholder.
+        assert_eq!(t.app.cursor_position((80, 24)), Some((24, 8)));
     }
 
     #[test]
@@ -2538,10 +2582,10 @@ mod tests {
         assert_eq!(buf[(23, 10)].fg, Color::Cyan);
         assert!(buf[(23, 10)].modifier.contains(Modifier::BOLD));
         assert_eq!(buf[(31, 10)].fg, Color::Reset);
-        // Input row: dimmed label + typed text.
-        assert!(line_from(&buf, 11, 22).starts_with("Notes  did stuff"));
-        assert_eq!(buf[(22, 11)].fg, Color::Gray);
-        assert_eq!(buf[(29, 11)].fg, Color::Reset);
+        // Input row: prompt + typed text.
+        assert!(line_from(&buf, 11, 22).starts_with("› did stuff"));
+        assert_eq!(buf[(22, 11)].fg, Color::Cyan);
+        assert_eq!(buf[(24, 11)].fg, Color::Reset);
     }
 
     #[test]
@@ -2564,25 +2608,25 @@ mod tests {
 
     #[test]
     fn cursor_position_tracks_input_lines() {
-        // 80×24 terminal: the start modal's input row is y=8 (values start at
-        // column 31), the end/note modals' is y=11.
+        // 80×24 terminal: the start modal's input row is y=8, the end/note
+        // modals' is y=11; values start at column 24, after "› ".
         let t = TestApp::new().on_project_step(vec![], "");
-        assert_eq!(t.app.cursor_position((80, 24)), Some((31, 8)));
+        assert_eq!(t.app.cursor_position((80, 24)), Some((24, 8)));
 
         let t = TestApp::new().on_project_step(vec![], "ab");
-        assert_eq!(t.app.cursor_position((80, 24)), Some((33, 8)));
+        assert_eq!(t.app.cursor_position((80, 24)), Some((26, 8)));
 
         let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Task));
-        assert_eq!(t.app.cursor_position((80, 24)), Some((28, 8))); // "Task  "
+        assert_eq!(t.app.cursor_position((80, 24)), Some((24, 8)));
 
         let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Activity));
-        assert_eq!(t.app.cursor_position((80, 24)), Some((32, 8))); // "Activity  "
+        assert_eq!(t.app.cursor_position((80, 24)), Some((24, 8)));
 
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: "hi".into(),
             step: EndStep::Notes,
         }));
-        assert_eq!(t.app.cursor_position((80, 24)), Some((31, 11)));
+        assert_eq!(t.app.cursor_position((80, 24)), Some((26, 11)));
 
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: String::new(),
@@ -2591,7 +2635,7 @@ mod tests {
         assert_eq!(t.app.cursor_position((80, 24)), None); // rating line, no input
 
         let t = TestApp::new().on_screen(Screen::AddNote(AddNoteForm { input: "hi".into() }));
-        assert_eq!(t.app.cursor_position((80, 24)), Some((30, 11))); // "Note  hi"
+        assert_eq!(t.app.cursor_position((80, 24)), Some((26, 11))); // "› hi"
 
         let t = TestApp::new();
         assert_eq!(t.app.cursor_position((80, 24)), None); // main screen
@@ -2995,10 +3039,11 @@ mod tests {
         let t = TestApp::new().on_project_step(vec![], typed);
         let buf = render(&t.app);
 
-        let y = row_with(&buf, "Project  a very long project name");
-        // The value wraps at a word boundary, continuing under itself.
-        assert!(line_from(&buf, y, 22).starts_with("Project  a very long project name "));
-        assert!(line_from(&buf, y + 1, 22).starts_with("         that keeps going "));
+        // "› " leaves 34 columns per row; the value wraps at a word
+        // boundary, continuing under itself.
+        let y = row_with(&buf, "› a very long project name");
+        assert!(line_from(&buf, y, 22).starts_with("› a very long project name that "));
+        assert!(line_from(&buf, y + 1, 22).starts_with("  keeps going "));
         // Both rows stay inside the modal's right border (x = 59).
         assert_eq!(buf[(59, y)].symbol(), "│");
         assert_eq!(buf[(59, y + 1)].symbol(), "│");
@@ -3011,7 +3056,7 @@ mod tests {
         // The cursor follows the text onto the second row.
         assert_eq!(
             t.app.cursor_position((RENDER_WIDTH, RENDER_HEIGHT)),
-            Some((22 + 9 + "that keeps going".len() as u16, y + 1))
+            Some((22 + 2 + "keeps going".len() as u16, y + 1))
         );
     }
 
@@ -3024,10 +3069,9 @@ mod tests {
         }));
         let buf = render(&t.app);
 
-        // "Notes  " leaves 29 columns per row.
-        let y = row_with(&buf, "Notes  fixed");
-        assert!(line_from(&buf, y, 22).starts_with("Notes  fixed the wrapping bug and "));
-        assert!(line_from(&buf, y + 1, 22).starts_with("       wrote tests for every input "));
+        let y = row_with(&buf, "› fixed");
+        assert!(line_from(&buf, y, 22).starts_with("› fixed the wrapping bug and wrote "));
+        assert!(line_from(&buf, y + 1, 22).starts_with("  tests for every input "));
         assert_eq!(buf[(59, y + 1)].symbol(), "│");
         // The modal grew by the extra row, keeping its two spare rows below
         // the input.
@@ -3042,7 +3086,7 @@ mod tests {
         assert!(line_from(&buf, y + 4, 20).starts_with("╰"));
         assert_eq!(
             t.app.cursor_position((RENDER_WIDTH, RENDER_HEIGHT)),
-            Some((22 + 7 + "wrote tests for every input".len() as u16, y + 1))
+            Some((22 + 2 + "tests for every input".len() as u16, y + 1))
         );
     }
 
@@ -3174,9 +3218,9 @@ mod tests {
         // Dimmed project·task·activity context line.
         assert!(line_from(&buf, 10, 22).starts_with("alpha · beta · Programming"));
         assert_eq!(buf[(22, 10)].fg, Color::Gray);
-        // Input row: dimmed label + typed text.
-        assert!(line_from(&buf, 11, 22).starts_with("Note  hello"));
-        assert_eq!(buf[(22, 11)].fg, Color::Gray);
-        assert_eq!(buf[(28, 11)].fg, Color::Reset);
+        // Input row: prompt + typed text.
+        assert!(line_from(&buf, 11, 22).starts_with("› hello"));
+        assert_eq!(buf[(22, 11)].fg, Color::Cyan);
+        assert_eq!(buf[(24, 11)].fg, Color::Reset);
     }
 }

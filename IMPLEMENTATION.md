@@ -430,11 +430,16 @@ in height only with a wrapped input:
 
 All five text inputs (Activity, Project, Task, Notes, Note) are drawn as a
 `WrappedInput`, built by `App::wrapped_input` from `text_input()` (the
-current screen's label and value) and the modal's inner width
+current screen's value and placeholder) and the modal's inner width
 (`modal_inner_width`):
 
-- Row one is `theme::kv(label, …)`; the value continues on later rows with a
-  hanging indent of `label + 2` columns, so it reads as one column.
+- Inputs have **no label**: the tabs row (or the note modal's context line)
+  already names the field, and a label repeated beside the value read like
+  part of it. Row one starts with a bold accent `› ` (`theme::PROMPT`); later
+  rows are indented 2 columns so the value reads as one column.
+- While the value is empty, a dimmed italic placeholder (`theme::PLACEHOLDER`,
+  e.g. "type or pick an activity") follows the prompt; the cursor sits on its
+  first char.
 - `wrap_text` breaks after the last space that fits (mid-word only for words
   longer than a row) and keeps every char, so the rows concatenate back to
   the value. Widths count chars, not bytes. A full last row gets an empty
@@ -446,7 +451,10 @@ current screen's label and value) and the modal's inner width
 Modal structure: a `Block::bordered()` (rounded) with a titled accent span, a
 `Tabs` row marking the current step, then the step body (a wrapped input plus
 suggestion `List`, or the rating line). Picker lists use `theme::picker_symbol()`
-(bold accent `>`) and `PICKER_HIGHLIGHT`.
+(bold accent `>`) and `PICKER_HIGHLIGHT`, with `HighlightSpacing::Always` so
+items don't shift right when one gets selected. `draw_suggestions` indents
+the list one column, putting suggestion text under the typed text and the
+`>` under the prompt's space.
 
 ### Terminal cursor
 
