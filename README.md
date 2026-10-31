@@ -53,7 +53,7 @@ The cat follows what you're doing: it idles when nothing is running, types on a 
 - **Today** (middle) — today's sessions, newest first. Scrollable.
 - **Summary** (bottom) — the day's span with tracked time split into work (meetings included), breaks and disruptions, and the gaps between sessions, time per activity and per project, average focus, interruptions and disruptions. When the terminal is tall enough, two graphs join in, in the activities' colors: the day as a timeline from the hour you started to now (gaps left blank, hours underneath), and each activity's and each project's share of the tracked time as a bar.
 
-Projects each get a color of their own, kept from day to day (they take them in the order you first used them), and show in it everywhere: the active session, today's list and the summary.
+Projects each get a color of their own, kept from day to day (they take them in the order you first used them; two projects on screen never share one), and show in it everywhere: the active session, today's list and the summary.
 
 | Key | Action |
 |-----|--------|

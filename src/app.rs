@@ -1548,19 +1548,41 @@ impl App {
         }
     }
 
-    /// A project's color: by the order projects were first used, so each
-    /// keeps its color from day to day; gray for no project.
+    /// A project's color on the main screen, gray for no project. Colors
+    /// go by the order projects were first used, so each keeps its color
+    /// from day to day, and are made distinct across today's projects (the
+    /// main screen's view; see `theme::project_colors`).
     fn project_color(&self, project: Option<&str>) -> Color {
         let Some(project) = project else {
             return theme::NO_PROJECT;
         };
-        let rank = self
-            .project_order
+        let mut today = self
+            .today_sessions
+            .iter()
+            .chain(&self.active_session)
+            .filter_map(|s| s.project.as_deref())
+            .collect::<Vec<_>>();
+        if !today.contains(&project) {
+            today.push(project);
+        }
+        today.sort_unstable();
+        today.dedup();
+        let ranks = today
+            .iter()
+            .map(|&name| self.project_rank(name))
+            .collect::<Vec<_>>();
+        let colors = theme::project_colors(&ranks);
+        let i = today.iter().position(|&name| name == project).unwrap_or(0);
+        colors[i]
+    }
+
+    /// Where `project` comes in the order projects were first used; one
+    /// not loaded yet (fresh, mid-refresh) comes after the rest.
+    fn project_rank(&self, project: &str) -> usize {
+        self.project_order
             .iter()
             .position(|p| p == project)
-            // Not loaded yet (a fresh project mid-refresh): after the rest.
-            .unwrap_or(self.project_order.len());
-        theme::project_color(rank)
+            .unwrap_or(self.project_order.len())
     }
 
     /// A project's name, bold in its color, or a dimmed italic "(none)".
@@ -4157,6 +4179,25 @@ mod tests {
         for activity in ["Programming", MEETING, BREAK, DISRUPTION] {
             assert!(!palette.contains(&theme::activity_color(activity)));
         }
+    }
+
+    #[test]
+    fn projects_sharing_a_preferred_color_get_distinct_ones_on_the_same_day() {
+        let mut t = TestApp::new();
+        // Ranks 0..=9: "p2" and "p10" both prefer the palette's third color.
+        t.app.project_order = (0..10).map(|i| format!("p{i}")).collect();
+        let p = theme::PROJECT_PALETTE;
+        // Alone on a day, each gets its usual color.
+        assert_eq!(t.app.project_color(Some("p10")), p[2]);
+        let start = chrono::Local::now() - chrono::Duration::hours(2);
+        for name in ["p10", "p2"] {
+            let mut s = finished_session(start, start + chrono::Duration::minutes(30), None);
+            s.project = Some(name.into());
+            t.app.today_sessions.push(s);
+        }
+        // Together, the older keeps it and the other moves on.
+        assert_eq!(t.app.project_color(Some("p2")), p[2]);
+        assert_eq!(t.app.project_color(Some("p10")), p[3]);
     }
 
     #[test]

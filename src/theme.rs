@@ -125,10 +125,28 @@ pub const PROJECT_PALETTE: [Color; 8] = [
 /// Time without a project.
 pub const NO_PROJECT: Color = MUTED;
 
-/// The color of the project that was `rank`-th to be used (0 first);
-/// past the palette's end, colors repeat.
-pub fn project_color(rank: usize) -> Color {
-    PROJECT_PALETTE[rank % PROJECT_PALETTE.len()]
+/// Colors for the projects one view shows, given their first-use `ranks`
+/// (0: the first project ever used), in the same order. Each prefers the
+/// color its rank picks from `PROJECT_PALETTE`, so it usually looks the
+/// same everywhere; when two on screen would share one, the project used
+/// first keeps it and the other takes the next free color. Colors only
+/// repeat once a view shows more projects than the palette has.
+pub fn project_colors(ranks: &[usize]) -> Vec<Color> {
+    let n = PROJECT_PALETTE.len();
+    let mut order = (0..ranks.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&i| ranks[i]);
+    let mut taken = [false; PROJECT_PALETTE.len()];
+    let mut colors = vec![PROJECT_PALETTE[0]; ranks.len()];
+    for i in order {
+        let preferred = ranks[i] % n;
+        let slot = (0..n)
+            .map(|step| (preferred + step) % n)
+            .find(|&slot| !taken[slot])
+            .unwrap_or(preferred);
+        taken[slot] = true;
+        colors[i] = PROJECT_PALETTE[slot];
+    }
+    colors
 }
 
 /// Bold accent — panel titles, active tab, the running timer.
@@ -159,6 +177,20 @@ pub fn kv(label: &str, value: Vec<Span<'static>>) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projects_keep_their_preferred_color_unless_it_clashes() {
+        let p = PROJECT_PALETTE;
+        // No clash: each by its rank.
+        assert_eq!(project_colors(&[0, 1, 5]), [p[0], p[1], p[5]]);
+        // Ranks 2 and 10 both prefer p[2]: the older keeps it, whatever
+        // the order given, and the other takes the next free one.
+        assert_eq!(project_colors(&[10, 2]), [p[3], p[2]]);
+        assert_eq!(project_colors(&[2, 3, 10]), [p[2], p[3], p[4]]);
+        // Past the palette, colors repeat (preferred again).
+        let ranks = (0..9).collect::<Vec<_>>();
+        assert_eq!(project_colors(&ranks)[8], p[0]);
+    }
 
     #[test]
     fn kv_pairs_dimmed_label_with_its_value() {

@@ -93,8 +93,14 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 
   Project colors go by the order projects were first used
   (`db.projects_by_first_use`, loaded into `App::project_order` with the
-  suggestions; `App::project_color`), so a project keeps its color from day
-  to day and none share one until there are more than 8.
+  suggestions), so a project keeps its color from day to day: its rank
+  picks a preferred color from the palette. Each view then makes them
+  distinct (`theme::project_colors`): when two projects it shows would
+  share one, the one used first keeps it and the other takes the next free
+  color. First use, not time, decides, so colors don't swap as the day's
+  times change. On the main screen the view is today's projects
+  (`App::project_color`); the multi-day views will do the same over their
+  period, with a wider pool.
 - **`app.rs`** — everything else: `App` state, the `Screen` enum and forms,
   per-screen key handlers, draw methods, session lifecycle helpers,
   `fuzzy_filter`, layout helpers, and the test harness. Unit tests at the
