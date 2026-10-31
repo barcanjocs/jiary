@@ -270,6 +270,15 @@ but knowing them makes new handlers much easier to write.
 
 Steps: `Activity → Project → Task` (the tabs row shows progress).
 
+- **Recent picks.** The form opens with `recent`, the last `RECENT_PICKS`
+  (5) distinct activity/project/task combinations that aren't detours
+  (`db.recent_combos`). While the activity input is empty the list area
+  shows them numbered (`draw_recent`) instead of the activity suggestions,
+  and `1`–`5` submits that combination at once. Once anything is typed
+  (Tab accepting a suggestion included), the usual suggestions are back and
+  digits are text.
+- Submitting, from a pick or the Task step, goes through `begin`.
+
 - **Activity / Project / Task** — each an `Autocomplete` (see *Fuzzy
   autocomplete*); the step handlers only intercept Enter and forward every
   other key to it. The activity and project fields' candidates are copied from

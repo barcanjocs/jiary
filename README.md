@@ -68,6 +68,8 @@ Section sizes and collapsed sections are remembered between runs, in `layout.con
 
 ### Starting a session
 
+The form opens with your 5 most recent activity/project/task combinations listed (detours left out): press `1`–`5` to start one straight away. Type anything to fill the form in instead:
+
 1. **Activity** — type to filter suggestions (fuzzy match), Tab or ↑/↓ to pick one, Enter to confirm
 2. **Project** — same as activity
 3. **Task** — same as activity (suggestions filtered by selected project)

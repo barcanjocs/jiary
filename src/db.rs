@@ -7,7 +7,7 @@ use crate::session::{BREAK, DISRUPTION, MEETING, Session};
 
 /// The (activity, project, task) of a session, as returned by
 /// [`Db::latest_work_session`] for resuming work.
-type SessionCombo = (String, Option<String>, Option<String>);
+pub type SessionCombo = (String, Option<String>, Option<String>);
 
 pub struct Db {
     conn: Connection,
@@ -284,6 +284,27 @@ impl Db {
 
         let rows = stmt
             .query_map(params![project], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
+    /// The last `limit` distinct activity/project/task combinations that
+    /// aren't detours, most recently started first: the start form's
+    /// one-key picks.
+    pub fn recent_combos(&self, limit: usize) -> Result<Vec<SessionCombo>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT activity, project, task FROM sessions
+                 WHERE activity NOT IN (?1, ?2, ?3)
+                 GROUP BY activity, project, task
+                 ORDER BY MAX(started_at) DESC, MAX(id) DESC LIMIT ?4",
+            )
+            .map_err(DbError::Sqlite)?;
+        let rows = stmt
+            .query_map(params![DISRUPTION, BREAK, MEETING, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
             .map_err(DbError::Sqlite)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
     }

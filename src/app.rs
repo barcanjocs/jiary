@@ -12,7 +12,7 @@ use ratatui::widgets::{
 };
 
 use crate::captions;
-use crate::db::Db;
+use crate::db::{Db, SessionCombo};
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
 use crate::mascot::{self, Mood, Reaction};
 use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
@@ -107,6 +107,9 @@ struct Undo {
     started: Option<i64>,
 }
 
+/// How many recent activity/project/task picks the start form offers.
+const RECENT_PICKS: usize = 5;
+
 enum Screen {
     Main,
     Help,
@@ -121,6 +124,9 @@ struct AddNoteForm {
 
 struct StartSessionForm {
     step: Step,
+    /// Recent combinations, started with `1`–`5` while the activity input
+    /// is empty.
+    recent: Vec<SessionCombo>,
     activity: Autocomplete,
     project: Autocomplete,
     task: Autocomplete,
@@ -561,8 +567,16 @@ impl App {
             KeyCode::Char('b') => self.detour(BREAK, false),
             KeyCode::Char('m') => self.detour(MEETING, false),
             KeyCode::Char('s') => {
+                let recent = match self.db.recent_combos(RECENT_PICKS) {
+                    Ok(recent) => recent,
+                    Err(e) => {
+                        self.set_error(e);
+                        Vec::new()
+                    }
+                };
                 self.screen = Screen::StartSession(Box::new(StartSessionForm {
                     step: Step::Activity,
+                    recent,
                     activity: Autocomplete::new(self.activities.clone()),
                     project: Autocomplete::new(self.projects.clone()),
                     task: Autocomplete::new(Vec::new()),
@@ -634,6 +648,14 @@ impl App {
                     form.step = Step::Project;
                 }
             }
+            // With nothing typed, a digit starts that recent pick.
+            KeyCode::Char(c @ '1'..='9')
+                if form.activity.input.is_empty()
+                    && let Some(combo) = form.recent.get(c as usize - '1' as usize) =>
+            {
+                let (activity, project, task) = combo.clone();
+                self.begin(&activity, project, task);
+            }
             _ => form.activity.handle_key(key),
         }
     }
@@ -678,7 +700,11 @@ impl App {
         };
         let project = form.project.value();
         let task = form.task.value();
+        self.begin(&activity, project, task);
+    }
 
+    /// Submits the start form: ends the active session and starts this one.
+    fn begin(&mut self, activity: &str, project: Option<String>, task: Option<String>) {
         // Auto-stop any currently active session. If that fails, abort:
         // creating anyway would leave two active sessions (the db trigger
         // rejects it, but failing early surfaces the real error instead of
@@ -687,7 +713,7 @@ impl App {
             return;
         }
 
-        self.start_session(&activity, project, task);
+        self.start_session(activity, project, task);
 
         self.refresh_after_session_change();
         self.refresh_suggestions();
@@ -1613,6 +1639,9 @@ impl App {
         );
 
         match form.step {
+            Step::Activity if form.activity.input.is_empty() && !form.recent.is_empty() => {
+                draw_recent(frame, list_area, &form.recent);
+            }
             Step::Activity => draw_suggestions(frame, list_area, &form.activity),
             Step::Project => draw_suggestions(frame, list_area, &form.project),
             Step::Task => draw_suggestions(frame, list_area, &form.task),
@@ -1730,6 +1759,30 @@ fn draw_suggestions(frame: &mut Frame, area: ratatui::layout::Rect, field: &Auto
             &mut ListState::default().with_selected(field.selection),
         );
     }
+}
+
+/// The start form's recent picks, numbered for their keys, as
+/// `activity · project · task`.
+fn draw_recent(frame: &mut Frame, area: Rect, recent: &[SessionCombo]) {
+    let lines = recent
+        .iter()
+        .enumerate()
+        .map(|(i, (activity, project, task))| {
+            let parts = [Some(activity.as_str()), project.as_deref(), task.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            Line::from(vec![
+                Span::styled(
+                    format!("[{}] ", i + 1),
+                    Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(parts),
+            ])
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// Columns the cat takes beside the session text: its canvas plus a gap on
@@ -2288,6 +2341,7 @@ mod tests {
         fn empty_form(step: Step) -> StartSessionForm {
             StartSessionForm {
                 step,
+                recent: Vec::new(),
                 activity: Autocomplete::new(Vec::new()),
                 project: Autocomplete::new(Vec::new()),
                 task: Autocomplete::new(Vec::new()),
@@ -3848,6 +3902,33 @@ mod tests {
         t.key(KeyCode::Char('u'));
         assert!(t.app.active_session.is_none());
         assert!(t.app.today_sessions.is_empty());
+    }
+
+    #[test]
+    fn recent_picks_start_with_one_key() {
+        let mut t = TestApp::new();
+        t.app
+            .start_session("Reading", Some("alpha".into()), Some("beta".into()));
+        t.key(KeyCode::Char('e'));
+        t.app.start_session("Writing", Some("gamma".into()), None);
+        t.key(KeyCode::Char('b')); // detours aren't offered
+        t.key(KeyCode::Char('s'));
+        let buf = render(&t.app);
+        assert!(line(&buf, row_with(&buf, "[1]")).contains("[1] Writing · gamma"));
+        assert!(line(&buf, row_with(&buf, "[2]")).contains("[2] Reading · alpha · beta"));
+        assert!(!line(&buf, row_with(&buf, "[2]") + 1).contains("[3]"));
+
+        t.key(KeyCode::Char('2'));
+        assert!(matches!(t.app.screen, Screen::Main));
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.activity, "Reading");
+        assert_eq!(active.project.as_deref(), Some("alpha"));
+        assert_eq!(active.task.as_deref(), Some("beta"));
+
+        // Once something is typed, digits are just text.
+        t.key(KeyCode::Char('s'));
+        t.typed("v2");
+        assert_eq!(t.form().activity.input, "v2");
     }
 
     fn activity(t: &TestApp) -> Option<&str> {
