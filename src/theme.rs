@@ -55,8 +55,28 @@ pub const OK: Color = Color::Yellow;
 /// Bad outcome (focus 1), errors, interruption counts.
 pub const BAD: Color = Color::Red;
 /// A session that could have been rated but wasn't (the summary's focus
-/// line).
+/// line, the focus grid).
 pub const UNRATED: Color = Color::DarkGray;
+
+/// The focus grid's ramp, from 256-color hues: red, through orange and
+/// yellow, to green, evenly over a day's average focus from 1 to 3.
+pub const FOCUS_RAMP: [Color; 9] = [
+    Color::Indexed(160), // red
+    Color::Indexed(166),
+    Color::Indexed(172), // orange
+    Color::Indexed(178),
+    Color::Indexed(184), // yellow
+    Color::Indexed(148),
+    Color::Indexed(112),
+    Color::Indexed(76),
+    Color::Indexed(40), // green
+];
+
+/// The ramp's color for an average focus (1 to 3; clamped).
+pub fn focus_gradient(average: f64) -> Color {
+    let step = ((average - 1.0) / 2.0 * (FOCUS_RAMP.len() - 1) as f64).round();
+    FOCUS_RAMP[step.clamp(0.0, (FOCUS_RAMP.len() - 1) as f64) as usize]
+}
 
 /// Activities, each in its own color wherever it shows (the active
 /// session, today's list, the summary): work in light blue, meetings in the
@@ -202,6 +222,17 @@ mod tests {
         // Past the palette, colors repeat (preferred again).
         let ranks = (0..17).collect::<Vec<_>>();
         assert_eq!(project_colors(&ranks)[16], p[0]);
+    }
+
+    #[test]
+    fn the_focus_gradient_runs_red_to_green() {
+        assert_eq!(focus_gradient(1.0), FOCUS_RAMP[0]);
+        assert_eq!(focus_gradient(2.0), FOCUS_RAMP[4]);
+        assert_eq!(focus_gradient(3.0), FOCUS_RAMP[8]);
+        assert_eq!(focus_gradient(2.6), FOCUS_RAMP[6]);
+        // Out of range: clamped.
+        assert_eq!(focus_gradient(0.0), FOCUS_RAMP[0]);
+        assert_eq!(focus_gradient(9.0), FOCUS_RAMP[8]);
     }
 
     #[test]

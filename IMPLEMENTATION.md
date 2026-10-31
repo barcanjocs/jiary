@@ -432,7 +432,16 @@ latest end's, as times of day; 9–17 when empty) and, in
 under them; then the totals over the whole period, built from the same
 pieces as today's summary (`time_split_items` plus the days tracked and
 the average per day, `activity_bar` / `activity_items`, `project_bar` /
-`project_items`, `focus_items`), bars as wide as the timelines. The
+`project_items`, `focus_items`), bars as wide as the timelines; under
+the focus text, `focus_grid`: a row per weekday and a column per week
+(headed by its Monday's date), a `██` per day in `theme::focus_gradient`
+of its average focus (`FOCUS_RAMP`: 9 256-color steps, red through
+yellow to green over 1–3), `UNRATED` gray when tracked without a rating,
+`░░` when nothing was tracked, blank outside the period or after today.
+It is centered on the view's width as a block (every row the same width,
+so `centered` gives them the same padding), with the ramp's legend
+(`focus_legend`) centered a blank row below. Focus averages everywhere are colored on the
+same ramp (`focus_color`), so a number matches its day's square. The
 running session counts through its in-memory copy, as today. Projects get
 colors distinct within the period (`theme::project_colors` over its
 projects). `draw_period` frames it in an accent box titled with the

@@ -1302,19 +1302,22 @@ impl App {
             ),
             Span::raw(" a day"),
         ]);
-        for (i, (label, bar, items)) in [
-            ("Total   ", None, totals),
+        // Each group: graph rows before its items, and after them.
+        for (i, (label, before, items, after)) in [
+            ("Total   ", Vec::new(), totals, Vec::new()),
             (
                 "Activity",
-                Some(activity_bar(&total, graph_width)),
+                vec![activity_bar(&total, graph_width)],
                 activity_items(&total),
+                Vec::new(),
             ),
             (
                 "Project ",
-                Some(project_bar(&total, graph_width, &colors)),
+                vec![project_bar(&total, graph_width, &colors)],
                 project_items(&total, &colors),
+                Vec::new(),
             ),
-            ("Focus   ", None, focus_items(&total)),
+            ("Focus   ", Vec::new(), focus_items(&total), Vec::new()),
         ]
         .into_iter()
         .enumerate()
@@ -1322,9 +1325,23 @@ impl App {
             if i > 0 {
                 lines.push(Line::default());
             }
-            let rows = [bar.into_iter().collect(), wrap_items(items, width, label)].concat();
+            let rows = [before, wrap_items(items, width, label), after].concat();
             lines.extend(hanging_lines(label, rows));
         }
+
+        // Under the focus text, the focus grid, centered as a block, and
+        // a row further down its legend, centered on its own.
+        let grid = focus_grid(&days, view.first, view.last, today);
+        let block_width = grid.iter().map(item_width).max().unwrap_or(0);
+        lines.push(Line::default());
+        lines.extend(
+            grid.into_iter()
+                .map(|row| centered(row, block_width, width)),
+        );
+        lines.push(Line::default());
+        let legend = focus_legend();
+        let legend_width = item_width(&legend);
+        lines.push(centered(legend, legend_width, width));
         lines
     }
 
@@ -3187,13 +3204,97 @@ fn focus_items(summary: &DaySummary) -> Vec<Item> {
     ]
 }
 
-/// The color of a focus average: its rounded rating's outcome color.
-fn focus_color(average: f64) -> Color {
-    match average.round() as i32 {
-        ..=1 => theme::BAD,
-        2 => theme::OK,
-        _ => theme::GOOD,
+/// The period's days as a grid of squares, GitHub style: a row per
+/// weekday, a column per week (headed by its Monday's date), each day
+/// colored by its average focus on `theme::FOCUS_RAMP`; dark gray when
+/// tracked but unrated, a faint texture when nothing was tracked, blank
+/// outside the period and after `today`. Its legend is `focus_legend`.
+fn focus_grid(
+    days: &[(chrono::NaiveDate, DaySummary)],
+    first: chrono::NaiveDate,
+    last: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+) -> Vec<Item> {
+    use chrono::Datelike;
+    const WEEKDAY: usize = 4; // "Mon "
+    let monday = first - chrono::Duration::days(first.weekday().num_days_from_monday() as i64);
+    let weeks = ((last - monday).num_days() / 7 + 1) as usize;
+    let week = |w: usize| monday + chrono::Duration::weeks(w as i64);
+
+    let mut header = vec![Span::raw(" ".repeat(WEEKDAY))];
+    // Spaced like the squares below: two columns, a space between.
+    let dates = (0..weeks)
+        .map(|w| format!("{:<2}", week(w).day()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    header.push(Span::styled(dates, theme::DIMMED));
+    let mut rows = vec![header];
+    for weekday in 0..7 {
+        let name = (monday + chrono::Duration::days(weekday))
+            .format("%a ")
+            .to_string();
+        let today_row = today.weekday().num_days_from_monday() as i64 == weekday
+            && (first..=last).contains(&today);
+        let mut row = vec![Span::styled(
+            name,
+            if today_row {
+                theme::TITLE
+            } else {
+                theme::DIMMED
+            },
+        )];
+        for w in 0..weeks {
+            let day = week(w) + chrono::Duration::days(weekday);
+            let summary = days.iter().find(|(d, _)| *d == day).map(|(_, s)| s);
+            let cell = match summary {
+                _ if day < first || day > last || day > today => Span::raw("  "),
+                Some(s) if s.average_focus.is_some() => Span::styled(
+                    "██",
+                    Style::new().fg(theme::focus_gradient(s.average_focus.unwrap_or(2.0))),
+                ),
+                Some(s) if !s.tracked.is_zero() => {
+                    Span::styled("██", Style::new().fg(theme::UNRATED))
+                }
+                _ => Span::styled("░░", Style::new().fg(theme::UNRATED)),
+            };
+            row.push(cell);
+            if w + 1 < weeks {
+                row.push(Span::raw(" "));
+            }
+        }
+        rows.push(row);
     }
+    rows
+}
+
+/// The focus grid's legend: 1, the ramp, 3.
+fn focus_legend() -> Item {
+    let mut legend = vec![Span::styled("1 ", theme::DIMMED)];
+    legend.extend(
+        theme::FOCUS_RAMP
+            .iter()
+            .map(|&color| Span::styled("█", Style::new().fg(color))),
+    );
+    legend.push(Span::styled(" 3", theme::DIMMED));
+    legend
+}
+
+/// A row's width in cells.
+fn item_width(row: &Item) -> usize {
+    row.iter().map(Span::width).sum()
+}
+
+/// `row`, part of a block `block_width` wide, centered on `width` columns:
+/// every row of the block gets the same left padding, so they stay aligned.
+fn centered(row: Item, block_width: usize, width: u16) -> Line<'static> {
+    let pad = (width as usize).saturating_sub(block_width) / 2;
+    Line::from([vec![Span::raw(" ".repeat(pad))], row].concat())
+}
+
+/// The color of a focus average: its place on the focus grid's ramp, so
+/// a number and its day's square always match.
+fn focus_color(average: f64) -> Color {
+    theme::focus_gradient(average)
 }
 
 /// Tracked time, then what it was made of (work, breaks, disruptions),
@@ -5801,6 +5902,76 @@ mod tests {
             line(&buf, RENDER_HEIGHT - 1),
             "[←→] previous/next  [w/m] week/month  [↑↓] scroll  [Esc] back"
         );
+    }
+
+    #[test]
+    fn the_focus_grid_colors_each_day_by_its_focus() {
+        let day = |d| chrono::NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+        let at = |d, h| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, d, h, 0, 0)
+                .unwrap()
+        };
+        let (first, last, today) = (
+            day(26),
+            chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            day(29),
+        );
+        let summary_of = |sessions: Vec<Session>| summarize(&sessions, None, Utc::now());
+        let days = vec![
+            (
+                day(26),
+                summary_of(vec![finished_session(at(26, 9), at(26, 11), Some(3))]),
+            ),
+            (
+                day(27),
+                summary_of(vec![finished_session(at(27, 9), at(27, 11), None)]),
+            ),
+            (day(28), summary_of(Vec::new())),
+            (
+                day(29),
+                summary_of(vec![finished_session(at(29, 9), at(29, 10), Some(1))]),
+            ),
+        ];
+        let grid = focus_grid(&days, first, last, today);
+        // A header (the week's Monday), then Mon–Sun.
+        assert_eq!(grid.len(), 8);
+        assert_eq!(grid[0][1].content, "26");
+        // Every row as wide as the others, so the block centers evenly.
+        let widths = grid
+            .iter()
+            .map(item_width)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(widths.len(), 1, "{widths:?}");
+        let cell = |weekday: usize| &grid[1 + weekday][1];
+        let fg = |weekday: usize| cell(weekday).style.fg;
+        assert_eq!(
+            (cell(0).content.as_ref(), fg(0)),
+            ("██", Some(theme::FOCUS_RAMP[8]))
+        );
+        assert_eq!(
+            (cell(1).content.as_ref(), fg(1)),
+            ("██", Some(theme::UNRATED))
+        );
+        assert_eq!(
+            (cell(2).content.as_ref(), fg(2)),
+            ("░░", Some(theme::UNRATED))
+        );
+        assert_eq!(
+            (cell(3).content.as_ref(), fg(3)),
+            ("██", Some(theme::FOCUS_RAMP[0]))
+        );
+        // Friday on: still to come.
+        assert_eq!(cell(4).content, "  ");
+        // Today's weekday in the accent.
+        assert_eq!(grid[4][0].style, theme::TITLE);
+        assert_eq!(grid[1][0].style, theme::DIMMED);
+        // The legend: 1, the ramp, 3.
+        let legend = focus_legend()
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+        assert_eq!(legend, "1 █████████ 3");
     }
 
     #[test]
