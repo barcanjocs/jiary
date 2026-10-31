@@ -34,7 +34,7 @@ On first run, a database is created at:
 | `n` | Add a note to the active session |
 | `i` | Increment interruption counter |
 | `d` | Stop current session, start a Disruption session (no-op during one) |
-| `b` | Stop current session, start a Break session (no-op during one) |
+| `b` | Stop current session (if any), start a Break session (no-op during one) |
 | `m` | Stop current session (if any), start a Meeting session (no-op during one) |
 | `r` | Resume the last work session (ends a disruption, break or meeting) |
 | `?` | Show all keys |
@@ -95,12 +95,12 @@ You can also add a note when ending a session (press `e`).
 Three keys step you out of what you're doing with a single keystroke:
 
 - `d` — you're interrupted (colleague conversation, phone call, context switch): starts a "Disruption" session.
-- `b` — you're taking a break on purpose (coffee, lunch, a walk): starts a "Break" session.
-- `m` — you're jumping into a meeting: starts a "Meeting" session. Unlike the other two it also works when nothing is running (e.g. the morning standup), and meeting time counts as work in the summary.
+- `b` — you're taking a break on purpose (coffee, lunch, a walk): starts a "Break" session. It also works when nothing is running, e.g. right after ending a session with `e`.
+- `m` — you're jumping into a meeting: starts a "Meeting" session. It also works when nothing is running (e.g. the morning standup), and meeting time counts as work in the summary.
 
 When you're done, press `r` to end the detour and restart your previous activity/project/task. The status line groups the three as `[d/b/m] away`; `?` lists them separately.
 
-The full round-trip is two keystrokes: `d`, `b` or `m` … `r`. `r` always goes back to the last session that wasn't a detour, so a meeting followed by a break (`m`, then `b`) still resumes your work. Disruptions and breaks need a running session to pause.
+The full round-trip is two keystrokes: `d`, `b` or `m` … `r`. `r` always goes back to the last session that wasn't a detour, so a meeting followed by a break (`m`, then `b`) still resumes your work. Only a disruption needs a running session to interrupt.
 
 Meetings you start with `s` (activity "Meeting") are detours too, so `r` never resumes into a meeting.
 

@@ -466,10 +466,11 @@ impl App {
                 self.refresh_after_session_change();
             }
 
-            // Disruptions and breaks pause something; a meeting is work in
-            // its own right, so it can also start from nothing.
+            // A disruption interrupts something, so it needs a session; a
+            // break or a meeting can also start from nothing (say, right
+            // after ending a session with `e`).
             KeyCode::Char('d') => self.detour(DISRUPTION, true),
-            KeyCode::Char('b') => self.detour(BREAK, true),
+            KeyCode::Char('b') => self.detour(BREAK, false),
             KeyCode::Char('m') => self.detour(MEETING, false),
             KeyCode::Char('s') => {
                 self.screen = Screen::StartSession(Box::new(StartSessionForm {
@@ -3553,10 +3554,12 @@ mod tests {
     }
 
     #[test]
-    fn break_needs_a_session_to_pause() {
+    fn break_can_start_from_nothing_but_disruption_cannot() {
         let mut t = TestApp::new();
-        t.key(KeyCode::Char('b'));
+        t.key(KeyCode::Char('d')); // nothing to interrupt
         assert!(t.app.active_session.is_none());
+        t.key(KeyCode::Char('b')); // e.g. right after ending a session
+        assert_eq!(activity(&t), Some(BREAK));
     }
 
     #[test]

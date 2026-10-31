@@ -325,8 +325,9 @@ Main-screen flows built from these:
   needs_session)`: close the active session (if any) and start a
   `DISRUPTION` / `BREAK` / `MEETING` session with no project/task. Repeating
   the same key is a no-op rather than splitting the detour in two; the other
-  keys switch kinds. `d` and `b` need a running session to pause; `m` also
-  starts from nothing (a meeting is work in its own right). All three are
+  keys switch kinds. `d` needs a running session to interrupt; `b` and `m`
+  also start from nothing (a break right after ending a session with `e`, a
+  standup before any work). All three are
   *detours* (`session::DETOURS`, `is_detour`).
 - **`r` (resume)** — proceeds only when there is no active session or the
   active one is a detour. Looks up `latest_work_session` (most recent
