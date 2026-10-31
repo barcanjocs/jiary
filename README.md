@@ -61,3 +61,17 @@ the day. Press `/` for the command palette, where `/weekly`, `/monthly` and
   keys, and where your data lives (and how to back it up).
 - **[Developer manual](docs/dev/README.md)**: building, checking, releasing,
   and how Jiary works inside.
+
+## Why I made this
+
+I wanted a Pomodoro-style timer with more flexibility and less friction.
+I like starting a work session with a Pomodoro in mind, but I don't want to
+be interrupted after 25 minutes: if I'm in deep flow, I want to keep going
+until I get tired, then glance at the clock and check I've put in the time
+before taking a break. So Jiary never alerts you. The timer just counts up,
+and the cat starts dozing off once you've been at it for 25 minutes.
+
+I also wanted starting a session, and getting through a busy day of
+interruptions, breaks and meetings, to take a key or two rather than a
+form. And I wanted to see how my focus and my time add up across days,
+weeks and months.
