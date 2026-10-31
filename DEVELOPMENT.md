@@ -33,7 +33,7 @@ truth for state — this file plus `git log` is all that is needed to resume.
   developer manuals in `docs/`, and pictures drawn by the UI code
   (`app/screenshot.rs`), all in 1.0.1; after it,
   `docs/dev/implementation.md` rewritten to match the code.
-- Next, in order: backlog H (rename labels, as a `/` command), J (sleep
+- Next, in order: backlog H (`/rename`, designed: implementing), J (sleep
   and mood, with its limits), A (browse past days, likely `/day` with ←→
   like the period views) and K (soft Pomodoro, with `/settings`).
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
@@ -59,17 +59,38 @@ from its scope note alone, without re-deriving context.
       `DEFAULT_ACTIVITIES` only seed a fresh db, so unused built-ins drop out;
       activity is required (empty Enter stays on the step); 1–7 shortcuts
       removed.
-- [ ] **H. Merge labels** (small). Free-text labels can't be deleted — they
-      are derived from history, so a typo ("Progamming") is suggested as long
-      as any session uses it. Add a way to rename every use of an activity,
-      project or task to another value (`UPDATE sessions SET activity = ?new
-      WHERE activity = ?old`, same for project/task), which removes the old
-      label from suggestions while keeping history truthful. Decided
-      2026-10-31: exposed as a `/` command (I is done, but palette commands
-      take no arguments yet). Open: how the old and new label are picked
-      (e.g. `/rename` then two `Autocomplete` steps, like the start form),
-      and confirming the rename before writing. Renaming a project also
-      moves its color (colors go by first use).
+- [ ] **H. Rename and merge labels** (small-medium). Free-text labels
+      can't be deleted: they come from history, so a typo ("Progamming")
+      is suggested as long as any session uses it. `/rename` changes every
+      use of an activity, project or task to another value; when that
+      value exists the two merge. History stays truthful (same sessions,
+      same times) and the old label drops out of suggestions. Designed
+      2026-10-31:
+      - Flow: one palette command opening a form like the start form, tabs
+        What · From · To (· Project before From, for tasks). What: pick
+        Activity, Project or Task. From: an `Autocomplete` over the labels
+        in use; only existing values. To: the same, plus free text. Then a
+        confirm line before writing, Enter applies, Esc cancels: `Rename
+        "a" to "b" in N sessions?` or `Merge "a" into "b" (N sessions; it
+        has M)?`.
+      - Tasks are renamed within one project (picked first; no project is
+        its own group), since task names repeat across projects.
+      - No undo: the confirmation with its count is the safety. `u` keeps
+        meaning the last start or end.
+      - The detour activities (Disruption, Break, Meeting) can't be renamed
+        and nothing can be renamed to them: jiary recognizes detours by
+        name, so either would break `r`, the rating window and the summary.
+      - Blank To is refused (clearing a label is a delete in disguise; can
+        come later as an explicit option). Case-only renames work.
+      - Db: `count_label` for the confirmation, `rename_label(kind, from,
+        to, project) -> rows`, one UPDATE in a transaction. No schema
+        change. Notes aren't touched.
+      - After a rename, reload everything `draw` reads: active session,
+        today, suggestions, project order, previous notes. Merging projects
+        can shift colors (first use decides); say so in the docs.
+      - Docs: recording.md, keys.md, implementation.md. Tests: rename,
+        merge, task scope, detours and blank refused, the count, the
+        in-memory refresh.
 - [x] **I. `/` commands** — done 2026-10-31: `/` opens a palette of
       `COMMANDS` (fuzzy filter, Tab completes, Enter runs). A command's
       `Action` is a main-screen key or a view. Commands take no arguments
