@@ -3,10 +3,12 @@ use super::graphs::{
     start_of_hour, timeline_row, year_focus_grid,
 };
 use super::palette::{COMMANDS, PaletteForm, palette_matches};
+use super::period_view::PeriodView;
 use super::text::{fmt_time, wrap_text};
 use super::*;
 use crate::db::Db;
 use crate::idle;
+use crate::period::Period;
 use chrono::TimeZone;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
