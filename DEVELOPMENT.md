@@ -32,8 +32,13 @@ truth for state — this file plus `git log` is all that is needed to resume.
   previous notes. README and IMPLEMENTATION.md synced. Tree green, 51 tests.
   Then on main: text inputs wrap inside their modal; backlog C done
   (free-text activities, requested by a user). Tree green, 61 tests.
-- Next: UI work. H (merge labels) is deferred until I (`/` commands)
-  exists, since it will be one of them.
+  Then on branch `three-section-layout`: the main screen is three sections
+  (active / today, scrollable / day summary), today and summary collapsible,
+  all resizable by keyboard (+/-/=) and mouse (drag borders), focus via Tab,
+  `?` help screen, layout saved to `layout.conf`. New modules `layout.rs`
+  (geometry + file) and `summary.rs`. Tree green, 89 tests.
+- Next: H (merge labels) is deferred until I (`/` commands) exists, since
+  it will be one of them.
 - Blockers / open questions: none.
 
 ## Backlog
@@ -152,6 +157,11 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/db.rs` — `Db` over rusqlite; schema + single-active trigger; all SQL
   lives here. Unit tests at the bottom.
 - `src/session.rs` — `Session` struct: a db row with parsed timestamps.
+- `src/layout.rs` — main-screen section geometry (`LayoutPrefs::resolve`,
+  resizing with clamping) and the `layout.conf` file. Pure; unit tests at
+  the bottom.
+- `src/summary.rs` — `summarize`: the day summary over in-memory sessions.
+  Pure; unit tests at the bottom.
 - `src/theme.rs` — palette (16 named colors) and shared style helpers; all
   widgets take their styles from here so the look is tweaked in one place.
 - `src/app.rs` — all UI: `App` state, `Screen` enum, per-screen key handlers

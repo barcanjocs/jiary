@@ -336,7 +336,8 @@ fn parse_timestamp(s: String) -> Result<DateTime<Utc>, DbError> {
         .map_err(|parse| DbError::BadTimestamp { value: s, parse })
 }
 
-fn data_dir() -> Option<PathBuf> {
+/// Where the database (and the layout file next to it) lives.
+pub fn data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("jiary"))
 }
 

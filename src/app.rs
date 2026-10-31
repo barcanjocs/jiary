@@ -1,14 +1,23 @@
+use std::path::PathBuf;
+
 use chrono::Utc;
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Tabs};
+use ratatui::widgets::{
+    Block, BorderType, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+    ScrollbarState, Tabs,
+};
 
 use crate::db::Db;
+use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
 use crate::session::Session;
+use crate::summary::{DaySummary, summarize};
 use crate::theme;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
@@ -42,10 +51,26 @@ pub struct App {
     /// Last error that occurred, kept as plain data so the UI renders it in
     /// exactly one place (and a future auto-clear-on-success can too).
     error: Option<String>,
+
+    /// Main-screen section sizes and collapsed state, saved to `layout_path`
+    /// (when set) whenever they change.
+    layout: LayoutPrefs,
+    layout_path: Option<PathBuf>,
+    /// The main-screen section that Space and +/- act on.
+    focus: Section,
+    /// First visible row of today's sessions.
+    scroll: usize,
+    /// Terminal size as of the last frame. Key and mouse handlers lay the
+    /// main screen out from it, so they see exactly what was drawn.
+    size: (u16, u16),
+    /// While a border is dragged with the mouse: the section whose height
+    /// it sets (see `border_at`).
+    drag: Option<Section>,
 }
 
 enum Screen {
     Main,
+    Help,
     // Boxed: three autocompletes make it far larger than the other variants.
     StartSession(Box<StartSessionForm>),
     EndSession(EndSessionForm),
@@ -146,7 +171,9 @@ enum Step {
 }
 
 impl App {
-    pub fn new(db: Db) -> Self {
+    /// `layout_path` is where the main-screen layout is loaded from and saved
+    /// to; `None` keeps it in memory only (tests).
+    pub fn new(db: Db, layout_path: Option<PathBuf>) -> Self {
         let mut app = Self {
             db,
             active_session: None,
@@ -157,7 +184,20 @@ impl App {
             screen: Screen::Main,
             previous_notes: Vec::new(),
             error: None,
+            layout: LayoutPrefs::default(),
+            layout_path,
+            focus: Section::Active,
+            scroll: 0,
+            size: (0, 0),
+            drag: None,
         };
+
+        if let Some(path) = &app.layout_path {
+            match LayoutPrefs::load(path) {
+                Ok(layout) => app.layout = layout,
+                Err(e) => app.set_error(format!("Could not read layout: {e}")),
+            }
+        }
 
         // Attempt every load so partial data still shows; failures are recorded
         // for display instead of being swallowed.
@@ -321,6 +361,7 @@ impl App {
         let key = key.code;
         match &self.screen {
             Screen::Main => return self.handle_main(key),
+            Screen::Help => self.screen = Screen::Main, // any key closes it
             Screen::StartSession(_) => self.handle_start_session(key),
             Screen::EndSession(_) => self.handle_end_session(key),
             Screen::AddNote(_) => self.handle_add_note(key),
@@ -331,6 +372,31 @@ impl App {
     fn handle_main(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Char('q') => return true,
+            KeyCode::Char('?') => self.screen = Screen::Help,
+
+            // Sections: focus, collapse, resize.
+            KeyCode::Tab => self.focus = self.focus.next(),
+            KeyCode::BackTab => self.focus = self.focus.prev(),
+            KeyCode::Char(' ') => {
+                self.layout.toggle_collapsed(self.focus);
+                self.save_layout();
+            }
+            KeyCode::Char('+') => self.resize_focused(1),
+            KeyCode::Char('-') => self.resize_focused(-1),
+            KeyCode::Char('=') => {
+                self.layout.reset_sizes();
+                self.save_layout();
+            }
+
+            // Today's sessions is the only section that scrolls, so the
+            // scroll keys act on it whichever section has focus.
+            KeyCode::Up | KeyCode::Char('k') => self.scroll_today(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.scroll_today(1),
+            KeyCode::PageUp => self.scroll_today(-(self.today_viewport() as isize)),
+            KeyCode::PageDown => self.scroll_today(self.today_viewport() as isize),
+            KeyCode::Home => self.scroll = 0,
+            KeyCode::End => self.scroll = self.max_scroll(),
+
             KeyCode::Char('i') => {
                 if let Some(id) = self.active_session.as_ref().map(|s| s.id) {
                     match self.db.increment_interruptions(id) {
@@ -603,12 +669,13 @@ impl App {
         let input = input.as_ref();
         match &self.screen {
             Screen::Main => self.draw_main(frame, content),
+            Screen::Help => draw_help(frame, content),
             Screen::StartSession(form) => self.draw_start_session(frame, content, form, input),
             Screen::EndSession(form) => self.draw_end_session(frame, content, form, input),
             Screen::AddNote(_) => self.draw_add_note(frame, content, input),
         }
 
-        frame.render_widget(self.status_line(), status);
+        frame.render_widget(self.status_line(status.width), status);
     }
 
     /// Terminal cursor position for the current screen: `Some` on input lines
@@ -692,22 +759,45 @@ impl App {
     }
 
     /// Bottom row: the red error when the last db operation failed, otherwise
-    /// key hints for the current screen. The only place errors and key hints
-    /// are rendered.
-    fn status_line(&self) -> Line<'static> {
+    /// key hints for the current screen, as many as fit in `width`. The only
+    /// place errors and key hints are rendered.
+    fn status_line(&self, width: u16) -> Line<'static> {
         if let Some(err) = &self.error {
             return Line::from(Span::styled(format!("✗ {err}"), theme::ERROR));
         }
         let hints: &[(&str, &str)] = match &self.screen {
-            Screen::Main => &[
-                ("s", "start"),
-                ("e", "end"),
-                ("n", "note"),
-                ("i", "interrupt"),
-                ("d", "disrupt"),
-                ("r", "resume"),
-                ("q", "quit"),
-            ],
+            // Most useful first for the focused section; `[?] help` is always
+            // shown and lists everything.
+            Screen::Main => match self.focus {
+                Section::Active => &[
+                    ("s", "start"),
+                    ("e", "end"),
+                    ("n", "note"),
+                    ("i", "interrupt"),
+                    ("d", "disrupt"),
+                    ("r", "resume"),
+                    ("Tab", "sections"),
+                    ("q", "quit"),
+                ],
+                Section::Today => &[
+                    ("↑↓", "scroll"),
+                    ("Space", "collapse"),
+                    ("+/-", "resize"),
+                    ("Tab", "next"),
+                    ("s", "start"),
+                    ("e", "end"),
+                    ("q", "quit"),
+                ],
+                Section::Summary => &[
+                    ("Space", "collapse"),
+                    ("+/-", "resize"),
+                    ("Tab", "next"),
+                    ("s", "start"),
+                    ("e", "end"),
+                    ("q", "quit"),
+                ],
+            },
+            Screen::Help => &[("any key", "close")],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
             Screen::EndSession(form) => match form.step {
                 EndStep::Notes => &[("Enter", "continue"), ("Esc", "cancel")],
@@ -721,8 +811,27 @@ impl App {
             },
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
         };
+        let help = matches!(self.screen, Screen::Main).then_some(("?", "help"));
+
+        let hint_width =
+            |(key, desc): &(&str, &str)| key.chars().count() + desc.chars().count() + 3;
+        // Saturating: terminals can be narrower than `[?] help` itself.
+        let budget =
+            (width as usize).saturating_sub(help.as_ref().map_or(0, |h| hint_width(h) + 2));
+        let mut used = 0;
+        let mut shown = Vec::new();
+        for hint in hints {
+            let needed = hint_width(hint) + if shown.is_empty() { 0 } else { 2 };
+            if used + needed > budget {
+                break;
+            }
+            used += needed;
+            shown.push(*hint);
+        }
+        shown.extend(help);
+
         let mut spans = Vec::new();
-        for (key, desc) in hints {
+        for (key, desc) in shown {
             if !spans.is_empty() {
                 spans.push(Span::raw("  "));
             }
@@ -735,34 +844,338 @@ impl App {
         Line::from(spans)
     }
 
-    fn draw_main(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        // The active session is a bordered panel; when there is none, a single
-        // centered dimmed line takes its place. Today's timeline fills the rest.
-        let (top, height) = match &self.active_session {
-            Some(session) => {
-                let lines = self.active_panel_lines(session);
-                let height = lines.len() as u16 + 2; // + top/bottom border
-                (
-                    Paragraph::new(lines).block(
-                        Block::bordered()
-                            .border_type(BorderType::Rounded)
-                            .border_style(Style::new().fg(theme::ACCENT))
-                            .title(Line::from(Span::styled(" ACTIVE ", theme::TITLE))),
-                    ),
-                    Constraint::Length(height),
-                )
+    // --- main screen: mouse -----------------------------------------------
+
+    /// Handles a mouse event; only the main screen uses the mouse. Dragging
+    /// a section border resizes, clicking focuses the section under the
+    /// pointer (and clicking a collapsible section's title row collapses or
+    /// expands it), and the wheel scrolls today's sessions.
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if !matches!(self.screen, Screen::Main) {
+            return;
+        }
+        let [_, content, _] = chrome_layout(Rect::new(0, 0, self.size.0, self.size.1));
+        let areas = self.resolve_layout(content);
+        let (column, row) = (mouse.column, mouse.row);
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.scroll_today(-3),
+            MouseEventKind::ScrollDown => self.scroll_today(3),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(section) = self.border_at(&areas, row) {
+                    self.drag = Some(section);
+                    self.focus = section;
+                    return;
+                }
+                let position = ratatui::layout::Position::new(column, row);
+                let Some(section) = [Section::Active, Section::Today, Section::Summary]
+                    .into_iter()
+                    .find(|&s| areas.get(s).contains(position))
+                else {
+                    return;
+                };
+                self.focus = section;
+                if section != Section::Active && row == areas.get(section).y {
+                    self.layout.toggle_collapsed(section);
+                    self.save_layout();
+                }
             }
-            None => (
-                Paragraph::new("No active session.")
-                    .style(theme::DIMMED)
-                    .alignment(Alignment::Center),
-                Constraint::Length(1),
-            ),
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let heights = self.content_heights(content.width);
+                match self.drag {
+                    Some(Section::Active) => {
+                        let height = row as i32 - areas.active.y as i32 + 1;
+                        self.layout.set_active_height(height, content, heights);
+                    }
+                    Some(Section::Summary) => {
+                        let height = content.bottom() as i32 - row as i32 - 1;
+                        self.layout.set_summary_height(height, content, heights);
+                    }
+                    _ => {}
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.drag.is_some() => {
+                self.drag = None;
+                self.save_layout();
+            }
+            _ => {}
+        }
+    }
+
+    /// The draggable border on `row`, as the section whose height it sets:
+    /// the active section's bottom border sets the active section's height,
+    /// and today's bottom border sets the summary's (only while both are
+    /// expanded; otherwise the summary just fills the space).
+    fn border_at(&self, areas: &Areas, row: u16) -> Option<Section> {
+        let bottom_border = |area: Rect| area.height > 0 && row + 1 == area.bottom();
+        if bottom_border(areas.active) {
+            Some(Section::Active)
+        } else if !self.layout.today_collapsed
+            && !self.layout.summary_collapsed
+            && bottom_border(areas.today)
+        {
+            Some(Section::Summary)
+        } else {
+            None
+        }
+    }
+
+    // --- main screen: geometry --------------------------------------------
+
+    /// Records the terminal size. main.rs calls this every frame, before
+    /// drawing, so handlers lay the main screen out exactly as drawn.
+    pub fn set_size(&mut self, size: (u16, u16)) {
+        self.size = size;
+    }
+
+    fn main_areas(&self) -> Areas {
+        let [_, content, _] = chrome_layout(Rect::new(0, 0, self.size.0, self.size.1));
+        self.resolve_layout(content)
+    }
+
+    fn resolve_layout(&self, content: Rect) -> Areas {
+        self.layout
+            .resolve(content, self.content_heights(content.width))
+    }
+
+    /// Content-fitting heights of the active section and the summary,
+    /// borders included.
+    fn content_heights(&self, width: u16) -> ContentHeights {
+        ContentHeights {
+            active: self.active_lines().len() as u16 + 2,
+            summary: self.summary_lines(width.saturating_sub(2)).len() as u16 + 2,
+        }
+    }
+
+    /// Rows of today's sessions visible inside the section's border.
+    fn today_viewport(&self) -> usize {
+        if self.layout.today_collapsed {
+            return 0;
+        }
+        self.main_areas().today.height.saturating_sub(2) as usize
+    }
+
+    fn max_scroll(&self) -> usize {
+        self.timeline_lines()
+            .len()
+            .saturating_sub(self.today_viewport())
+    }
+
+    fn scroll_today(&mut self, delta: isize) {
+        self.scroll = self
+            .scroll
+            .saturating_add_signed(delta)
+            .min(self.max_scroll());
+    }
+
+    fn resize_focused(&mut self, delta: i32) {
+        let [_, content, _] = chrome_layout(Rect::new(0, 0, self.size.0, self.size.1));
+        let heights = self.content_heights(content.width);
+        self.layout.resize(self.focus, delta, content, heights);
+        self.save_layout();
+    }
+
+    /// Writes the layout file, if there is one. A failure only costs the
+    /// layout, so it is reported without stopping anything.
+    fn save_layout(&mut self) {
+        let result = self.layout_path.as_ref().map(|path| self.layout.save(path));
+        if let Some(Err(e)) = result {
+            self.set_error(format!("Could not save layout: {e}"));
+        }
+    }
+
+    // --- main screen: drawing ---------------------------------------------
+
+    /// The three sections: the active session on top, today's sessions in
+    /// the middle (scrollable), the day summary at the bottom. The middle
+    /// and bottom ones collapse to a single line; all are resizable.
+    fn draw_main(&self, frame: &mut Frame, area: Rect) {
+        let areas = self.resolve_layout(area);
+
+        let block = self.section_block(Section::Active, " ACTIVE ".to_string());
+        let inner = block.inner(areas.active);
+        frame.render_widget(block, areas.active);
+        frame.render_widget(Paragraph::new(self.active_lines()), inner);
+
+        let sessions = plural(self.today_sessions.len(), "session");
+        if self.layout.today_collapsed {
+            let text = format!("TODAY · {sessions} · {}", fmt_hms(self.total_today()));
+            self.draw_collapsed(frame, areas.today, Section::Today, text);
+        } else {
+            self.draw_today(frame, areas.today, &sessions);
+        }
+
+        if self.layout.summary_collapsed {
+            let text = self.summary_one_liner();
+            self.draw_collapsed(frame, areas.summary, Section::Summary, text);
+        } else {
+            let block = self.section_block(Section::Summary, " ▾ SUMMARY ".to_string());
+            let inner = block.inner(areas.summary);
+            frame.render_widget(block, areas.summary);
+            frame.render_widget(Paragraph::new(self.summary_lines(inner.width)), inner);
+        }
+    }
+
+    /// A section's rounded border: accent while focused, dimmed otherwise.
+    fn section_block(&self, section: Section, title: String) -> Block<'static> {
+        let border = if self.focus == section {
+            Style::new().fg(theme::ACCENT)
+        } else {
+            theme::DIMMED
+        };
+        Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(border)
+            .title(Line::from(Span::styled(title, theme::TITLE)))
+    }
+
+    /// A collapsed section: one unbordered `▸` line, accent while focused.
+    fn draw_collapsed(&self, frame: &mut Frame, area: Rect, section: Section, text: String) {
+        let style = if self.focus == section {
+            theme::TITLE
+        } else {
+            theme::DIMMED.add_modifier(Modifier::BOLD)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(format!("▸ {text}"), style)),
+            area,
+        );
+    }
+
+    /// Today's sessions, scrolled to `scroll` (clamped to the content), with
+    /// a scrollbar on the right border when they don't all fit.
+    fn draw_today(&self, frame: &mut Frame, area: Rect, sessions: &str) {
+        let block = self.section_block(Section::Today, format!(" ▾ TODAY · {sessions} "));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let lines = self.timeline_lines();
+        let total = lines.len();
+        let visible = inner.height as usize;
+        let offset = self.scroll.min(total.saturating_sub(visible));
+        frame.render_widget(Paragraph::new(lines).scroll((offset as u16, 0)), inner);
+
+        if total > visible {
+            let mut state = ScrollbarState::new(total.saturating_sub(visible))
+                .position(offset)
+                .viewport_content_length(visible);
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .track_symbol(Some("│"))
+                    .thumb_style(Style::new().fg(theme::ACCENT)),
+                area.inner(Margin::new(0, 1)),
+                &mut state,
+            );
+        }
+    }
+
+    /// Body of the active section: the running session, or a hint.
+    fn active_lines(&self) -> Vec<Line<'static>> {
+        match &self.active_session {
+            Some(session) => self.active_panel_lines(session),
+            None => vec![Line::from(Span::styled(
+                "No active session. Press s to start one.",
+                theme::DIMMED,
+            ))],
+        }
+    }
+
+    /// Body of today's sessions: one item per session, newest first,
+    /// separated by blank rows.
+    fn timeline_lines(&self) -> Vec<Line<'static>> {
+        if self.today_sessions.is_empty() {
+            return vec![Line::from(Span::styled(
+                "No sessions yet today.",
+                theme::DIMMED,
+            ))];
+        }
+        let mut lines = Vec::new();
+        for session in &self.today_sessions {
+            if !lines.is_empty() {
+                lines.push(Line::default());
+            }
+            lines.extend(self.timeline_item_lines(session));
+        }
+        lines
+    }
+
+    fn day_summary(&self) -> DaySummary {
+        summarize(
+            &self.today_sessions,
+            self.active_session.as_ref(),
+            Utc::now(),
+        )
+    }
+
+    /// Body of the summary, wrapped to `width`: time per activity and per
+    /// project, focus and interruptions, and the day's span.
+    fn summary_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let summary = self.day_summary();
+        let Some((start, end)) = summary.span else {
+            return vec![Line::from(Span::styled(
+                "Nothing tracked yet today.",
+                theme::DIMMED,
+            ))];
         };
 
-        let [top_area, timeline_area] = Layout::vertical([height, Constraint::Min(0)]).areas(area);
-        frame.render_widget(top, top_area);
-        self.draw_timeline(frame, timeline_area);
+        let activities = summary
+            .per_activity
+            .iter()
+            .map(|(activity, d)| format!("{activity} {}", fmt_hms(*d)))
+            .collect::<Vec<_>>();
+        let projects = summary
+            .per_project
+            .iter()
+            .map(|(project, d)| {
+                format!("{} {}", project.as_deref().unwrap_or("(none)"), fmt_hms(*d))
+            })
+            .collect::<Vec<_>>();
+        let focus = vec![
+            match summary.average_focus {
+                Some(avg) => format!("avg {avg:.1} ({} rated)", summary.rated),
+                None => "not rated".to_string(),
+            },
+            plural(summary.interruptions as usize, "interruption"),
+            match summary.disruptions {
+                0 => "no disruptions".to_string(),
+                n => format!(
+                    "{} ({})",
+                    plural(n, "disruption"),
+                    fmt_hms(summary.disruption_time)
+                ),
+            },
+        ];
+        let day = vec![
+            format!("{} – {}", fmt_time(&start), fmt_time(&end)),
+            format!("tracked {}", fmt_hms(summary.tracked)),
+            format!("gaps {}", fmt_hms(summary.untracked())),
+        ];
+
+        let mut lines = Vec::new();
+        for (label, items) in [
+            ("Activity", activities),
+            ("Project ", projects),
+            ("Focus   ", focus),
+            ("Day     ", day),
+        ] {
+            lines.extend(hanging_lines(label, wrap_items(&items, width, label)));
+        }
+        lines
+    }
+
+    /// The collapsed summary: tracked time and the top activity.
+    fn summary_one_liner(&self) -> String {
+        let summary = self.day_summary();
+        match summary.per_activity.first() {
+            Some((activity, d)) => format!(
+                "SUMMARY · tracked {} · {activity} {}",
+                fmt_hms(summary.tracked),
+                fmt_hms(*d)
+            ),
+            None => "SUMMARY · nothing tracked yet".to_string(),
+        }
     }
 
     /// Lines inside the active-session panel: bold timer, dimmed label/value
@@ -825,33 +1238,6 @@ impl App {
         }
 
         lines
-    }
-
-    /// Today's sessions (completed plus the running one) as a multi-line list:
-    /// bold time range + duration, colored focus badge, bright project·task·
-    /// activity, dimmed notes.
-    fn draw_timeline(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        if self.today_sessions.is_empty() {
-            return;
-        }
-
-        // A dimmed section label anchors the list below the active panel.
-        let [label_area, list_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "TODAY",
-                Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD),
-            ))),
-            label_area,
-        );
-
-        let items = self
-            .today_sessions
-            .iter()
-            .map(|session| ListItem::new(self.timeline_item_lines(session)))
-            .collect::<Vec<_>>();
-        frame.render_widget(List::new(items), list_area);
     }
 
     /// One timeline item: time range, duration, focus badge and interruption
@@ -921,7 +1307,6 @@ impl App {
             }
         }
 
-        lines.push(Line::default()); // spacing between sessions
         lines
     }
 
@@ -1050,6 +1435,7 @@ impl App {
 const MODAL_WIDTH: u16 = 40;
 const START_MODAL_HEIGHT: u16 = 12;
 const SMALL_MODAL_HEIGHT: u16 = 6;
+const HELP_WIDTH: u16 = 50;
 
 /// A picker `List` with the accent highlight symbol and style.
 fn picker_list<'a>(items: Vec<ListItem<'a>>) -> List<'a> {
@@ -1182,14 +1568,7 @@ impl WrappedInput {
         let last = rows.len() - 1;
         let cursor_col = indent + rows[last].chars().count();
 
-        let mut lines = rows
-            .into_iter()
-            .enumerate()
-            .map(|(i, row)| match i {
-                0 => theme::kv(label, row),
-                _ => Line::from(format!("{}{row}", " ".repeat(indent))),
-            })
-            .collect::<Vec<_>>();
+        let mut lines = hanging_lines(label, rows);
         let hidden = lines.len().saturating_sub(max_rows as usize);
         lines.drain(..hidden);
 
@@ -1213,6 +1592,116 @@ impl WrappedInput {
         let (col, row) = self.cursor;
         (area.x + col.min(area.width.saturating_sub(1)), area.y + row)
     }
+}
+
+/// `label` beside the first row (as `theme::kv` draws it), the other rows
+/// indented to line up under the first row's value.
+fn hanging_lines(label: &str, rows: Vec<String>) -> Vec<Line<'static>> {
+    let indent = " ".repeat(label.chars().count() + 2);
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, row)| match i {
+            0 => theme::kv(label, row),
+            _ => Line::from(format!("{indent}{row}")),
+        })
+        .collect()
+}
+
+/// Packs `items` into rows joined by " · ", for display beside `label`
+/// within `width` columns. An item only wraps (mid-item, via `wrap_text`)
+/// when it is wider than a whole row.
+fn wrap_items(items: &[String], width: u16, label: &str) -> Vec<String> {
+    let width = (width as usize)
+        .saturating_sub(label.chars().count() + 2)
+        .max(1);
+    let mut rows = Vec::new();
+    let mut row = String::new();
+    for item in items {
+        let len = item.chars().count();
+        if !row.is_empty() && row.chars().count() + 3 + len <= width {
+            row.push_str(" · ");
+            row.push_str(item);
+            continue;
+        }
+        if !row.is_empty() {
+            rows.push(std::mem::take(&mut row));
+        }
+        let mut pieces = wrap_text(item, width);
+        if pieces.len() > 1 && pieces.last().is_some_and(String::is_empty) {
+            pieces.pop(); // the cursor row wrap_text adds after a full row
+        }
+        row = pieces.pop().unwrap_or_default();
+        rows.extend(pieces);
+    }
+    rows.push(row);
+    rows
+}
+
+/// The help screen: every key, grouped. A centered modal sized to its
+/// content (shrunk on small terminals).
+fn draw_help(frame: &mut Frame, content: Rect) {
+    const SECTIONS: &[(&str, &[(&str, &str)])] = &[
+        (
+            "Sessions",
+            &[
+                ("s", "start a session"),
+                ("e", "end the active session"),
+                ("n", "add a note"),
+                ("i", "count an interruption"),
+                ("d", "start a disruption"),
+                ("r", "resume after a disruption"),
+                ("q / Ctrl+C", "quit"),
+            ],
+        ),
+        (
+            "Sections",
+            &[
+                ("Tab / Shift+Tab", "focus next / previous"),
+                ("Space", "collapse or expand"),
+                ("+ / -", "grow or shrink"),
+                ("=", "reset sizes"),
+                ("↑↓ j k PgUp PgDn", "scroll today's sessions"),
+                ("Home / End", "jump to first / last"),
+            ],
+        ),
+        (
+            "Mouse",
+            &[
+                ("drag a border", "resize"),
+                ("click a title", "collapse or expand"),
+                ("wheel", "scroll today's sessions"),
+            ],
+        ),
+    ];
+
+    let key_width = 18;
+    let mut lines = Vec::new();
+    // No blank rows between groups: the bold headings separate them, and
+    // the whole list fits a 24-row terminal.
+    for (heading, keys) in SECTIONS {
+        lines.push(Line::from(Span::styled(
+            heading.to_string(),
+            Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD),
+        )));
+        for (key, desc) in *keys {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{key:<key_width$}"),
+                    Style::new().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(desc.to_string(), theme::DIMMED),
+            ]));
+        }
+    }
+
+    let (modal, inner) = modal_layout(content, HELP_WIDTH, lines.len() as u16 + 2);
+    frame.render_widget(
+        Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(Line::from(Span::styled(" Keys ", theme::TITLE))),
+        modal,
+    );
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Splits `text` into rows of at most `width` chars, breaking after the last
@@ -1241,6 +1730,11 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         rows.push(String::new());
     }
     rows
+}
+
+/// "1 session", "3 sessions".
+fn plural(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
 fn fmt_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
@@ -1307,10 +1801,9 @@ mod tests {
             ));
             std::fs::create_dir_all(&dir).unwrap();
             let db = Db::open_at(&dir.join("jiary.db")).unwrap();
-            Self {
-                app: App::new(db),
-                dir,
-            }
+            let mut app = App::new(db, None);
+            app.set_size((RENDER_WIDTH, RENDER_HEIGHT));
+            Self { app, dir }
         }
 
         /// Puts the app on the Project step of the start-session form, with
@@ -1650,8 +2143,26 @@ mod tests {
         let buf = render(&t.app);
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
-            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [q] quit"
+            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [?] help"
         );
+    }
+
+    #[test]
+    fn status_line_drops_hints_that_dont_fit_but_keeps_help() {
+        let t = TestApp::new();
+        let text = |width| {
+            t.app
+                .status_line(width)
+                .spans
+                .iter()
+                .map(|s| s.content.to_string())
+                .collect::<String>()
+        };
+        assert_eq!(text(40), "[s] start  [e] end  [n] note  [?] help");
+        // Narrower than the help hint itself (a pty can report 0 columns).
+        assert_eq!(text(5), "[?] help");
+        assert_eq!(text(0), "[?] help");
+        assert_eq!(text(120).matches('[').count(), 9); // everything, quit included
     }
 
     #[test]
@@ -1713,15 +2224,20 @@ mod tests {
     // --- main screen ------------------------------------------------------
 
     #[test]
-    fn main_screen_no_active_shows_centered_dimmed_line() {
+    fn main_screen_no_active_shows_a_dimmed_hint_in_the_active_section() {
         let t = TestApp::new();
         let buf = render(&t.app);
-        // 18 chars centered in 80 columns: (80 - 18) / 2 = 31.
+        assert!(line(&buf, 1).starts_with("╭ ACTIVE "));
         assert_eq!(
-            line(&buf, 1),
-            format!("{}No active session.", " ".repeat(31))
+            line(&buf, 2),
+            format!(
+                "│No active session. Press s to start one.{}│",
+                " ".repeat(38)
+            )
         );
-        assert_eq!(buf[(31, 1)].fg, Color::Gray);
+        assert_eq!(buf[(1, 2)].fg, Color::Gray);
+        // Content-fitting: border, hint, border.
+        assert!(line(&buf, 3).starts_with("╰"));
     }
 
     #[test]
@@ -1804,12 +2320,13 @@ mod tests {
             .today_sessions
             .push(finished_session(start, end, None));
         let buf = render(&t.app);
-        assert_eq!(line(&buf, 2), "TODAY");
-        assert_eq!(line(&buf, 3), "10:00 – 11:30 (1h 30m) F- I:0");
-        assert!(buf[(0, 3)].modifier.contains(Modifier::BOLD)); // time range
-        let dur_col = col_of(&buf, 3, "1h 30m");
-        assert!(buf[(dur_col, 3)].modifier.contains(Modifier::BOLD)); // duration
-        assert_eq!(line(&buf, 4), "alpha · beta · Programming");
+        // Below the 3-row active section; inner text starts at column 1.
+        assert!(line(&buf, 4).starts_with("╭ ▾ TODAY · 1 session "));
+        assert!(line_from(&buf, 5, 1).starts_with("10:00 – 11:30 (1h 30m) F- I:0 "));
+        assert!(buf[(1, 5)].modifier.contains(Modifier::BOLD)); // time range
+        let dur_col = col_of(&buf, 5, "1h 30m");
+        assert!(buf[(dur_col, 5)].modifier.contains(Modifier::BOLD)); // duration
+        assert!(line_from(&buf, 6, 1).starts_with("alpha · beta · Programming "));
     }
 
     #[test]
@@ -1827,7 +2344,7 @@ mod tests {
                 .push(finished_session(start, end, focus));
         }
         let buf = render(&t.app);
-        // Items stack three rows apart (range, parts, spacing).
+        // Items stack three rows apart (range, parts, spacing), from row 5.
         let expectations = [
             ("F1", Color::Red),
             ("F2", Color::Yellow),
@@ -1835,7 +2352,7 @@ mod tests {
             ("F-", Color::Gray),
         ];
         for (i, (badge, color)) in expectations.iter().enumerate() {
-            let y = 3 + 3 * i as u16;
+            let y = 5 + 3 * i as u16;
             let col = col_of(&buf, y, badge);
             assert_eq!(buf[(col, y)].fg, *color);
         }
@@ -2030,6 +2547,304 @@ mod tests {
 
         let t = TestApp::new();
         assert_eq!(t.app.cursor_position((80, 24)), None); // main screen
+    }
+
+    // --- main screen sections ----------------------------------------------
+
+    /// `n` completed 30-minute sessions today, newest first.
+    fn with_sessions(mut t: TestApp, n: usize) -> TestApp {
+        let now = Utc::now();
+        for i in 0..n {
+            let end = now - chrono::Duration::minutes(40 * i as i64);
+            let mut session = finished_session(
+                (end - chrono::Duration::minutes(30)).into(),
+                end.into(),
+                Some(3),
+            );
+            session.id = i as i64;
+            t.app.today_sessions.push(session);
+        }
+        t
+    }
+
+    #[test]
+    fn tab_moves_focus_and_the_accent_border() {
+        let mut t = TestApp::new();
+        let border_colors = |t: &TestApp| {
+            let buf = render(&t.app);
+            let today = row_with(&buf, "TODAY");
+            let summary = row_with(&buf, "SUMMARY");
+            [buf[(0, 1)].fg, buf[(0, today)].fg, buf[(0, summary)].fg]
+        };
+        assert_eq!(border_colors(&t), [Color::Cyan, Color::Gray, Color::Gray]);
+        t.key(KeyCode::Tab);
+        assert_eq!(border_colors(&t), [Color::Gray, Color::Cyan, Color::Gray]);
+        t.key(KeyCode::Tab);
+        assert_eq!(border_colors(&t), [Color::Gray, Color::Gray, Color::Cyan]);
+        t.key(KeyCode::BackTab);
+        assert_eq!(t.app.focus, Section::Today);
+    }
+
+    #[test]
+    fn space_collapses_the_focused_section_to_one_line() {
+        let mut t = with_sessions(TestApp::new(), 2);
+        t.key(KeyCode::Char(' ')); // the active section can't collapse
+        assert_eq!(t.app.layout, LayoutPrefs::default());
+
+        t.key(KeyCode::Tab);
+        t.key(KeyCode::Char(' '));
+        let buf = render(&t.app);
+        assert_eq!(line(&buf, 4), "▸ TODAY · 2 sessions · 1h 0m");
+        assert_eq!(buf[(0, 4)].fg, Color::Cyan); // still focused
+        // The summary takes the freed rows.
+        assert!(line(&buf, 5).starts_with("╭ ▾ SUMMARY "));
+        assert!(line(&buf, RENDER_HEIGHT - 2).starts_with("╰"));
+
+        t.key(KeyCode::Tab);
+        t.key(KeyCode::Char(' '));
+        let buf = render(&t.app);
+        assert_eq!(
+            line(&buf, 5),
+            "▸ SUMMARY · tracked 1h 0m · Programming 1h 0m"
+        );
+        assert_eq!(line(&buf, 6), "");
+
+        t.key(KeyCode::Char(' ')); // and back
+        assert!(line(&render(&t.app), 5).starts_with("╭ ▾ SUMMARY "));
+    }
+
+    #[test]
+    fn summary_shows_totals_for_the_day() {
+        let t = with_sessions(TestApp::new(), 2);
+        let buf = render(&t.app);
+        let y = row_with(&buf, "Activity  ");
+        assert!(line_from(&buf, y, 1).starts_with("Activity  Programming 1h 0m "));
+        assert!(line_from(&buf, y + 1, 1).starts_with("Project   alpha 1h 0m "));
+        assert!(
+            line_from(&buf, y + 2, 1)
+                .starts_with("Focus     avg 3.0 (2 rated) · 0 interruptions · no disruptions ")
+        );
+        // 30m + 10m gap + 30m.
+        assert!(line_from(&buf, y + 3, 1).contains("· tracked 1h 0m · gaps 10m"));
+    }
+
+    #[test]
+    fn empty_day_shows_hints_in_every_section() {
+        let t = TestApp::new();
+        let buf = render(&t.app);
+        row_with(&buf, "No active session.");
+        row_with(&buf, "No sessions yet today.");
+        row_with(&buf, "Nothing tracked yet today.");
+    }
+
+    #[test]
+    fn scrolling_is_clamped_to_the_content() {
+        let mut t = with_sessions(TestApp::new(), 2);
+        t.key(KeyCode::Down); // everything fits: nothing to scroll
+        assert_eq!(t.app.scroll, 0);
+
+        let mut t = with_sessions(TestApp::new(), 10);
+        // 10 items × 2 rows + 9 separators = 29 rows; the viewport is 11.
+        assert_eq!(t.app.today_viewport(), 11);
+        assert_eq!(t.app.max_scroll(), 18);
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Char('j'));
+        assert_eq!(t.app.scroll, 2);
+        t.key(KeyCode::PageDown);
+        assert_eq!(t.app.scroll, 13);
+        t.key(KeyCode::PageDown);
+        assert_eq!(t.app.scroll, 18);
+        t.key(KeyCode::Home);
+        assert_eq!(t.app.scroll, 0);
+        t.key(KeyCode::Up);
+        assert_eq!(t.app.scroll, 0);
+        t.key(KeyCode::End);
+        let buf = render(&t.app);
+        // The oldest session is the last visible item.
+        let last = row_with(&buf, "╭ ▾ SUMMARY ") - 3;
+        let oldest = fmt_time(&t.app.today_sessions[9].started_at);
+        assert!(line_from(&buf, last, 1).starts_with(&oldest));
+    }
+
+    #[test]
+    fn plus_and_minus_resize_and_equals_resets() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('+'));
+        t.key(KeyCode::Char('+'));
+        assert_eq!(t.app.layout.active_height, Some(5));
+        assert!(line(&render(&t.app), 5).starts_with("╰"));
+        t.key(KeyCode::Char('-'));
+        assert_eq!(t.app.layout.active_height, Some(4));
+
+        t.key(KeyCode::Tab);
+        t.key(KeyCode::Tab);
+        t.key(KeyCode::Char('+'));
+        assert_eq!(t.app.layout.summary_height, Some(4));
+
+        t.key(KeyCode::Char('='));
+        assert_eq!(t.app.layout, LayoutPrefs::default());
+    }
+
+    #[test]
+    fn question_mark_opens_help_and_any_key_closes_it() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('?'));
+        let buf = render(&t.app);
+        assert!(line(&buf, row_with(&buf, "╭ Keys ")).contains("╭ Keys "));
+        // The whole list fits a 24-row terminal, down to the last group.
+        row_with(&buf, "wheel");
+        assert!(!t.app.handle_key(press(KeyCode::Char('q')))); // closes, doesn't quit
+        assert!(matches!(t.app.screen, Screen::Main));
+    }
+
+    #[test]
+    fn layout_is_saved_on_change_and_restored_on_start() {
+        let t = TestApp::new();
+        let path = t.dir.join("layout.conf");
+        let open = |t: &TestApp| {
+            let db = Db::open_at(&t.dir.join("jiary.db")).unwrap();
+            let mut app = App::new(db, Some(path.clone()));
+            app.set_size((RENDER_WIDTH, RENDER_HEIGHT));
+            app
+        };
+
+        let mut app = open(&t);
+        app.handle_key(press(KeyCode::Char('+')));
+        app.handle_key(press(KeyCode::Tab));
+        app.handle_key(press(KeyCode::Char(' ')));
+        assert!(app.error.is_none());
+        drop(app);
+
+        let app = open(&t);
+        assert_eq!(
+            app.layout,
+            LayoutPrefs {
+                active_height: Some(4),
+                today_collapsed: true,
+                ..Default::default()
+            }
+        );
+    }
+
+    // --- mouse -------------------------------------------------------------
+
+    fn mouse(t: &mut TestApp, kind: MouseEventKind, column: u16, row: u16) {
+        t.app.handle_mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    fn drag(t: &mut TestApp, from: u16, to: u16) {
+        let left = MouseButton::Left;
+        mouse(t, MouseEventKind::Down(left), 10, from);
+        mouse(t, MouseEventKind::Drag(left), 10, to);
+        mouse(t, MouseEventKind::Up(left), 10, to);
+    }
+
+    #[test]
+    fn dragging_the_active_border_resizes_it() {
+        let mut t = TestApp::new();
+        // No session: the active section is rows 1–3, its border on row 3.
+        drag(&mut t, 3, 7);
+        assert_eq!(t.app.layout.active_height, Some(7));
+        assert!(line(&render(&t.app), 7).starts_with("╰"));
+        assert!(t.app.drag.is_none());
+        // Clamped so today's sessions keep their minimum.
+        drag(&mut t, 7, 100);
+        let buf = render(&t.app);
+        assert_eq!(
+            row_with(&buf, "╭ ▾ SUMMARY ") - row_with(&buf, "╭ ▾ TODAY "),
+            3
+        );
+    }
+
+    #[test]
+    fn dragging_todays_bottom_border_resizes_the_summary() {
+        let mut t = TestApp::new();
+        let buf = render(&t.app);
+        let border = row_with(&buf, "╭ ▾ SUMMARY ") - 1;
+        drag(&mut t, border, border - 4);
+        assert_eq!(t.app.layout.summary_height, Some(7));
+        assert_eq!(t.app.focus, Section::Summary);
+        assert_eq!(row_with(&render(&t.app), "╭ ▾ SUMMARY "), border - 3);
+    }
+
+    #[test]
+    fn clicking_focuses_and_title_rows_toggle_collapse() {
+        let mut t = TestApp::new();
+        let click = MouseEventKind::Down(MouseButton::Left);
+        let buf = render(&t.app);
+        let today = row_with(&buf, "╭ ▾ TODAY ");
+
+        mouse(&mut t, click, 10, today + 1); // inside the body: focus only
+        assert_eq!(t.app.focus, Section::Today);
+        assert!(!t.app.layout.today_collapsed);
+
+        mouse(&mut t, click, 10, today); // the title row
+        assert!(t.app.layout.today_collapsed);
+        mouse(&mut t, click, 10, today); // now the collapsed line
+        assert!(!t.app.layout.today_collapsed);
+    }
+
+    #[test]
+    fn wheel_scrolls_todays_sessions() {
+        let mut t = with_sessions(TestApp::new(), 10);
+        mouse(&mut t, MouseEventKind::ScrollDown, 10, 10);
+        assert_eq!(t.app.scroll, 3);
+        mouse(&mut t, MouseEventKind::ScrollUp, 10, 10);
+        mouse(&mut t, MouseEventKind::ScrollUp, 10, 10);
+        assert_eq!(t.app.scroll, 0);
+    }
+
+    #[test]
+    fn mouse_is_ignored_outside_the_main_screen() {
+        let mut t = TestApp::new().on_project_step(vec![], "");
+        drag(&mut t, 3, 7);
+        assert_eq!(t.app.layout, LayoutPrefs::default());
+    }
+
+    #[test]
+    fn every_screen_survives_tiny_terminals() {
+        let screens = || {
+            vec![
+                Screen::Main,
+                Screen::Help,
+                TestApp::start_form_at(Step::Activity),
+                Screen::EndSession(EndSessionForm {
+                    notes: "x".repeat(200),
+                    step: EndStep::Notes,
+                }),
+                Screen::AddNote(AddNoteForm {
+                    input: "word ".repeat(50),
+                }),
+            ]
+        };
+        for (width, height) in [(0, 0), (1, 1), (5, 3), (12, 6), (30, 10)] {
+            for screen in screens() {
+                let mut t = with_sessions(TestApp::new(), 5).on_screen(screen);
+                t.app.set_size((width, height));
+                let backend = TestBackend::new(width, height);
+                let mut terminal = Terminal::new(backend).unwrap();
+                terminal.draw(|frame| t.app.draw(frame)).unwrap();
+                t.app.cursor_position((width, height));
+                if matches!(t.app.screen, Screen::Main) {
+                    for code in [
+                        KeyCode::Char('+'),
+                        KeyCode::Tab,
+                        KeyCode::Char('-'),
+                        KeyCode::End,
+                    ] {
+                        t.key(code);
+                    }
+                    drag(&mut t, 2, 8);
+                    mouse(&mut t, MouseEventKind::ScrollDown, 0, 0);
+                    terminal.draw(|frame| t.app.draw(frame)).unwrap();
+                }
+            }
+        }
     }
 
     // --- wrapped inputs ---------------------------------------------------

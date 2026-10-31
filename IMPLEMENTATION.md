@@ -13,18 +13,20 @@ bundled). One SQLite file is the entire persistence layer; everything else is
 transient UI state that is rebuilt from the db on startup.
 
 ```
-main.rs        event loop: draw → place cursor → poll(100 ms) → handle key
+main.rs        event loop: size → draw → place cursor → poll(100 ms) → key/mouse
   └─ App       all UI state + a Db handle          (app.rs)
        ├─ Db   rusqlite connection; all SQL lives here (db.rs)
        ├─ Session  one db row with parsed timestamps (session.rs)
+       ├─ LayoutPrefs  main-screen section geometry + layout file (layout.rs)
+       ├─ summarize  day totals over in-memory sessions (summary.rs)
        └─ theme  palette + shared style helpers    (theme.rs)
 ```
 
 The loop runs at ~10 fps: `event::poll` times out after 100 ms, so the timer
-in the active-session panel ticks even when no key is pressed. Only key
-*presses* are processed: releases and repeats (reported by some terminals,
-e.g. on Windows) and all other crossterm events are ignored, and Ctrl
-combinations never reach a form as plain letters. Quitting is a return value,
+in the active-session panel ticks even when no key is pressed. Key *presses*
+and mouse events are processed: key releases and repeats (reported by some
+terminals, e.g. on Windows) and all other crossterm events are ignored, and
+Ctrl combinations never reach a form as plain letters. Quitting is a return value,
 not a state: `App::handle_key` returns `true` for `q` on the main screen or
 Ctrl+C anywhere, which breaks the loop in `main.rs`.
 
@@ -37,9 +39,19 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 
 - **`main.rs`** — owns the terminal lifecycle: `ratatui::init()` (raw mode +
   alternate screen + a panic hook that restores them, chained with one that
-  re-shows the cursor), `ratatui::restore()` on every other exit path, cursor
-  show/hide, and the loop. It knows nothing about UI; it calls `app.draw`,
-  `app.cursor_position`, `app.handle_key` and nothing else.
+  re-shows the cursor and releases the mouse), mouse capture,
+  `ratatui::restore()` on every other exit path, cursor show/hide, and the
+  loop. It knows nothing about UI; it calls `app.set_size`, `app.draw`,
+  `app.cursor_position`, `app.handle_key`, `app.handle_mouse` and nothing
+  else. It also passes `App::new` the layout file path (`layout.conf` in the
+  data dir).
+- **`layout.rs`** — `LayoutPrefs` (section heights and collapsed state) and
+  pure geometry: `resolve` splits the content area into the three main-screen
+  sections, `resize` / `set_*_height` move borders with clamping, plus the
+  lenient `key=value` layout file (`parse`, `load`, `save`). No rendering.
+- **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
+  activity and project, focus, interruptions, disruptions, span and gaps.
+  Pure; computed from in-memory sessions every frame.
 - **`db.rs`** — `Db` wraps a `rusqlite::Connection`. The schema (including the
   single-active-session trigger) is a `const SCHEMA` string applied with
   `execute_batch` on every open, so opening an existing db also migrates it.
@@ -139,8 +151,21 @@ pub struct App {
     screen: Screen,                    // which screen + its form state
     previous_notes: Vec<String>,       // cached "recent notes" for the active project/task
     error: Option<String>,             // last db failure, rendered in exactly one place
+    // main screen
+    layout: LayoutPrefs,               // section sizes + collapsed state (persisted)
+    layout_path: Option<PathBuf>,      // where `layout` is saved; None in tests
+    focus: Section,                    // section that Space and +/- act on
+    scroll: usize,                     // first visible row of today's sessions
+    size: (u16, u16),                  // terminal size as of the last frame
+    drag: Option<Section>,             // section whose border the mouse is dragging
 }
 ```
+
+`size` exists so key and mouse handlers can lay the main screen out exactly
+as the last frame did (`main_areas`): main.rs calls `set_size` before every
+draw. `scroll` is clamped against the content in the handlers
+(`scroll_today`, `max_scroll`) and again at draw time, since the content can
+shrink between frames.
 
 **The UI mirrors the db in memory.** `draw` runs ~10×/sec and must never query
 the db, so everything it needs is a field on `App`. The mirror is refreshed by
@@ -315,17 +340,64 @@ UI never jumps when an error appears or disappears.
 
 ### Main screen
 
-Top: the active session as a rounded, accent-bordered panel titled ` ACTIVE `
-(bold timer, dimmed label/value rows via `theme::kv`, interruptions red when
-> 0, cached previous notes, then the session's own notes as bullets). The
-panel height is derived from its line count. With no active session, a single
-centered dimmed "No active session." line takes its place.
+Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
 
-Below: a dimmed `TODAY` label and a `List` of timeline items — one item per
-session (completed and the running one), each with a bold time range +
-duration, a focus badge (`F1` red / `F2` yellow / `F3` green / `F-` dimmed),
-an interruption count (`I:N`, red when > 0), a bright `project · task ·
-activity` line, and dimmed note bullets.
+- **Active** (` ACTIVE `) — bold timer, dimmed label/value rows via
+  `theme::kv`, interruptions red when > 0, cached previous notes, then the
+  session's own notes as bullets; a dimmed hint when there is no session.
+  Never collapses.
+- **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
+  (completed and the running one), newest first, separated by blank rows:
+  bold time range + duration, a focus badge (`F1` red / `F2` yellow / `F3`
+  green / `F-` dimmed), an interruption count (`I:N`, red when > 0), a bright
+  `project · task · activity` line, and dimmed note bullets. Drawn as one
+  `Paragraph` scrolled by `scroll`, with a `Scrollbar` on the right border
+  when the items don't fit.
+- **Summary** (` ▾ SUMMARY `) — `summary_lines`: `Activity` / `Project` /
+  `Focus` / `Day` rows from `summarize`, items joined by ` · ` and packed by
+  `wrap_items` (an item only splits when wider than a whole row), continuing
+  under the value via `hanging_lines`.
+
+Sizing: Active and Summary default to their content height
+(`content_heights`), Today fills the rest; a fixed height replaces the
+content height once the user resizes. When Today is collapsed the summary
+fills instead; when both are collapsed the spare rows stay empty. When space
+runs out, the summary and then the active section shrink to their 3-row
+minimum, and on tiny terminals the summary is clipped before Today.
+
+Focus is shown by the border color (accent vs dimmed). A collapsed section
+is one unbordered `▸` line with a short summary (`draw_collapsed`).
+
+Status-line hints depend on the focused section and are fitted to the
+terminal width: hints are added in priority order while they fit, and
+`[?] help` is always last. The `?` help screen (`Screen::Help`,
+`draw_help`) lists every key; any key closes it.
+
+### Mouse
+
+`handle_mouse` acts only on the main screen, using the same `main_areas`
+geometry as the last frame:
+
+- Left-press on a draggable border starts a drag (`border_at`): the active
+  section's bottom border sets its height; today's bottom border sets the
+  summary's (only while both are expanded). Drag events move it with the
+  same clamping as `+`/`-`; release saves the layout.
+- Left-press elsewhere focuses the section under the pointer; on the title
+  row of Today or Summary (or their collapsed line) it also toggles collapse.
+- The wheel scrolls today's sessions by 3 rows.
+
+Mouse capture means terminals no longer select text on a plain drag;
+Shift-drag still selects in most of them.
+
+### Layout file
+
+`layout.conf` in the data dir, `key=value` lines (`active_height`,
+`summary_height` as a number or `auto`, `today_collapsed`,
+`summary_collapsed`). Parsing is lenient (unknown keys, junk and values below
+the minimum height fall back to defaults) so a stale or hand-edited file
+never blocks startup. It is saved on every collapse, resize, reset and drag
+release, via a temp file plus rename; a read or write failure goes to the
+error line and the app carries on with the in-memory layout.
 
 ### Modals
 
@@ -445,14 +517,21 @@ removed.
 - *db.rs* — SQL behavior: trigger enforcement, duplicate-active tolerance,
   timestamp format (`+00:00` suffix, legacy `Z` rows), bad-timestamp error
   path, today query and its local-midnight boundary, same-second ordering.
+- *layout.rs / summary.rs* — pure: section heights for every
+  collapsed/resized combination and small or tiny areas, resize clamping,
+  layout file round-trip and junk tolerance; summary totals, ordering, the
+  running session's in-memory copy, focus/disruption figures.
 - *app.rs state machine* — key handling against a `TestApp` (real db):
   key-event filtering, autocomplete semantics, end/note form commit and
-  cancel, disrupt/resume edge cases, status-line content. Keys go through
+  cancel, disrupt/resume edge cases, section focus/collapse/resize/scroll,
+  mouse drag/click/wheel (`mouse`, `drag` helpers), layout persistence
+  across two `App`s, status-line content and width fitting. Keys go through
   `press(code)` / `TestApp::key` / `TestApp::typed`. Setup helpers
   (`on_project_step`, `on_activity_step`, `on_screen`, `empty_form`) put the
   app directly on a screen/step; pushing sessions straight into
-  `today_sessions` is the right level for tests of things `draw` reads from
-  memory.
+  `today_sessions` (or `with_sessions(t, n)`) is the right level for tests of
+  things `draw` reads from memory. `TestApp` sets the 80×24 render size so
+  handlers see the same geometry as `render`.
 - *app.rs rendering* — a `TestBackend` at a fixed 80×24, drawn once via
   `render(&app) -> Buffer`, asserted with char-based row extractors:
   `line(buf, y)` (row text, trailing padding trimmed), `line_from(buf, y, x)`

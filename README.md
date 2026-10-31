@@ -35,7 +35,30 @@ On first run, a database is created at:
 | `i` | Increment interruption counter |
 | `d` | Stop current session, start a Disruption session (no-op during one) |
 | `r` | Resume last non-Disruption session |
+| `?` | Show all keys |
 | `q` / `Ctrl+C` | Quit |
+
+### The main screen
+
+The main screen has three stacked sections:
+
+- **Active** (top) — the running session: timer, project, task, activity, interruptions and notes.
+- **Today** (middle) — today's sessions, newest first. Scrollable.
+- **Summary** (bottom) — time per activity and per project, average focus, interruptions and disruptions, and the day's span with tracked time and gaps.
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Focus the next / previous section (accent border) |
+| `Space` | Collapse or expand the focused section (Today and Summary) |
+| `+` / `-` | Grow or shrink the focused section |
+| `=` | Reset section sizes to fit their content |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll today's sessions |
+
+A collapsed section shrinks to one line that still shows a short summary (e.g. `▸ TODAY · 6 sessions · 4h 12m`). Today's sessions take whatever space the other sections leave; when Today is collapsed, the summary does.
+
+With the mouse: drag the border under a section to resize it, click a section to focus it, click the title of Today or Summary to collapse or expand it, and use the wheel to scroll today's sessions. Because Jiary captures the mouse, select text with `Shift` held (in most terminals).
+
+Section sizes and collapsed sections are remembered between runs, in `layout.conf` next to the database.
 
 ### Starting a session
 
@@ -117,7 +140,7 @@ sqlite3 ~/Library/Application\ Support/jiary/jiary.db "SELECT * FROM sessions OR
 
 ## Backing up
 
-Copy the `.db` file. That's the entire dataset.
+Copy the `.db` file. That's the entire dataset. (`layout.conf` beside it only holds the main screen's section sizes.)
 
 ## Design principles
 
