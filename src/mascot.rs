@@ -3,11 +3,11 @@
 //! animated by time.
 //!
 //! What it does follows the session (`Mood`): idling with nothing running,
-//! writing in a notebook during work and getting drowsy in a long session,
+//! typing on a laptop during work and dozing off over it in a long session,
 //! asleep on a break, chatting with a friend in a meeting, gaming when
 //! disrupted. Some actions trigger a short one-off `Reaction` on top: a
-//! flinch on an interruption, a check mark on a note, and a mood that
-//! matches the focus rating when a session ends.
+//! flinch on an interruption, writing the note down in a notebook when one
+//! is added, and a mood that matches the focus rating when a session ends.
 //!
 //! A frame is a grid of palette characters (two pixel rows per terminal
 //! row) plus optional colored text over transparent cells, for things that
@@ -24,17 +24,14 @@ use crate::theme;
 pub const WIDTH: u16 = 24;
 pub const HEIGHT: u16 = 5;
 
-/// How long a reaction shows before the cat goes back to its mood.
-pub const REACTION_MS: u64 = 1500;
-
 /// What the cat is up to, following the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mood {
     /// No session running: sitting around, blinking, flicking its tail.
     Idle,
-    /// A work session: writing in a notebook.
+    /// A work session: typing on a laptop.
     Working,
-    /// A long work session: nodding off over the notebook.
+    /// A long work session: dozing off over the laptop.
     Drowsy,
     /// A break: asleep, with z's floating up.
     Sleeping,
@@ -44,12 +41,12 @@ pub enum Mood {
     Gaming,
 }
 
-/// A short one-off reaction, shown for `REACTION_MS`.
+/// A short one-off reaction, shown for its `duration`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reaction {
     /// An interruption was counted.
     Flinch,
-    /// A note was added.
+    /// A note was added: the cat writes it down.
     Noted,
     /// A session ended with this focus rating (1–3).
     Rated(i32),
@@ -67,8 +64,9 @@ const fn frame(pixels: [&'static str; HEIGHT as usize * 2]) -> Frame {
 
 // Palette: `.` transparent; the cat: `C` fur, `L` muzzle and belly, `P`
 // inner ears and nose, `K` eyes and mouth, `W` eye shine; its friend: `F`
-// fur, `f` muzzle and belly; props: `N` paper, `g` ink and spine, `O` pen,
-// `D` controller, `r` / `G` buttons.
+// fur, `f` muzzle and belly; props: `a` laptop, `k` its screen, `c` code,
+// `d` keys, `N` paper, `g` ink and spine, `O` pen, `D` controller, `r` / `G`
+// buttons.
 //
 // The cat's body is on columns 10–20 in every scene where it is alone.
 
@@ -116,26 +114,95 @@ const IDLE_TAIL: Frame = frame([
     "............CC...CC.....",
 ]);
 
-// --- working: a paw on a pen over an open notebook -------------------------
+// --- working: typing on a laptop, code lines growing on its screen ----------
+
+const TYPE_A: Frame = frame([
+    "............C.....C.....",
+    "aaaaaaa....CPC...CPC....",
+    "akkkkka....CCCCCCCCC....",
+    "akcccka...CCWCCCWCCCC...",
+    "akkkkka...CCKCPCKCCCC...",
+    "akcckka....CCCLLLCCC....",
+    "akkkkka.....CCLLLCC.....",
+    "aaaaaaa.CCCCCCLLLCC.....",
+    "dddddddC....CCLLLCC.....",
+    "aaaaaaaaa...CC...CC.....",
+]);
+const TYPE_B: Frame = frame([
+    "............C.....C.....",
+    "aaaaaaa....CPC...CPC....",
+    "akkkkka....CCCCCCCCC....",
+    "akcccka...CCWCCCWCCCC...",
+    "akkkkka...CCKCPCKCCCC...",
+    "akcccka....CCCLLLCCC....",
+    "akkkkka.CCCCCCLLLCC.....",
+    "aaaaaaaC....CCLLLCC.....",
+    "dddddddd....CCLLLCC.....",
+    "aaaaaaaaa...CC...CC.....",
+]);
+const TYPE_C: Frame = frame([
+    "............C.....C.....",
+    "aaaaaaa....CPC...CPC....",
+    "akkkkka....CCCCCCCCC....",
+    "akcckka...CCWCCCWCCCC...",
+    "akkkkka...CCKCPCKCCCC...",
+    "akcccka....CCCLLLCCC....",
+    "akkkkka.....CCLLLCC.....",
+    "aaaaaaa.CCCCCCLLLCC.....",
+    "dddddddC....CCLLLCC.....",
+    "aaaaaaaaa...CC...CC.....",
+]);
+const TYPE_D: Frame = frame([
+    "............C.....C.....",
+    "aaaaaaa....CPC...CPC....",
+    "akkkkka....CCCCCCCCC....",
+    "akcccka...CCWCCCWCCCC...",
+    "akkkkka...CCKCPCKCCCC...",
+    "akcckka....CCCLLLCCC....",
+    "akkkkka.CCCCCCLLLCC.....",
+    "aaaaaaaC....CCLLLCC.....",
+    "dddddddd....CCLLLCC.....",
+    "aaaaaaaaa...CC...CC.....",
+]);
+const TYPE_BLINK: Frame = frame([
+    "............C.....C.....",
+    "aaaaaaa....CPC...CPC....",
+    "akkkkka....CCCCCCCCC....",
+    "akcccka...CCCCCCCCCCC...",
+    "akkkkka...CCKCPCKCCCC...",
+    "akcckka....CCCLLLCCC....",
+    "akkkkka.....CCLLLCC.....",
+    "aaaaaaa.CCCCCCLLLCC.....",
+    "dddddddC....CCLLLCC.....",
+    "aaaaaaaaa...CC...CC.....",
+]);
+
+/// Dozing: eyes shut, paw resting on the keys, the screen gone dark.
+const DOZE_PIXELS: [&str; 10] = [
+    "............C.....C.....",
+    "aaaaaaa....CPC...CPC....",
+    "akkkkka....CCCCCCCCC....",
+    "akkkkka...CCCCCCCCCCC...",
+    "akkkkka...CCKCPCKCCCC...",
+    "akkkkka....CCCLLLCCC....",
+    "akkkkka.....CCLLLCC.....",
+    "aaaaaaa.CCCCCCLLLCC.....",
+    "dddddddC....CCLLLCC.....",
+    "aaaaaaaaa...CC...CC.....",
+];
+const DOZE: Frame = frame(DOZE_PIXELS);
+const DOZE_Z: Frame = Frame {
+    pixels: DOZE_PIXELS,
+    text: &[(0, 22, "z", theme::CAT_TEXT)],
+};
+
+// --- noting: writing in an open notebook ------------------------------------
 
 const WRITE_A_PIXELS: [&str; 10] = [
     "............C.....C.....",
     "...........CPC...CPC....",
     "...........CCCCCCCCC....",
     "..........CCWCCCWCCCC...",
-    ".....O....CCKCPCKCCCC...",
-    "......O....CCCLLLCCC....",
-    ".......OCCCCCCLLLCC.....",
-    "NNNNNgNNNNN.CCLLLCC.....",
-    "NgggNgNNggN.CCLLLCC.....",
-    "NNNNNgNNNNN.CC...CC.....",
-];
-
-const WRITE_SHUT_PIXELS: [&str; 10] = [
-    "............C.....C.....",
-    "...........CPC...CPC....",
-    "...........CCCCCCCCC....",
-    "..........CCCCCCCCCCC...",
     ".....O....CCKCPCKCCCC...",
     "......O....CCCLLLCCC....",
     ".......OCCCCCCLLLCC.....",
@@ -157,11 +224,6 @@ const WRITE_B: Frame = frame([
     "NgggNgNgggN.CCLLLCC.....",
     "NNNNNgNNNNN.CC...CC.....",
 ]);
-const WRITE_BLINK: Frame = frame(WRITE_SHUT_PIXELS);
-const DROWSY_Z: Frame = Frame {
-    pixels: WRITE_SHUT_PIXELS,
-    text: &[(0, 22, "z", theme::CAT_TEXT)],
-};
 
 // --- sleeping: curled into a loaf, z's drifting up --------------------------
 
@@ -302,11 +364,8 @@ const STARTLED_BANG: Frame = Frame {
     text: &[(1, 22, "!", theme::CAT_ALERT)],
 };
 
-const NOTED_A: Frame = Frame {
-    pixels: WRITE_SHUT_PIXELS,
-    text: &[(0, 22, "✓", theme::CAT_CHECK)],
-};
-const NOTED_B: Frame = Frame {
+/// Written down: the notebook with a check mark.
+const NOTED_DONE: Frame = Frame {
     pixels: WRITE_A_PIXELS,
     text: &[(0, 22, "✓", theme::CAT_CHECK)],
 };
@@ -373,26 +432,30 @@ const IDLE_LOOP: Animation = &[
     (150, &IDLE_BLINK),
 ];
 
-/// The pen goes back and forth, with a pause and a blink now and then.
+/// Paw tapping the keys while the code on screen grows, with a pause and a
+/// blink now and then.
 const WORK_LOOP: Animation = &[
-    (400, &WRITE_A),
-    (400, &WRITE_B),
-    (400, &WRITE_A),
-    (400, &WRITE_B),
-    (400, &WRITE_A),
-    (400, &WRITE_B),
-    (900, &WRITE_A),
-    (150, &WRITE_BLINK),
-    (600, &WRITE_A),
+    (220, &TYPE_A),
+    (180, &TYPE_B),
+    (220, &TYPE_C),
+    (180, &TYPE_D),
+    (220, &TYPE_A),
+    (180, &TYPE_B),
+    (220, &TYPE_C),
+    (900, &TYPE_A),
+    (150, &TYPE_BLINK),
+    (220, &TYPE_C),
+    (180, &TYPE_D),
+    (600, &TYPE_A),
 ];
 
-/// Eyes mostly shut over the notebook, a z, and a brief jolt awake.
+/// Eyes shut over a dark screen, a z, and a brief jolt awake.
 const DROWSY_LOOP: Animation = &[
-    (1800, &WRITE_BLINK),
-    (900, &DROWSY_Z),
-    (250, &WRITE_A),
-    (1500, &WRITE_BLINK),
-    (900, &DROWSY_Z),
+    (1800, &DOZE),
+    (900, &DOZE_Z),
+    (250, &TYPE_A),
+    (1500, &DOZE),
+    (900, &DOZE_Z),
 ];
 
 /// z, then z Z, then Z: the z's float up and away.
@@ -425,14 +488,21 @@ const GAME_LOOP: Animation = &[
     (400, &GAME_B),
 ];
 
-// Reactions play once over `REACTION_MS`.
+// Reactions play once. Most take 1.5 s; noting lasts a little longer so a
+// few pen strokes show before the check mark.
 const FLINCH: Animation = &[
     (200, &STARTLED_BANG),
     (150, &STARTLED),
     (200, &STARTLED_BANG),
     (950, &STARTLED),
 ];
-const NOTED: Animation = &[(250, &NOTED_A), (1250, &NOTED_B)];
+const NOTED: Animation = &[
+    (350, &WRITE_A),
+    (350, &WRITE_B),
+    (350, &WRITE_A),
+    (350, &WRITE_B),
+    (1000, &NOTED_DONE),
+];
 const HAPPY: Animation = &[(500, &HAPPY_A), (500, &HAPPY_B), (500, &HAPPY_C)];
 const CONTENT: Animation = &[(750, &CONTENT_A), (750, &CONTENT_B)];
 const DOWNCAST: Animation = &[(1500, &SAD)];
@@ -460,6 +530,11 @@ impl Reaction {
             Reaction::Rated(_) => DOWNCAST,
         }
     }
+
+    /// How long the reaction shows before the cat goes back to its mood.
+    pub fn duration(self) -> u64 {
+        self.animation().iter().map(|(ms, _)| ms).sum()
+    }
 }
 
 /// The frame of `animation` shown `millis` milliseconds in, looping.
@@ -482,7 +557,7 @@ pub fn mood_lines(mood: Mood, millis: u64) -> Vec<Line<'static>> {
 }
 
 /// The cat `millis` milliseconds into `reaction` (meant for the first
-/// `REACTION_MS`).
+/// `reaction.duration()`).
 pub fn reaction_lines(reaction: Reaction, millis: u64) -> Vec<Line<'static>> {
     render(frame_at(reaction.animation(), millis))
 }
@@ -499,6 +574,10 @@ fn color(pixel: u8) -> Option<Color> {
         b'N' => Some(theme::CAT_PAPER),
         b'g' => Some(theme::CAT_INK),
         b'O' => Some(theme::CAT_PEN),
+        b'a' => Some(theme::CAT_LAPTOP),
+        b'k' => Some(theme::CAT_SCREEN),
+        b'c' => Some(theme::CAT_CODE),
+        b'd' => Some(theme::CAT_KEYS),
         b'D' => Some(theme::CAT_CONTROLLER),
         b'r' => Some(theme::CAT_BUTTON_A),
         b'G' => Some(theme::CAT_BUTTON_B),
@@ -617,17 +696,20 @@ mod tests {
     }
 
     #[test]
-    fn reactions_last_exactly_the_reaction_time() {
+    fn reactions_are_short_and_noting_shows_a_few_strokes() {
         for reaction in [
             Reaction::Flinch,
-            Reaction::Noted,
             Reaction::Rated(1),
             Reaction::Rated(2),
             Reaction::Rated(3),
         ] {
-            let total: u64 = reaction.animation().iter().map(|(ms, _)| ms).sum();
-            assert_eq!(total, REACTION_MS, "{reaction:?}");
+            assert_eq!(reaction.duration(), 1500, "{reaction:?}");
         }
+        assert_eq!(Reaction::Noted.duration(), 2400);
+        // It writes before the check mark appears.
+        assert!(std::ptr::eq(frame_at(NOTED, 0), &WRITE_A));
+        assert!(std::ptr::eq(frame_at(NOTED, 350), &WRITE_B));
+        assert!(std::ptr::eq(frame_at(NOTED, 1400), &NOTED_DONE));
     }
 
     #[test]
@@ -663,7 +745,15 @@ mod tests {
         // The left ear tip is at pixel (0, 12) whenever the cat is alone, so
         // a reaction never makes it jump.
         for frame in [
-            &IDLE, &WRITE_A, &DROWSY_Z, &GAME_A, &STARTLED, &HAPPY_A, &NOTED_B,
+            &IDLE,
+            &TYPE_A,
+            &TYPE_B,
+            &DOZE_Z,
+            &WRITE_A,
+            &GAME_A,
+            &STARTLED,
+            &HAPPY_A,
+            &NOTED_DONE,
         ] {
             assert_eq!(frame.pixels[0].as_bytes()[12], b'C');
         }
@@ -672,7 +762,8 @@ mod tests {
     #[test]
     fn animations_step_through_their_frames() {
         assert!(std::ptr::eq(frame_at(IDLE_LOOP, 2800), &IDLE_BLINK));
-        assert!(std::ptr::eq(frame_at(WORK_LOOP, 400), &WRITE_B));
+        assert!(std::ptr::eq(frame_at(WORK_LOOP, 220), &TYPE_B));
+        assert!(std::ptr::eq(frame_at(DROWSY_LOOP, 1800), &DOZE_Z));
         assert!(std::ptr::eq(frame_at(SLEEP_LOOP, 1000), &SLEEP_B));
         assert!(std::ptr::eq(frame_at(MEET_LOOP, 2000), &MEET_THEY_TALK));
         assert!(std::ptr::eq(frame_at(HAPPY, 600), &HAPPY_B));

@@ -383,15 +383,17 @@ accent (`CAT_FUR = ACCENT`), a pink friend, and props.
 What it shows (`App::cat_lines`):
 
 - **`Mood`**, from the session (`App::mood`): `Idle` with none, `Working`
-  (writing in a notebook) in a work session, `Drowsy` once a work session
-  passes `DROWSY_AFTER_MINUTES` (25, a candidate for a setting), `Sleeping`
+  (typing on a laptop, code growing on its screen) in a work session,
+  `Drowsy` (eyes shut over a dark screen) once a work session passes
+  `DROWSY_AFTER_MINUTES` (25, a candidate for a setting), `Sleeping`
   on a break, `Meeting` (talking with the friend) in a meeting, `Gaming` in
   a disruption. Moods loop by wall-clock time, so they run at the same pace
   regardless of how often the app redraws (~10×/sec).
-- **`Reaction`**, a one-off shown for `REACTION_MS` (1.5 s) from the moment
-  it is triggered (`App::react`, timed with `Instant`): `Flinch` on `i`,
-  `Noted` when a note is added, `Rated(n)` when a session ends with a focus
-  rating (hearts / a tune / drooped ears). Skipping the rating or saving an
+- **`Reaction`**, a one-off shown for its `duration()` (the sum of its
+  frames) from the moment it is triggered (`App::react`, timed with
+  `Instant`): `Flinch` on `i` (1.5 s), `Noted` when a note is added (2.4 s:
+  a few pen strokes in a notebook, then a `✓`), `Rated(n)` when a session
+  ends with a focus rating (1.5 s: hearts / a tune / drooped ears). Skipping the rating or saving an
   empty note triggers nothing.
 
 All frames share one size, and the cat's body sits on the same columns in

@@ -75,7 +75,7 @@ pub struct App {
     /// toggles only if the mouse didn't move (a click, not a drag).
     title_press: Option<Section>,
     /// The cat's current one-off reaction and when it started; it shows
-    /// for `mascot::REACTION_MS`, then the cat goes back to its mood.
+    /// for the reaction's `duration`, then the cat goes back to its mood.
     reaction: Option<(Reaction, Instant)>,
 }
 
@@ -1222,7 +1222,7 @@ impl App {
     fn current_reaction(&self) -> Option<(Reaction, u64)> {
         let (reaction, started) = self.reaction?;
         let elapsed = started.elapsed().as_millis() as u64;
-        (elapsed < mascot::REACTION_MS).then_some((reaction, elapsed))
+        (elapsed < reaction.duration()).then_some((reaction, elapsed))
     }
 
     /// The cat's current frame: a reaction while one plays, else its mood
@@ -2940,7 +2940,9 @@ mod tests {
     fn reactions_end_after_the_reaction_time() {
         let mut t = TestApp::new();
         let long_ago = Instant::now()
-            .checked_sub(std::time::Duration::from_millis(mascot::REACTION_MS))
+            .checked_sub(std::time::Duration::from_millis(
+                Reaction::Flinch.duration(),
+            ))
             .unwrap();
         t.app.reaction = Some((Reaction::Flinch, long_ago));
         assert!(t.app.current_reaction().is_none());

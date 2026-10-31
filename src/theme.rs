@@ -18,7 +18,12 @@ pub const CAT_SHINE: Color = Color::White;
 /// The friend it meets with: a pink cat.
 pub const CAT_FRIEND: Color = Color::Magenta;
 pub const CAT_FRIEND_LIGHT: Color = Color::LightMagenta;
-/// Props: notebook paper, ink and spine, pen, game controller and buttons.
+/// Props: laptop body, screen, code on it and keys; notebook paper, ink
+/// and spine, pen; game controller and buttons.
+pub const CAT_LAPTOP: Color = Color::Gray;
+pub const CAT_SCREEN: Color = Color::Black;
+pub const CAT_CODE: Color = Color::Green;
+pub const CAT_KEYS: Color = Color::DarkGray;
 pub const CAT_PAPER: Color = Color::White;
 pub const CAT_INK: Color = Color::Gray;
 pub const CAT_PEN: Color = Color::Yellow;
