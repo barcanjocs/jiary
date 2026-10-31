@@ -1,3 +1,4 @@
+use super::chrome::chrome_layout;
 use super::graphs::{
     activity_bar, centered, focus_grid, focus_legend, hour_labels, item_width, project_bar,
     timeline_row, year_focus_grid,
@@ -8,7 +9,7 @@ use super::items::{
 };
 use super::sections::draw_scrollbar;
 use super::text::{fmt_hms, plural};
-use super::{App, Screen, chrome_layout};
+use super::{App, Screen};
 use crate::period::Period;
 use crate::session::Session;
 use crate::summary::summarize;
