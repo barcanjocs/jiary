@@ -592,13 +592,15 @@ impl App {
             KeyCode::Backspace => {
                 form.input.pop();
             }
-            KeyCode::Enter | KeyCode::Esc => {
+            KeyCode::Enter => {
                 if !form.input.is_empty() {
                     let note = form.input.clone();
                     self.append_active_note(&note);
                 }
                 self.screen = Screen::Main;
             }
+            // Cancel: the typed note is discarded.
+            KeyCode::Esc => self.screen = Screen::Main,
             _ => {}
         }
     }
@@ -1844,6 +1846,27 @@ mod tests {
 
         let t = TestApp::new();
         assert_eq!(t.app.cursor_position((80, 24)), None); // main screen
+    }
+
+    #[test]
+    fn add_note_enter_saves_and_esc_discards() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        for (keys, expected) in [("kept", Some("kept\n")), ("dropped", Some("kept\n"))] {
+            t.app.handle_key(press(KeyCode::Char('n')));
+            for c in keys.chars() {
+                t.app.handle_key(press(KeyCode::Char(c)));
+            }
+            let confirm = if keys == "kept" {
+                KeyCode::Enter
+            } else {
+                KeyCode::Esc
+            };
+            t.app.handle_key(press(confirm));
+            assert!(matches!(t.app.screen, Screen::Main));
+            let notes = t.app.active_session.as_ref().unwrap().notes.as_deref();
+            assert_eq!(notes, expected);
+        }
     }
 
     #[test]
