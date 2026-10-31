@@ -2591,10 +2591,11 @@ fn timeline_row(
     half_cells(&colors)
 }
 
-/// A line over the timeline (`━`, mid-row, so it lifts off the bar) in the
-/// focus rating of what ran at each cell's middle: red, yellow, green, or
-/// dimmed for a session that could be rated but wasn't. Blank over breaks,
-/// disruptions and gaps, which are never rated.
+/// A thick line over the timeline (`▀`, the top half of its row, so it
+/// lifts off the bar by the bottom half) in the focus rating of what ran
+/// at each cell's middle: red, yellow, green, or dimmed for a session that
+/// could be rated but wasn't. Blank over breaks, disruptions and gaps,
+/// which are never rated.
 fn focus_row(
     summary: &DaySummary,
     start: chrono::DateTime<Utc>,
@@ -2615,7 +2616,7 @@ fn focus_row(
                 },
                 _ => return Span::raw(" "),
             };
-            Span::styled("━", Style::new().fg(color))
+            Span::styled("▀", Style::new().fg(color))
         })
         .collect()
 }
@@ -4114,7 +4115,7 @@ mod tests {
         // On top, the focus line: green over the two rated (3) sessions,
         // blank over the gap.
         let focus: String = line_from(buf, y - 1, first).chars().take(68).collect();
-        assert_eq!(buf[(last, y - 1)].symbol(), "━");
+        assert_eq!(buf[(last, y - 1)].symbol(), "▀");
         assert_eq!(buf[(last, y - 1)].fg, Color::Green);
         assert!(focus.trim().contains(' '), "the gap: {focus:?}");
         assert_eq!(
@@ -4226,14 +4227,14 @@ mod tests {
         assert_eq!(
             shown,
             [
-                ("━", red),
-                ("━", red),
+                ("▀", red),
+                ("▀", red),
                 (" ", None),
                 (" ", None),
-                ("━", gray),
-                ("━", gray),
-                ("━", green),
-                ("━", green),
+                ("▀", gray),
+                ("▀", gray),
+                ("▀", green),
+                ("▀", green),
             ]
         );
     }

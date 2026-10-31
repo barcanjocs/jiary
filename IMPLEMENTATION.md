@@ -493,10 +493,10 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
   label sits at the left edge) to now (`timeline_row`: each half cell colored by `DaySummary::activity_at` its
   middle, over `DaySummary::blocks`; a `Block` carries its session's
   activity and focus) with, on top under no label, the focus line
-  (`focus_row`: a `━` per cell, mid-row so it lifts off the bar, in the
-  rating of what ran there, dimmed `UNRATED` for a rateable session
-  without one, blank over breaks, disruptions and gaps) and its hours (`hour_labels`, local
-  time, dropped where they would collide; the span then leaves the `Day`
+  (`focus_row`: a `▀` per cell, the top half of the row so it lifts off
+  the bar, in the rating of what ran there, dimmed `UNRATED` for a
+  rateable session without one, blank over breaks, disruptions and gaps)
+  and its hours (`hour_labels`, local time, dropped where they would collide; the span then leaves the `Day`
   text, which would repeat it); under `Activity` the share bar
   (`share_row`: halves split by cumulative time, longest first), and under
   `Project` the same for projects, in their colors. Both go
