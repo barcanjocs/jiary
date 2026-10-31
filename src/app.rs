@@ -158,14 +158,7 @@ impl App {
             Err(e) => app.set_error(e),
         }
         app.refresh_after_session_change();
-        match app.db.distinct_projects() {
-            Ok(projects) => app.projects = projects,
-            Err(e) => app.set_error(e),
-        }
-        match app.db.distinct_tasks() {
-            Ok(tasks) => app.tasks = tasks,
-            Err(e) => app.set_error(e),
-        }
+        app.refresh_suggestions();
 
         app
     }
@@ -190,6 +183,19 @@ impl App {
             Err(e) => self.set_error(e),
         }
         self.refresh_previous_notes();
+    }
+
+    /// Reloads the project/task autocomplete candidates. Called at startup
+    /// and after starting a session (which may introduce new values).
+    fn refresh_suggestions(&mut self) {
+        match self.db.distinct_projects() {
+            Ok(projects) => self.projects = projects,
+            Err(e) => self.set_error(e),
+        }
+        match self.db.distinct_tasks() {
+            Ok(tasks) => self.tasks = tasks,
+            Err(e) => self.set_error(e),
+        }
     }
 
     /// Refreshes the cached "previous notes" for the active session. The list
@@ -459,11 +465,18 @@ impl App {
         match key {
             KeyCode::Enter => {
                 let candidates = match form.project.value() {
-                    None => self.tasks.clone(),
-                    Some(project) => self.db.tasks_for_project(&project).unwrap_or_default(),
+                    None => Ok(self.tasks.clone()),
+                    Some(project) => self.db.tasks_for_project(&project),
                 };
-                form.task = Autocomplete::new(candidates);
-                form.step = Step::Task;
+                // `form` is dead from here, so self can be borrowed again.
+                let candidates = candidates.unwrap_or_else(|e| {
+                    self.set_error(e);
+                    Vec::new()
+                });
+                if let Screen::StartSession(form) = &mut self.screen {
+                    form.task = Autocomplete::new(candidates);
+                    form.step = Step::Task;
+                }
             }
             _ => form.project.handle_key(key),
         }
@@ -495,8 +508,7 @@ impl App {
         self.start_session(activity, project, task);
 
         self.refresh_after_session_change();
-        self.projects = self.db.distinct_projects().unwrap_or_default();
-        self.tasks = self.db.distinct_tasks().unwrap_or_default();
+        self.refresh_suggestions();
         self.screen = Screen::Main;
     }
 
