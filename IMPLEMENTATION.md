@@ -369,65 +369,22 @@ UI never jumps when an error appears or disappears.
 
 Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
 
-- **Active** (` ACTIVE `) — two parts. Pinned at the top
-  (`pinned_height`): the session info (`active_lines`: bold timer, dimmed
-  label/value rows via `theme::kv`, interruptions red when > 0; a dimmed
-  hint when there is no session) beside the cat, its gap row and caption
-  rows, as tall as the taller of the two. Below it, the notes
-  (`note_lines`: cached previous notes, then the session's own, as bullets)
-  across the full width, scrolled by `notes_scroll`, with a scrollbar on
-  the right border beside them when they don't fit. Never collapses. While
-  the cat fits the width (`cat_fits`), the pinned part is always the cat's
-  full height, even with no session. The cat sits top-right
-  (`split_for_cat`), one column in from the border, and is left out when
-  the section is shorter than the sprite or the text would get under 24
-  columns.
-
-### The cat (`mascot.rs`)
-
-Pixel art drawn with half blocks on a 24×10-pixel canvas (24×5 cells), each
-cell showing a top and a bottom pixel. `render` picks per cell: blank for
-two transparent pixels, `█` for two equal colors, `▀`/`▄` in the pixel's
-color when one half is transparent (the terminal background shows through),
-and `▀` with fg = top, bg = bottom otherwise. A frame can also carry text
-over transparent cells (`z`, `…`, `!`, `✓`, `♥`, `♪`, each with its own
-color), for symbols that read better as characters than as pixels. Palette
-characters map to `theme::CAT_*`: a slim blue kitten whose fur is the app's
-accent (`CAT_FUR = ACCENT`), a pink friend, and props.
-
-What it shows (`App::cat_lines`):
-
-- **`Mood`**, from the session (`App::mood`): `Idle` with none, `Working`
-  (typing on a laptop, code growing on its screen) in a work session,
-  `Drowsy` (eyes shut over a dark screen) once a work session passes
-  `DROWSY_AFTER_MINUTES` (25, a candidate for a setting), `Sleeping`
-  on a break, `Meeting` (talking with the friend) in a meeting, `Gaming` in
-  a disruption. Moods loop by wall-clock time, so they run at the same pace
-  regardless of how often the app redraws (~10×/sec).
-- **`Reaction`**, a one-off shown for its `duration()` (the sum of its
-  frames) from the moment it is triggered (`App::react`, timed with
-  `Instant`): `Flinch` on `i` (1.5 s), `Noted` when a note is added (2.4 s:
-  a few pen strokes in a notebook, then a `✓`), `Rated(n)` when a session
-  ends with a focus rating (1.5 s: hearts / a tune / drooped ears). Skipping the rating or saving an
-  empty note triggers nothing.
-
-All frames share one size, and the cat's body sits on the same columns in
-every scene where it is alone (pinned by a test), so switching moods or
-starting a reaction never makes it jump.
-
-**Caption.** Under the cat, after a blank `CAPTION_GAP` row (so it doesn't
-crowd the cat), `CAPTION_ROWS` (2) rows hold a faded italic
-caption (`theme::CAPTION`), centered and wrapped to the cat's width. The
-sentence comes from `captions::caption`: the list for the current mood, or
-for a work session whose activity has its own list (`BY_ACTIVITY`, matched
-ignoring case); an empty list shows nothing. `App::caption_seed` picks the
-sentence and is renewed in `refresh_after_session_change`, so a caption
-stays put until the session changes (or the mood does, e.g. turning
-drowsy); there is no random-number dependency, the seed is the clock's
-nanoseconds. The caption rows are part of the active section's content
-height whenever the cat fits, caption or not, so the layout never jumps
-when one appears; a section shrunk below cat + caption keeps the cat and
-drops the caption.
+- **Active** (` ACTIVE `) — two columns. Left: the session info, pinned
+  (`active_lines`: bold timer, dimmed label/value rows via `theme::kv`,
+  interruptions red when > 0; a dimmed hint when there is no session), and
+  directly below it the notes (`note_lines`: cached previous notes, then
+  the session's own, as bullets word-wrapped to the text column by
+  `bullet_lines` with continuation rows indented under the text; scrolling
+  and the section height count wrapped rows), scrolled by `notes_scroll` in
+  the rest of
+  the height, with a scrollbar on the right border beside them when they
+  don't fit. Right: the cat, a gap row and its caption rows
+  (`CAT_BLOCK_HEIGHT`), pinned, top-aligned, one column in from the border
+  (`split_for_cat`). The section is as tall as the taller column (info +
+  notes, or the cat block whenever the cat fits the width, even with no
+  session), so notes follow the info with no gap. Never collapses. The cat
+  is left out when the section is shorter than the sprite or the text
+  would get under 24 columns.
 - **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
   (completed and the running one), newest first, separated by blank rows:
   bold time range + duration, a focus badge (`F1` red / `F2` yellow / `F3`

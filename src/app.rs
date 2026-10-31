@@ -1090,23 +1090,20 @@ impl App {
     /// borders included.
     fn content_heights(&self, width: u16) -> ContentHeights {
         let inner_width = width.saturating_sub(2);
-        let active = self.pinned_height(inner_width) + self.note_lines().len() as u16;
+        // The text column (info, then notes) or the cat column, whichever is
+        // taller. The cat column keeps its caption rows even without a
+        // caption, so the layout doesn't jump when one appears.
+        let notes = self.note_lines(text_width(inner_width)).len();
+        let text = (self.active_lines().len() + notes) as u16;
+        let cat = if cat_fits(inner_width) {
+            CAT_BLOCK_HEIGHT
+        } else {
+            0
+        };
+        let active = text.max(cat);
         ContentHeights {
             active: active + 2,
             summary: self.summary_lines(width.saturating_sub(2)).len() as u16 + 2,
-        }
-    }
-
-    /// Rows at the top of the active section that stay put while its notes
-    /// scroll: the session info, beside the cat and its caption when the
-    /// cat fits. The caption rows are kept even without a caption, so the
-    /// layout doesn't jump when one appears.
-    fn pinned_height(&self, inner_width: u16) -> u16 {
-        let info = self.active_lines().len() as u16;
-        if cat_fits(inner_width) {
-            info.max(mascot::HEIGHT + CAPTION_GAP + CAPTION_ROWS)
-        } else {
-            info
         }
     }
 
@@ -1130,7 +1127,10 @@ impl App {
     /// today's sessions.
     fn scroll_lines(&self, section: Section) -> usize {
         match section {
-            Section::Active => self.note_lines().len(),
+            Section::Active => {
+                let inner_width = self.main_areas().active.width.saturating_sub(2);
+                self.note_lines(text_width(inner_width)).len()
+            }
             _ => self.timeline_lines().len(),
         }
     }
@@ -1140,9 +1140,9 @@ impl App {
         let areas = self.main_areas();
         match section {
             Section::Active => {
-                let inner = areas.active.height.saturating_sub(2);
-                let pinned = self.pinned_height(areas.active.width.saturating_sub(2));
-                inner.saturating_sub(pinned) as usize
+                // The notes fill the text column below the session info.
+                let inner = areas.active.height.saturating_sub(2) as usize;
+                inner.saturating_sub(self.active_lines().len())
             }
             _ if self.layout.today_collapsed => 0,
             _ => areas.today.height.saturating_sub(2) as usize,
@@ -1187,34 +1187,32 @@ impl App {
         let block = self.section_block(Section::Active);
         let inner = block.inner(areas.active);
         frame.render_widget(block, areas.active);
-        // Session info and the cat stay pinned at the top; the notes below
-        // them scroll.
-        let pinned = self.pinned_height(inner.width).min(inner.height);
-        let [pinned_area, notes_area] =
-            Layout::vertical([Constraint::Length(pinned), Constraint::Min(0)]).areas(inner);
-        let notes = self.note_lines();
-        let offset = self
-            .notes_scroll
-            .min(notes.len().saturating_sub(notes_area.height as usize));
+        // Two columns: on the left the session info, pinned, with the notes
+        // directly below it scrolling in the rest of the height; on the
+        // right the cat and its caption, pinned.
+        let (text_area, cat_area, caption_area) = split_for_cat(inner);
+        let info = self.active_lines();
+        let [info_area, notes_area] =
+            Layout::vertical([Constraint::Length(info.len() as u16), Constraint::Min(0)])
+                .areas(text_area);
+        frame.render_widget(Paragraph::new(info), info_area);
+
+        let notes = self.note_lines(notes_area.width);
+        let visible = notes_area.height as usize;
+        let offset = self.notes_scroll.min(notes.len().saturating_sub(visible));
         frame.render_widget(
             Paragraph::new(notes.clone()).scroll((offset as u16, 0)),
             notes_area,
         );
+        // On the border, beside the notes rows.
         let track = Rect::new(
             areas.active.right().saturating_sub(1),
             notes_area.y,
             1,
             notes_area.height,
         );
-        draw_scrollbar(
-            frame,
-            track,
-            notes.len(),
-            notes_area.height as usize,
-            offset,
-        );
-        let (text_area, cat_area, caption_area) = split_for_cat(pinned_area);
-        frame.render_widget(Paragraph::new(self.active_lines()), text_area);
+        draw_scrollbar(frame, track, notes.len(), visible, offset);
+
         if let Some(cat_area) = cat_area {
             frame.render_widget(Paragraph::new(self.cat_lines()), cat_area);
         }
@@ -1489,7 +1487,9 @@ impl App {
 
     /// The scrollable part of the active section: previous notes for the
     /// project/task, then the session's own, as dimmed bullets.
-    fn note_lines(&self) -> Vec<Line<'static>> {
+    /// Notes are wrapped to `width` (the text column), so scrolling and the
+    /// section's height count rows on screen, not notes.
+    fn note_lines(&self, width: u16) -> Vec<Line<'static>> {
         let Some(session) = &self.active_session else {
             return Vec::new();
         };
@@ -1499,11 +1499,8 @@ impl App {
             lines.push(Line::from(Span::styled("Previous notes:", theme::DIMMED)));
             // Each entry is one session's notes: newline-separated, one
             // bullet per line.
-            for line in self.previous_notes.iter().flat_map(|notes| notes.lines()) {
-                lines.push(Line::from(Span::styled(
-                    format!("  • {line}"),
-                    theme::DIMMED,
-                )));
+            for note in self.previous_notes.iter().flat_map(|notes| notes.lines()) {
+                lines.extend(bullet_lines(note, width));
             }
         }
 
@@ -1512,11 +1509,8 @@ impl App {
             && !notes.is_empty()
         {
             lines.push(Line::from(Span::styled("Session notes:", theme::DIMMED)));
-            for line in notes.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  • {line}"),
-                    theme::DIMMED,
-                )));
+            for note in notes.lines() {
+                lines.extend(bullet_lines(note, width));
             }
         }
 
@@ -1772,6 +1766,38 @@ fn cat_fits(inner_width: u16) -> bool {
     inner_width >= MIN_TEXT_WIDTH + CAT_COLUMNS
 }
 
+/// Width of the active section's text column (session info and notes):
+/// what the cat leaves when it fits, otherwise the whole interior.
+fn text_width(inner_width: u16) -> u16 {
+    if cat_fits(inner_width) {
+        inner_width - CAT_COLUMNS
+    } else {
+        inner_width
+    }
+}
+
+/// One note as dimmed `  • ` bullet rows, word-wrapped to `width` with
+/// continuation rows indented under the text.
+fn bullet_lines(note: &str, width: u16) -> Vec<Line<'static>> {
+    const BULLET: &str = "  • ";
+    let indent = BULLET.chars().count();
+    let mut rows = wrap_text(note, (width as usize).saturating_sub(indent));
+    if rows.len() > 1 && rows.last().is_some_and(String::is_empty) {
+        rows.pop(); // the cursor row wrap_text adds after a full row
+    }
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let prefix = if i == 0 {
+                BULLET.to_string()
+            } else {
+                " ".repeat(indent)
+            };
+            Line::from(Span::styled(format!("{prefix}{row}"), theme::DIMMED))
+        })
+        .collect()
+}
+
 /// A scrollbar in `track` (a border column) when `total` rows don't fit in
 /// `visible`; nothing otherwise.
 fn draw_scrollbar(frame: &mut Frame, track: Rect, total: usize, visible: usize, offset: usize) {
@@ -1797,6 +1823,9 @@ fn draw_scrollbar(frame: &mut Frame, track: Rect, total: usize, visible: usize, 
 const CAPTION_GAP: u16 = 1;
 const CAPTION_ROWS: u16 = 2;
 
+/// The cat column's height: the cat, the gap and the caption rows.
+const CAT_BLOCK_HEIGHT: u16 = mascot::HEIGHT + CAPTION_GAP + CAPTION_ROWS;
+
 /// Splits the active section's interior into the session text and, when it
 /// fits, the cat on the right (top-aligned, one column in from the border)
 /// with its caption rows below. The cat is left out rather than squeezing
@@ -1816,7 +1845,7 @@ fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>, Option<Rect>) {
         mascot::WIDTH,
         mascot::HEIGHT,
     );
-    let caption = (inner.height >= mascot::HEIGHT + CAPTION_GAP + CAPTION_ROWS).then(|| Rect {
+    let caption = (inner.height >= CAT_BLOCK_HEIGHT).then(|| Rect {
         y: cat.bottom() + CAPTION_GAP,
         height: CAPTION_ROWS,
         ..cat
@@ -3142,8 +3171,9 @@ mod tests {
     // --- scrolling the active session's notes ------------------------------
 
     /// A running session with notes "note 1" … "note n", in an active
-    /// section fixed at 13 rows: of its 11 inner rows, 8 are pinned (info
-    /// beside the cat, gap and caption), leaving rows 10–12 for the notes.
+    /// section fixed at 13 rows: of its 11 inner rows, the first 5 are the
+    /// pinned session info, leaving rows 7–12 of the text column (beside
+    /// the cat) for the notes.
     fn with_notes(n: usize) -> TestApp {
         let mut t = TestApp::new();
         let mut session = running_session(chrono::Duration::minutes(1), 0);
@@ -3156,9 +3186,9 @@ mod tests {
     #[test]
     fn notes_scroll_under_the_pinned_session_info_and_cat() {
         let mut t = with_notes(10);
-        // "Session notes:" + 10 bullets = 11 rows in a 3-row viewport.
-        assert_eq!(t.app.viewport(Section::Active), 3);
-        assert_eq!(t.app.max_scroll(Section::Active), 8);
+        // "Session notes:" + 10 bullets = 11 rows in a 6-row viewport.
+        assert_eq!(t.app.viewport(Section::Active), 6);
+        assert_eq!(t.app.max_scroll(Section::Active), 5);
 
         t.key(KeyCode::Down);
         t.key(KeyCode::Char('j'));
@@ -3167,15 +3197,40 @@ mod tests {
         // Pinned: the timer and the cat's ear stay at the top.
         assert!(line(&buf, 2).starts_with("│00:01:00"));
         assert_eq!(buf[(65, 2)].symbol(), "▄");
-        // The notes below have moved.
-        assert!(line_from(&buf, 10, 1).starts_with("  • note 2 "));
+        // The notes right below the info have moved: no gap above them.
+        assert!(line(&buf, 6).starts_with("│Interruptions  0"));
+        assert!(line_from(&buf, 7, 1).starts_with("  • note 2 "));
         // With a scrollbar on the border beside them.
-        assert_ne!(buf[(79, 11)].symbol(), " ");
+        assert_ne!(buf[(79, 9)].symbol(), " ");
 
         t.key(KeyCode::End);
         assert!(line_from(&render(&t.app), 12, 1).starts_with("  • note 10 "));
         t.key(KeyCode::Home);
-        assert!(line_from(&render(&t.app), 10, 1).starts_with("Session notes:"));
+        assert!(line_from(&render(&t.app), 7, 1).starts_with("Session notes:"));
+    }
+
+    #[test]
+    fn long_notes_wrap_with_an_indent_beside_the_cat() {
+        let mut t = with_notes(0);
+        let long = "a long note about the layout that keeps going well past the cat";
+        t.app.active_session.as_mut().unwrap().notes = Some(format!("{long}\n"));
+        let buf = render(&t.app);
+        // The text column is 52 wide (78 inner minus the cat's 26): the note
+        // wraps at a word boundary and continues under its text.
+        assert!(
+            line_from(&buf, 8, 1).starts_with("  • a long note about the layout that keeps going ")
+        );
+        assert!(line_from(&buf, 9, 1).starts_with("    well past the cat "));
+        // Each row stays inside the text column (the cat's caption is to its
+        // right on these rows).
+        let text_column = |y| line_from(&buf, y, 1).chars().take(52).collect::<String>();
+        assert_eq!(
+            text_column(8).trim_end(),
+            "  • a long note about the layout that keeps going"
+        );
+        assert_eq!(text_column(9).trim_end(), "    well past the cat");
+        // Scrolling counts the wrapped rows: "Session notes:" + 2.
+        assert_eq!(t.app.scroll_lines(Section::Active), 3);
     }
 
     #[test]
