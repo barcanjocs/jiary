@@ -286,10 +286,8 @@ impl App {
                     return false;
                 }
 
-                if !self.close_active_session() {
-                    return false;
-                }
-
+                // Look up what to resume before closing the disruption, so
+                // it keeps running when there is nothing to resume.
                 let combo = match self.db.latest_non_disruption() {
                     Ok(Some(combo)) => {
                         self.clear_error();
@@ -302,6 +300,10 @@ impl App {
                     }
                 };
 
+                if !self.close_active_session() {
+                    return false;
+                }
+
                 let (activity, project, task) = combo;
                 self.start_session(&activity, project, task);
 
@@ -309,12 +311,16 @@ impl App {
             }
 
             KeyCode::Char('d') => {
-                // Only start a Disruption if there was a session to interrupt.
-                let had_active = self.active_session.is_some();
-                if had_active && self.close_active_session() {
+                // Only start a Disruption if there was a session to interrupt,
+                // and not another one on top of a running Disruption.
+                let interruptible = self
+                    .active_session
+                    .as_ref()
+                    .is_some_and(|s| s.activity != "Disruption");
+                if interruptible && self.close_active_session() {
                     self.start_session("Disruption", None, None);
+                    self.refresh_after_session_change();
                 }
-                self.refresh_after_session_change();
             }
             KeyCode::Char('s') => {
                 self.screen = Screen::StartSession(StartSessionForm {
@@ -1891,6 +1897,44 @@ mod tests {
             assert!(active.ended_at.is_none());
             assert!(active.notes.is_none(), "cancelled notes must not be saved");
         }
+    }
+
+    fn activity(t: &TestApp) -> Option<&str> {
+        t.app.active_session.as_ref().map(|s| s.activity.as_str())
+    }
+
+    #[test]
+    fn disrupt_then_resume_restores_previous_session() {
+        let mut t = TestApp::new();
+        t.app
+            .start_session("Reading", Some("alpha".into()), Some("beta".into()));
+        t.app.handle_key(press(KeyCode::Char('d')));
+        assert_eq!(activity(&t), Some("Disruption"));
+        t.app.handle_key(press(KeyCode::Char('r')));
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.activity, "Reading");
+        assert_eq!(active.project.as_deref(), Some("alpha"));
+        assert_eq!(active.task.as_deref(), Some("beta"));
+        assert_eq!(t.app.today_sessions.len(), 3);
+    }
+
+    #[test]
+    fn disrupt_during_a_disruption_is_a_noop() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.app.handle_key(press(KeyCode::Char('d')));
+        let id = t.app.active_session.as_ref().unwrap().id;
+        t.app.handle_key(press(KeyCode::Char('d')));
+        assert_eq!(t.app.active_session.as_ref().unwrap().id, id);
+        assert_eq!(t.app.today_sessions.len(), 2);
+    }
+
+    #[test]
+    fn resume_with_nothing_to_resume_keeps_the_disruption() {
+        let mut t = TestApp::new();
+        t.app.start_session("Disruption", None, None);
+        t.app.handle_key(press(KeyCode::Char('r')));
+        assert_eq!(activity(&t), Some("Disruption"));
     }
 
     #[test]
