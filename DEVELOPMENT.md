@@ -35,23 +35,19 @@ truth for state — this file plus `git log` is all that is needed to resume.
   (`.github/workflows/release.yml`) and `install.sh` (curl one-liner in the
   README). Since then: `src/app.rs` split into `src/app/` (2026-10-31;
   one file per screen plus shared pieces, code moved unchanged, see the
-  file map).
+  file map). Docs reorganized: a short README (what it is and isn't,
+  install, a typical day), the user manual in `docs/user/` and the
+  developer manual in `docs/dev/` (IMPLEMENTATION.md moved there).
 - Next, in order:
-  1. **README revamp** (docs). It has grown feature by feature: restructure
-     around install → first session → daily loop (s/e/rating/n/i/detours)
-     → reviewing (summary, palette, week/month/year) → data & backup, with
-     the key tables in one place. Keep the Install section's curl command
-     and the `cargo install --git` fallback; the dev quick start (build,
-     `./check`, releasing) moves to its own section or to this file.
-  2. **Docs drift.** IMPLEMENTATION.md has grown long paragraphs; tighten
-     it to match the code (module map, screens, lifecycle, rendering).
-  3. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
+  1. **Docs drift.** docs/dev/implementation.md has grown long
+     paragraphs; tighten it to match the code (module map, screens,
+     lifecycle, rendering).
+  2. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
      with its limits) and A (browse past days, likely `/day` with ←→ like
      the period views).
-- Releasing: bump `version` in Cargo.toml, commit, then tag and push the
-  tag (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`); the workflow
-  builds and publishes. Tag pushes are done by the maintainer, not an
-  agent. Runner images age out: macOS builds moved to `macos-15` after
+- Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
+  the tag; the workflow builds and publishes). Tag pushes are done by the
+  maintainer, not an agent. Runner images age out: macOS builds moved to `macos-15` after
   `macos-14` was retired (Nov 2026).
 - Blockers / open questions: the Intel macOS and Linux builds are built
   and tested in CI but not yet run by hand on real machines.
@@ -117,14 +113,15 @@ from its scope note alone, without re-deriving context.
       shortcut / terminal keybind that runs `jiary`); no in-process global
       hotkey registration — Wayland forbids it and it breaks the
       no-system-deps property. Touches: E's lockfile format, one X11
-      activation helper, README.
+      activation helper, user manual (`docs/user/`).
 - [ ] **J. Day context: sleep and mood** (medium; touches the db, the start
       flow and the period views).
       Two once-a-day ratings to set the day's work against. Discussed
       2026-10-31; the limits are the point, so keep them:
       - Exactly two, fixed: sleep and mood, on focus's 1–3 scale. No custom
         fields or "add a metric": that road ends in a habit tracker, out of
-        scope. Say so in the README's scope statement.
+        scope. The README and the user manual already say Jiary is
+        not a habit tracker; keep it so.
       - Asked once, cheaply: the day's first `s` opens a small prompt before
         the start form (`sleep 1/2/3 · mood 1/2/3`, two keys); Esc skips and
         it doesn't ask again that day. `/day` sets or changes them later.
@@ -173,8 +170,10 @@ from its scope note alone, without re-deriving context.
   each other's live databases.
 - **Commits:** small, lowercase imperative, one concern each; keep the
   worktree clean so `git diff` always shows exactly the current task.
-- User-facing docs (keys, data model, backup) live in README.md — keep it in
-  sync when behavior changes.
+- **Docs:** user-facing behavior (keys, workflows, data, backup) lives in
+  the user manual, `docs/user/` (keys in `keys.md`); keep it in sync when
+  behavior changes. The README stays short: what Jiary is and isn't,
+  install, a typical day. Building and releasing live in `docs/dev/`.
 
 ## Verification
 
@@ -186,7 +185,9 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 
 ## File map
 
-- `IMPLEMENTATION.md` — developer-facing implementation details: architecture,
+- `docs/user/` — the user manual. `docs/dev/README.md` — building,
+  checking, releasing.
+- `docs/dev/implementation.md` — developer-facing implementation details: architecture,
   data layer, app state, screen state machine, session lifecycle, rendering,
   testing. Keep in sync when architecture changes.
 - `src/main.rs` — entry point: open db, `ratatui::init()`/`restore()` (raw
@@ -211,4 +212,4 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
   file per screen (`main_screen`, `forms`, `palette`, `period_view`,
   `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
-  `items`, `graphs`, `text`), and `tests.rs`. See IMPLEMENTATION.md.
+  `items`, `graphs`, `text`), and `tests.rs`. See docs/dev/implementation.md.
