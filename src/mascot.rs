@@ -17,45 +17,46 @@ pub const HEIGHT: u16 = 5;
 
 type Sprite = [&'static str; HEIGHT as usize * 2];
 
-// Palette: `.` transparent, `Y` fur, `R` forehead stripe, `P` inner ears
-// and nose, `K` eyes, `W` eye shine.
+// Palette: `.` transparent, `C` fur, `L` muzzle and belly, `P` inner ears
+// and nose, `K` eyes, `W` eye shine. A slim kitten: round head, narrow
+// body, thin upright tail.
 const IDLE: Sprite = [
-    ".Y........Y...",
-    ".YY......YY...",
-    ".YPYYRRYYPY...",
-    "YYYYYYYYYYYY..",
-    "YYYWYYYYWYYY..",
-    "YYYKYPPYKYYY..",
-    ".YYYYYYYYYY..Y",
-    "..YYYYYYYY...Y",
-    ".YYYYYYYYYY.Y.",
-    ".YYYYYYYYYYY..",
+    "..C.....C.....",
+    ".CPC...CPC....",
+    ".CCCCCCCCC....",
+    "CCCWCCCWCCC...",
+    "CCCKCPCKCCC...",
+    ".CCCLLLCCC..C.",
+    "..CCLLLCC...C.",
+    "..CCLLLCC..C..",
+    "..CCLLLCCCC...",
+    "..CC.C.CC.....",
 ];
 
 const BLINK: Sprite = [
-    ".Y........Y...",
-    ".YY......YY...",
-    ".YPYYRRYYPY...",
-    "YYYYYYYYYYYY..",
-    "YYYYYYYYYYYY..",
-    "YYYKYPPYKYYY..",
-    ".YYYYYYYYYY..Y",
-    "..YYYYYYYY...Y",
-    ".YYYYYYYYYY.Y.",
-    ".YYYYYYYYYYY..",
+    "..C.....C.....",
+    ".CPC...CPC....",
+    ".CCCCCCCCC....",
+    "CCCCCCCCCCC...",
+    "CCCKCPCKCCC...",
+    ".CCCLLLCCC..C.",
+    "..CCLLLCC...C.",
+    "..CCLLLCC..C..",
+    "..CCLLLCCCC...",
+    "..CC.C.CC.....",
 ];
 
 const TAIL_DOWN: Sprite = [
-    ".Y........Y...",
-    ".YY......YY...",
-    ".YPYYRRYYPY...",
-    "YYYYYYYYYYYY..",
-    "YYYWYYYYWYYY..",
-    "YYYKYPPYKYYY..",
-    ".YYYYYYYYYY...",
-    "..YYYYYYYY....",
-    ".YYYYYYYYYY.YY",
-    ".YYYYYYYYYYY..",
+    "..C.....C.....",
+    ".CPC...CPC....",
+    ".CCCCCCCCC....",
+    "CCCWCCCWCCC...",
+    "CCCKCPCKCCC...",
+    ".CCCLLLCCC....",
+    "..CCLLLCC.....",
+    "..CCLLLCC...CC",
+    "..CCLLLCCCCC..",
+    "..CC.C.CC.....",
 ];
 
 /// The idle loop: (milliseconds, frame) steps, repeated. Mostly still, with
@@ -95,8 +96,8 @@ pub fn lines(millis: u64) -> Vec<Line<'static>> {
 
 fn color(pixel: u8) -> Option<Color> {
     match pixel {
-        b'Y' => Some(theme::CAT_FUR),
-        b'R' => Some(theme::CAT_STRIPE),
+        b'C' => Some(theme::CAT_FUR),
+        b'L' => Some(theme::CAT_LIGHT),
         b'P' => Some(theme::CAT_PINK),
         b'K' => Some(theme::CAT_EYE),
         b'W' => Some(theme::CAT_SHINE),
@@ -149,17 +150,23 @@ mod tests {
         let lines = render(&IDLE);
         assert_eq!(lines.len(), HEIGHT as usize);
         let cell = |row: usize, col: usize| lines[row].spans[col].clone();
-        // Ear: both pixels fur → full block; only the bottom → lower half.
-        assert_eq!(cell(0, 1).content, "█");
-        assert_eq!(cell(0, 2).content, "▄");
-        assert_eq!(cell(0, 2).style, Style::new().fg(theme::CAT_FUR));
-        // Eye: shine over pupil → upper half in shine on a pupil background.
-        assert_eq!(cell(2, 3).content, "▀");
+        // Ear: only the bottom pixel → lower half in fur.
+        assert_eq!(cell(0, 1).content, "▄");
+        assert_eq!(cell(0, 1).style, Style::new().fg(theme::CAT_FUR));
+        // Ear tip over inner ear → upper half in fur on a pink background.
+        assert_eq!(cell(0, 2).content, "▀");
         assert_eq!(
-            cell(2, 3).style,
-            Style::new().fg(theme::CAT_SHINE).bg(theme::CAT_EYE)
+            cell(0, 2).style,
+            Style::new().fg(theme::CAT_FUR).bg(theme::CAT_PINK)
         );
-        // Transparent pixels stay blank.
+        // Fur over the eye's shine.
+        assert_eq!(cell(1, 3).content, "▀");
+        assert_eq!(
+            cell(1, 3).style,
+            Style::new().fg(theme::CAT_FUR).bg(theme::CAT_SHINE)
+        );
+        // Two fur pixels → full block; transparent pixels stay blank.
+        assert_eq!(cell(1, 1).content, "█");
         assert_eq!(cell(0, 0).content, " ");
     }
 

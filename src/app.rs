@@ -2751,10 +2751,11 @@ mod tests {
         let buf = render(&t.app);
         // Inner area is columns 1–78; the 14-wide cat ends one column before
         // the border, so its left edge is column 64. The left ear (same in
-        // every frame): full block, then a lower half beside it.
-        assert_eq!(buf[(65, 2)].symbol(), "█");
-        assert_eq!(buf[(65, 2)].fg, Color::Yellow);
-        assert_eq!(buf[(66, 2)].symbol(), "▄");
+        // every frame): a lower half, then fur over the pink inner ear.
+        assert_eq!(buf[(65, 2)].symbol(), "▄");
+        assert_eq!(buf[(65, 2)].fg, Color::Cyan);
+        assert_eq!(buf[(66, 2)].symbol(), "▀");
+        assert_eq!(buf[(66, 2)].bg, Color::LightRed);
         // The session text keeps the left side.
         assert!(line(&buf, 3).starts_with("│Project  alpha"));
     }
@@ -2764,7 +2765,7 @@ mod tests {
         // No session: the active section is one row tall.
         let t = TestApp::new();
         let buf = render(&t.app);
-        assert!((1..79).all(|x| buf[(x, 2)].fg != Color::Yellow));
+        assert!((1..79).all(|x| buf[(x, 2)].fg != Color::Cyan));
 
         // Too narrow to keep 24 columns of text beside it.
         let mut t = TestApp::new();
@@ -2774,7 +2775,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| t.app.draw(frame)).unwrap();
         let buf = terminal.backend().buffer();
-        assert!((1..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Yellow)));
+        assert!((1..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Cyan)));
     }
 
     // --- main screen sections ----------------------------------------------

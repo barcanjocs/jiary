@@ -7,11 +7,11 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// The cat mascot (an orange tabby): fur, forehead stripe, pink inner
-/// ears and nose, eyes and their shine. Readable on dark and light
-/// backgrounds alike.
-pub const CAT_FUR: Color = Color::Yellow;
-pub const CAT_STRIPE: Color = Color::Red;
+/// The cat mascot, a blue kitten in the app's accent hue: fur, lighter
+/// muzzle and belly, pink inner ears and nose, eyes and their shine.
+/// Readable on dark and light backgrounds alike.
+pub const CAT_FUR: Color = ACCENT;
+pub const CAT_LIGHT: Color = Color::LightCyan;
 pub const CAT_PINK: Color = Color::LightRed;
 pub const CAT_EYE: Color = Color::Black;
 pub const CAT_SHINE: Color = Color::White;

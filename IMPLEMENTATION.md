@@ -367,8 +367,9 @@ each cell showing a top and a bottom pixel. `render` picks per cell: blank
 for two transparent pixels, `█` for two equal colors, `▀`/`▄` in the
 pixel's color when one half is transparent (the terminal background shows
 through), and `▀` with fg = top, bg = bottom otherwise. Palette characters
-map to `theme::CAT_*` (an orange tabby that reads on dark and light
-backgrounds).
+map to `theme::CAT_*`: a slim blue kitten whose fur is the app's accent
+(`CAT_FUR = ACCENT`), with a `LightCyan` muzzle and belly, so it reads on
+dark and light backgrounds.
 
 Animation is a schedule of (milliseconds, frame) steps looped by wall-clock
 time, so it runs at the same pace regardless of how often the app redraws
