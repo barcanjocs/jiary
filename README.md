@@ -127,6 +127,15 @@ The rating is shown in the daily history as `F1`–`F3`, or `F-` if not rated.
 
 Started late? `[` moves the running session's start 5 minutes earlier, and `]` 5 minutes later. It never goes into the future. If you switched from another session (pressed `s`, `d`, `b`, `m` or `r`), the switch moves with it, so the session before ends earlier too (keeping at least a minute). If there was a gap, the start stops at the end of the session before; pressing on from there moves both.
 
+Walked away and left a session running? While Jiary is open, it watches how long the computer has gone without keyboard or mouse input (macOS, or Linux with `xprintidle` installed), and notices when the computer slept. After 15 minutes or more away during a work session, coming back asks what that time was:
+
+- `k` — count it as the session (say, you were reading on paper)
+- `b` — it was a break: the session ends when you left, a break covers the time away, and the same work picks up again now
+- `d` — it was a disruption: the same, with a disruption covering the time away
+- `e` — end the session when you left
+
+`u` undoes whichever you choose. Detours (breaks, meetings, disruptions) are never asked about, since being away from the computer is what they're for.
+
 ### Interruptions
 
 Press `i` at any time during an active session to log a micro-interruption (phone glance, Slack ping, urge to check something). The count is shown in the active session view and in the daily history as `I:N`.

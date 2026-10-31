@@ -1,6 +1,7 @@
 mod app;
 mod captions;
 mod db;
+mod idle;
 mod layout;
 mod mascot;
 mod session;
@@ -8,6 +9,8 @@ mod summary;
 mod theme;
 
 use std::io;
+use std::sync::mpsc;
+use std::thread;
 
 use crossterm::{
     cursor::Show,
@@ -58,7 +61,19 @@ fn run(terminal: &mut DefaultTerminal, mut app: app::App) -> io::Result<()> {
     // frame (only the start form's input steps show it).
     terminal.hide_cursor()?;
 
+    // Asking the system for its idle time runs a command, so it happens
+    // off the draw loop; the loop picks up whatever has arrived.
+    let (idle_tx, idle_rx) = mpsc::channel();
+    thread::spawn(move || {
+        while idle_tx.send(idle::system_idle()).is_ok() {
+            thread::sleep(idle::POLL);
+        }
+    });
+
     loop {
+        while let Ok(idle) = idle_rx.try_recv() {
+            app.observe_idle(idle, chrono::Utc::now());
+        }
         let size = terminal.size()?;
         app.set_size((size.width, size.height));
         terminal.draw(|frame| app.draw(frame))?;

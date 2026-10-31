@@ -143,6 +143,34 @@ impl Db {
         Ok(())
     }
 
+    /// Ends an active session at `at` instead of now (it was left running
+    /// while nobody was there).
+    pub fn complete_session_at(&self, id: i64, at: DateTime<Utc>) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE sessions SET ended_at = ?1 WHERE id = ?2 AND ended_at IS NULL",
+                params![stamp(at), id],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// Records a session that already happened, from `start` to `end`.
+    pub fn insert_finished_session(
+        &self,
+        activity: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<i64, DbError> {
+        self.conn
+            .execute(
+                "INSERT INTO sessions (started_at, ended_at, activity) VALUES (?1, ?2, ?3)",
+                params![stamp(start), stamp(end), activity],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
     /// Moves a session's start.
     pub fn set_started_at(&self, id: i64, at: DateTime<Utc>) -> Result<(), DbError> {
         self.conn

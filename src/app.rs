@@ -89,6 +89,11 @@ pub struct App {
     rating: Option<(i64, Instant)>,
     /// The last session change, for `u` to undo.
     undo: Option<Undo>,
+    /// Since when nobody has touched the computer, while a long enough
+    /// absence is under way (see `observe_idle`).
+    away_since: Option<chrono::DateTime<Utc>>,
+    /// When the system idle time was last observed, to notice sleep.
+    last_observed: Option<chrono::DateTime<Utc>>,
 }
 
 /// After this long in a work session the cat gets drowsy, a nudge to take a
@@ -99,13 +104,19 @@ const DROWSY_AFTER_MINUTES: i64 = 25;
 /// a rating given right away is the honest one.
 const RATING_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// A session change, as the sessions it ended and started (either may be
-/// missing: `e` only ends one, starting from nothing only starts one).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// A session change, as the session it ended and those it created (either
+/// may be missing: `e` only ends one, starting from nothing only creates
+/// one; counting an absence as a break creates the break and the resumed
+/// session).
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Undo {
     ended: Option<i64>,
-    started: Option<i64>,
+    created: Vec<i64>,
 }
+
+/// How long nobody has to touch the computer during a work session before
+/// coming back asks what that time was.
+const AWAY_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
 
 /// How far `[` and `]` move the active session's start.
 const START_STEP: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
@@ -119,6 +130,9 @@ enum Screen {
     // Boxed: three autocompletes make it far larger than the other variants.
     StartSession(Box<StartSessionForm>),
     AddNote(AddNoteForm),
+    /// Back after `AWAY_AFTER` or more without touching the computer,
+    /// during a work session: what was that time?
+    Away(chrono::DateTime<Utc>),
 }
 
 struct AddNoteForm {
@@ -233,6 +247,8 @@ impl App {
             caption_seed: fresh_seed(),
             rating: None,
             undo: None,
+            away_since: None,
+            last_observed: None,
         };
 
         if let Some(path) = &app.layout_path {
@@ -336,7 +352,7 @@ impl App {
                     self.clear_error();
                     self.undo = Some(Undo {
                         ended: Some(session.id),
-                        started: None,
+                        created: Vec::new(),
                     });
                     // Starting from nothing keeps an open window (say, a
                     // break right after `e`); ending another session
@@ -363,7 +379,7 @@ impl App {
         {
             Ok(session) => {
                 self.clear_error();
-                self.undo.get_or_insert_default().started = Some(session.id);
+                self.undo.get_or_insert_default().created.push(session.id);
                 self.active_session = Some(session);
             }
             Err(e) => self.set_error(e),
@@ -398,18 +414,18 @@ impl App {
         }
     }
 
-    /// Undoes the last session change: deletes the session it started and
+    /// Undoes the last session change: deletes the sessions it created and
     /// reopens the one it ended, so ending by mistake (or to add a last
     /// note) costs one key. Only the last change can be undone.
     fn undo(&mut self) {
         let Some(change) = self.undo.take() else {
             return;
         };
-        if let Some(id) = change.started
-            && let Err(e) = self.db.delete_session(id)
-        {
-            self.set_error(e);
-            return;
+        for &id in &change.created {
+            if let Err(e) = self.db.delete_session(id) {
+                self.set_error(e);
+                return;
+            }
         }
         if let Some(id) = change.ended
             && let Err(e) = self.db.reopen_session(id)
@@ -461,13 +477,123 @@ impl App {
             return key.code == KeyCode::Char('c');
         }
         let key = key.code;
+        // Back from an absence the idle poll hasn't seen end yet: ask about
+        // it first; this key only brings the question up.
+        if self.away_since.is_some() && self.came_back() {
+            return false;
+        }
         match &self.screen {
             Screen::Main => return self.handle_main(key),
             Screen::Help => self.screen = Screen::Main, // any key closes it
             Screen::StartSession(_) => self.handle_start_session(key),
             Screen::AddNote(_) => self.handle_add_note(key),
+            Screen::Away(since) => {
+                let since = *since;
+                self.handle_away(key, since);
+            }
         }
         false
+    }
+
+    // --- away: catching sessions left running -------------------------------
+
+    /// Takes in the system idle time (`None` when the platform can't tell),
+    /// polled every `idle::POLL` by `main`. Once nobody has touched the
+    /// computer for `AWAY_AFTER`, the absence is remembered from when it
+    /// started; on return (input again, or a key in the app) a work
+    /// session still running from before then asks what that time was. A
+    /// gap of `AWAY_AFTER` between polls means the computer slept, which
+    /// counts as away too, from the last poll before it.
+    pub fn observe_idle(&mut self, idle: Option<std::time::Duration>, now: chrono::DateTime<Utc>) {
+        if let Some(last) = self.last_observed.replace(now)
+            && now - last >= AWAY_AFTER
+        {
+            self.away_since = Some(self.away_since.map_or(last, |since| since.min(last)));
+        }
+        let idle = idle.and_then(|idle| chrono::TimeDelta::from_std(idle).ok());
+        match idle {
+            Some(idle) if idle >= AWAY_AFTER => {
+                let since = now - idle;
+                self.away_since = Some(self.away_since.map_or(since, |s| s.min(since)));
+            }
+            // Input again (or no way to tell, after a sleep): back.
+            _ if self.away_since.is_some() => {
+                self.came_back();
+            }
+            _ => {}
+        }
+    }
+
+    /// Ends an absence: asks about it when a work session ran through it
+    /// and the main screen is up (not to throw away a half-filled form).
+    /// Returns whether it asked.
+    fn came_back(&mut self) -> bool {
+        let Some(since) = self.away_since.take() else {
+            return false;
+        };
+        let asks = matches!(self.screen, Screen::Main)
+            && self
+                .active_session
+                .as_ref()
+                .is_some_and(|s| !session::is_detour(&s.activity) && s.started_at < since);
+        if asks {
+            self.screen = Screen::Away(since);
+        }
+        asks
+    }
+
+    /// The away question: `k` (or Esc) keeps the time as it was, `b` / `d`
+    /// turn it into a break / disruption and pick the work back up, `e`
+    /// ends the session when the absence began.
+    fn handle_away(&mut self, key: KeyCode, since: chrono::DateTime<Utc>) {
+        match key {
+            KeyCode::Char('k') | KeyCode::Esc => {}
+            KeyCode::Char('e') => {
+                self.close_active_session_at(since);
+            }
+            KeyCode::Char(c @ ('b' | 'd')) => {
+                let detour = if c == 'b' { BREAK } else { DISRUPTION };
+                let Some(session) = self.active_session.as_ref() else {
+                    return;
+                };
+                let (activity, project, task) = (
+                    session.activity.clone(),
+                    session.project.clone(),
+                    session.task.clone(),
+                );
+                if !self.close_active_session_at(since) {
+                    return;
+                }
+                match self.db.insert_finished_session(detour, since, Utc::now()) {
+                    Ok(id) => self.undo.get_or_insert_default().created.push(id),
+                    Err(e) => {
+                        self.set_error(e);
+                        return;
+                    }
+                }
+                self.start_session(&activity, project, task);
+                self.refresh_after_session_change();
+            }
+            _ => return,
+        }
+        self.screen = Screen::Main;
+    }
+
+    /// Like `close_active_session`, but the session ends at `at` (in the
+    /// past), then the main screen refreshes.
+    fn close_active_session_at(&mut self, at: chrono::DateTime<Utc>) -> bool {
+        let Some(id) = self.active_session.as_ref().map(|s| s.id) else {
+            return false;
+        };
+        if let Err(e) = self.db.complete_session_at(id, at) {
+            self.set_error(e);
+            return false;
+        }
+        // Already ended in the db, so this records the change (undo, the
+        // rating window) without ending it again.
+        let closed = self.close_active_session();
+        self.refresh_after_session_change();
+        closed
     }
 
     // --- moving the start ---------------------------------------------------
@@ -823,6 +949,7 @@ impl App {
             Screen::Help => draw_help(frame, content),
             Screen::StartSession(form) => self.draw_start_session(frame, content, form, input),
             Screen::AddNote(_) => self.draw_add_note(frame, content, input),
+            Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 
         frame.render_widget(self.status_line(status.width), status);
@@ -956,6 +1083,12 @@ impl App {
             Screen::Help => &[("any key", "close")],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
+            Screen::Away(_) => &[
+                ("k", "keep"),
+                ("b", "break"),
+                ("d", "disruption"),
+                ("e", "end"),
+            ],
         };
         // Hints are shown in order while they fit, keeping room for
         // `HELP_HINT` (always shown, wherever it sits in the list). Once a
@@ -1717,6 +1850,46 @@ impl App {
         }
     }
 
+    /// The away question: a small modal saying since when, with the
+    /// answers.
+    fn draw_away(&self, frame: &mut Frame, area: Rect, since: chrono::DateTime<Utc>) {
+        let (modal, top_area, body_area) = small_modal_layout(area, 4);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title(Line::from(Span::styled(" Welcome back ", theme::TITLE)));
+        frame.render_widget(block, modal);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!(
+                    "Away since {} ({})",
+                    fmt_time(&since),
+                    fmt_duration(&since, &Utc::now())
+                ),
+                theme::DIMMED,
+            ))),
+            top_area,
+        );
+        let activity = self
+            .active_session
+            .as_ref()
+            .map_or("the session", |s| s.activity.as_str());
+        let key =
+            |k: &str| Span::styled(format!("[{k}] "), Style::new().add_modifier(Modifier::BOLD));
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(vec![key("k"), Span::raw(format!("count it as {activity}"))]),
+                Line::from(vec![key("b"), Span::raw("it was a break")]),
+                Line::from(vec![key("d"), Span::raw("it was a disruption")]),
+                Line::from(vec![
+                    key("e"),
+                    Span::raw(format!("end it at {}", fmt_time(&since))),
+                ]),
+            ]),
+            body_area,
+        );
+    }
+
     /// Add-note form: small centered modal with a dimmed project·task·activity
     /// context line (the full note history stays on the main screen) and a
     /// note input (cursor placed by main.rs).
@@ -2348,6 +2521,7 @@ fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::db::Db;
+    use crate::idle;
     use chrono::TimeZone;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -4072,6 +4246,130 @@ mod tests {
             (reading_end - START_STEP).timestamp()
         );
         assert_eq!(ended(&t), started_at(&t).timestamp());
+    }
+
+    /// A work session running for an hour, then 20 minutes away and back:
+    /// returns when the absence began.
+    fn away_and_back(t: &mut TestApp) -> chrono::DateTime<Utc> {
+        let now = Utc::now();
+        t.app
+            .observe_idle(Some(std::time::Duration::from_secs(20 * 60)), now);
+        assert!(matches!(t.app.screen, Screen::Main), "still away");
+        t.app
+            .observe_idle(Some(std::time::Duration::from_secs(1)), now + idle::POLL);
+        now - chrono::TimeDelta::minutes(20)
+    }
+
+    fn working_for_an_hour() -> TestApp {
+        let mut t = TestApp::new();
+        t.app
+            .start_session("Reading", Some("alpha".into()), Some("beta".into()));
+        backdate(&mut t, 60);
+        t
+    }
+
+    #[test]
+    fn coming_back_asks_about_the_absence_and_k_keeps_it() {
+        let mut t = working_for_an_hour();
+        let since = away_and_back(&mut t);
+        assert!(matches!(t.app.screen, Screen::Away(s) if s == since));
+        let buf = render(&t.app);
+        assert!(line(&buf, row_with(&buf, "Welcome back")).contains("Welcome back"));
+        assert!(line(&buf, row_with(&buf, "Away since")).contains("(20m)"));
+        assert!(line(&buf, row_with(&buf, "[k]")).contains("count it as Reading"));
+        assert!(line(&buf, row_with(&buf, "[d]")).contains("it was a disruption"));
+        assert!(line(&buf, row_with(&buf, "[e]")).contains("end it at"));
+
+        let id = t.app.active_session.as_ref().unwrap().id;
+        t.key(KeyCode::Char('k'));
+        assert!(matches!(t.app.screen, Screen::Main));
+        assert_eq!(t.app.active_session.as_ref().unwrap().id, id);
+    }
+
+    #[test]
+    fn e_ends_the_session_when_the_absence_began() {
+        let mut t = working_for_an_hour();
+        let since = away_and_back(&mut t);
+        t.key(KeyCode::Char('e'));
+        assert!(t.app.active_session.is_none());
+        assert_eq!(
+            t.app.today_sessions[0].ended_at.unwrap().timestamp(),
+            since.timestamp()
+        );
+        assert!(t.app.rating_open());
+        t.key(KeyCode::Char('u'));
+        assert!(t.app.active_session.as_ref().unwrap().ended_at.is_none());
+    }
+
+    #[test]
+    fn b_or_d_turn_the_absence_into_a_detour_and_resume() {
+        for (key, detour) in [('b', BREAK), ('d', DISRUPTION)] {
+            let mut t = working_for_an_hour();
+            let first = t.app.active_session.as_ref().unwrap().id;
+            let since = away_and_back(&mut t);
+            t.key(KeyCode::Char(key));
+            assert!(matches!(t.app.screen, Screen::Main));
+            let active = t.app.active_session.as_ref().unwrap();
+            assert_ne!(active.id, first);
+            assert_eq!(active.project.as_deref(), Some("alpha"));
+            let [resumed, pause, before] = &t.app.today_sessions[..] else {
+                panic!("{:?}", t.app.today_sessions);
+            };
+            assert_eq!(resumed.id, active.id);
+            assert_eq!(pause.activity, detour);
+            assert_eq!(pause.started_at.timestamp(), since.timestamp());
+            assert_eq!(before.ended_at.unwrap().timestamp(), since.timestamp());
+
+            // One undo takes it all back.
+            t.key(KeyCode::Char('u'));
+            assert_eq!(t.app.active_session.as_ref().unwrap().id, first);
+            assert_eq!(t.app.today_sessions.len(), 1);
+        }
+    }
+
+    #[test]
+    fn short_absences_detours_and_newer_sessions_dont_ask() {
+        let back = |t: &mut TestApp, minutes: u64| {
+            let now = Utc::now();
+            t.app
+                .observe_idle(Some(std::time::Duration::from_secs(minutes * 60)), now);
+            t.app
+                .observe_idle(Some(std::time::Duration::ZERO), now + idle::POLL);
+            matches!(t.app.screen, Screen::Away(_))
+        };
+        let mut t = working_for_an_hour();
+        assert!(!back(&mut t, 10), "under AWAY_AFTER");
+
+        let mut t = TestApp::new();
+        t.app.start_session(MEETING, None, None);
+        backdate(&mut t, 60);
+        assert!(!back(&mut t, 20), "a detour");
+
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        assert!(!back(&mut t, 20), "started after the absence began");
+    }
+
+    #[test]
+    fn sleep_counts_as_away() {
+        let mut t = working_for_an_hour();
+        let now = Utc::now();
+        let before = now - chrono::TimeDelta::minutes(30);
+        // No idle time on this platform: only the gap between polls shows.
+        t.app.observe_idle(None, before);
+        t.app.observe_idle(None, now);
+        assert!(matches!(t.app.screen, Screen::Away(s) if s == before));
+    }
+
+    #[test]
+    fn a_key_before_the_poll_notices_the_return_brings_the_question_up() {
+        let mut t = working_for_an_hour();
+        t.app
+            .observe_idle(Some(std::time::Duration::from_secs(20 * 60)), Utc::now());
+        t.key(KeyCode::Char('i'));
+        assert!(matches!(t.app.screen, Screen::Away(_)));
+        // The key only brought the question up.
+        assert_eq!(t.app.active_session.as_ref().unwrap().interruptions, None);
     }
 
     fn activity(t: &TestApp) -> Option<&str> {

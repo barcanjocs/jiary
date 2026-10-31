@@ -44,8 +44,11 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   re-shows the cursor and releases the mouse), mouse capture,
   `ratatui::restore()` on every other exit path, cursor show/hide, and the
   loop. It knows nothing about UI; it calls `app.set_size`, `app.draw`,
-  `app.cursor_position`, `app.handle_key`, `app.handle_mouse` and nothing
-  else. It also passes `App::new` the layout file path (`layout.conf` in the
+  `app.cursor_position`, `app.handle_key`, `app.handle_mouse`,
+  `app.observe_idle` and nothing else. A thread polls `idle::system_idle`
+  every `idle::POLL` and sends the result over a channel, which the loop
+  drains before each frame (the poll runs a command, so it stays off the
+  draw loop). It also passes `App::new` the layout file path (`layout.conf` in the
   data dir).
 - **`layout.rs`** — `LayoutPrefs` (section heights and collapsed state) and
   pure geometry: `resolve` splits the content area into the three main-screen
@@ -58,6 +61,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   `Mood` plus optional per-activity lists for work sessions, and
   `caption(mood, activity, seed)` to pick one. Adding a caption means adding
   a sentence to a list.
+- **`idle.rs`** — `system_idle()`: time since the last keyboard or mouse
+  input system-wide, from `ioreg -c IOHIDSystem` on macOS or `xprintidle` on
+  Linux, `None` elsewhere or when the tool fails.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
   activity and project, focus, interruptions, disruptions, breaks, span and
   gaps.
@@ -213,6 +219,7 @@ enum Screen {
     Main,
     StartSession(Box<StartSessionForm>),  // boxed: by far the largest variant
     AddNote(AddNoteForm),
+    Away(DateTime<Utc>),  // back from an absence: since when
 }
 ```
 
@@ -321,8 +328,9 @@ alike:
   window open; closing another session replaces it (and closes it for a
   break or disruption).
 - **Undo.** `close_active_session` begins an `Undo` record of the change
-  (the id it ended, if any) and `start_session` adds the id it started. `u`
-  (`undo`) deletes the started session (`db.delete_session`), reopens the
+  (the id it ended, if any) and `start_session` adds the id it started to
+  `created` (the away question's `b` / `d` also add the detour they insert). `u`
+  (`undo`) deletes the created sessions (`db.delete_session`), reopens the
   ended one (`db.reopen_session`: `ended_at` and `focus` back to NULL), and
   reloads the active session from the db. Only the last change can be undone.
   Undo also stands in for the old end-form notes step: `e`, `u`, `n`, `e`
@@ -338,6 +346,26 @@ least a minute; otherwise the start stops at its end. A start stopped there
 touches it, so the next press moves both. Only today's list is reloaded
 (`reload_today`), keeping the caption and scroll. The timer row shows
 `since HH:MM` beside the elapsed time, so the move is visible.
+
+### Away
+
+`observe_idle(idle, now)`, fed by `main`'s poll, keeps `away_since`: set
+once the system idle time reaches `AWAY_AFTER` (15 min), as `now - idle`,
+or, when the gap since the previous poll (`last_observed`) is that long
+(the computer slept), as the time of that poll. Idle time under the
+threshold (input again), or none at all after a sleep, means back:
+`came_back` opens `Screen::Away(since)` when the main screen is up and a
+non-detour session started before `since` is running. A key arriving first
+also calls `came_back`, and that key only brings the question up.
+
+- `k` / Esc: keep the time as it was.
+- `e`: `close_active_session_at(since)` (`db.complete_session_at`, then the
+  usual `close_active_session` bookkeeping: undo record, rating window).
+- `b` / `d`: end at `since`, insert a finished `BREAK` / `DISRUPTION` from
+  `since` to now (`db.insert_finished_session`), and start the same
+  activity/project/task.
+
+Detours never ask: being away from the computer is what they're for.
 
 ### Add-note form
 
