@@ -115,6 +115,8 @@ const IDLE_TAIL: Frame = frame([
 ]);
 
 // --- working: typing on a laptop, code lines growing on its screen ----------
+// The cat types with its tail (the "arm" leaves the body down by the legs).
+// That's deliberate: it reads as a tail and it's cute; keep it.
 
 const TYPE_A: Frame = frame([
     "............C.....C.....",
