@@ -1,29 +1,33 @@
-//! The README's picture of the main screen: a made-up day, drawn by the
-//! real `App::draw` into a test buffer and written out as an SVG. Ignored
-//! by `cargo test`; regenerate after UI changes with
+//! The docs' pictures (`docs/images/`): made-up data, drawn by the real
+//! `App::draw` into a test buffer and written out as SVG. Ignored by
+//! `cargo test`; regenerate after UI changes with
 //!
 //! ```sh
 //! cargo test screenshot -- --ignored
 //! ```
 //!
-//! The day is laid out backwards from now, so run it during the day (its
-//! first session starts six hours ago and must fall on today's date).
+//! The main screen's day is laid out backwards from now, so run it during
+//! the day (its first session starts six hours ago and must fall on
+//! today's date). The longer views get about 400 days of history before
+//! today, from a fixed seed.
 
 use std::fmt::Write;
 
-use chrono::{Duration, Utc};
+use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone, Utc, Weekday};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 
 use crate::db::Db;
+use crate::period::Period;
+use crate::session::{BREAK, DISRUPTION, MEETING};
 
-use super::App;
+use super::{App, Screen};
 
 const WIDTH: u16 = 100;
 const HEIGHT: u16 = 40;
-const OUTPUT: &str = "docs/screenshot.svg";
+const IMAGES: &str = "docs/images";
 
 /// Cell size in pixels, and the margin around the terminal.
 const CELL_W: f64 = 9.0;
@@ -138,11 +142,9 @@ const DAY: &[Sample] = &[
 ];
 
 #[test]
-#[ignore = "writes docs/screenshot.svg; run with --ignored"]
-fn screenshot() {
-    let dir = std::env::temp_dir().join(format!("jiary-screenshot-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let db = Db::open_at(&dir.join("jiary.db")).unwrap();
+#[ignore = "writes docs/images/main.svg; run with --ignored"]
+fn screenshot_of_the_main_screen() {
+    let (dir, db) = temp_db("main");
     let now = Utc::now();
     for s in DAY {
         let session = db.create_session(s.activity, s.project, s.task).unwrap();
@@ -163,13 +165,258 @@ fn screenshot() {
 
     let mut app = App::new(db, None);
     app.caption_seed = 0;
-    app.set_size((WIDTH, HEIGHT));
-    let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
-    let svg = to_svg(terminal.backend().buffer());
+    write_svg(&mut app, HEIGHT, "main");
     drop(app);
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::write(OUTPUT, svg).unwrap();
+}
+
+#[test]
+#[ignore = "writes docs/images/{weekly,monthly,yearly}.svg; run with --ignored"]
+fn screenshots_of_the_longer_views() {
+    let (dir, db) = temp_db("history");
+    drop(db);
+    write_history(&dir.join("jiary.db"));
+    let db = Db::open_at(&dir.join("jiary.db")).unwrap();
+    let mut app = App::new(db, None);
+
+    // Complete periods look best: last week and last month, and this year
+    // once it is half gone.
+    let year = if Local::now().month() >= 7 { 0 } else { -1 };
+    for (period, offset, name) in [
+        (Period::Week, -1, "weekly"),
+        (Period::Month, -1, "monthly"),
+        (Period::Year, year, "yearly"),
+    ] {
+        // Tall enough to show the whole view without scrolling.
+        app.set_size((WIDTH, HEIGHT));
+        app.open_period(period, offset);
+        let Screen::Period(view) = &app.screen else {
+            panic!("expected a period view");
+        };
+        let rows = app.period_lines(view, WIDTH - 2).len() as u16 + 4;
+        app.set_size((WIDTH, rows));
+        app.open_period(period, offset);
+        write_svg(&mut app, rows, name);
+    }
+    drop(app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A fresh db in a temp dir of its own.
+fn temp_db(name: &str) -> (std::path::PathBuf, Db) {
+    let dir = std::env::temp_dir().join(format!("jiary-screenshot-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = Db::open_at(&dir.join("jiary.db")).unwrap();
+    (dir, db)
+}
+
+/// Draws the app's current screen at `WIDTH` × `rows` into
+/// `docs/images/<name>.svg`.
+fn write_svg(app: &mut App, rows: u16, name: &str) {
+    app.set_size((WIDTH, rows));
+    let mut terminal = Terminal::new(TestBackend::new(WIDTH, rows)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    std::fs::create_dir_all(IMAGES).unwrap();
+    std::fs::write(
+        format!("{IMAGES}/{name}.svg"),
+        to_svg(terminal.backend().buffer()),
+    )
+    .unwrap();
+}
+
+/// A small deterministic random source (xorshift), so the made-up history
+/// is the same on every run.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    /// A number in `lo..=hi`.
+    fn range(&mut self, lo: i64, hi: i64) -> i64 {
+        lo + (self.next() % (hi - lo + 1) as u64) as i64
+    }
+
+    /// True with probability `p`.
+    fn chance(&mut self, p: f64) -> bool {
+        (self.next() % 10_000) as f64 / 10_000.0 < p
+    }
+}
+
+/// Projects by what part of the year they run in (months, inclusive),
+/// with the tasks each one has.
+const PROJECTS: &[(&str, u32, u32, &[&str])] = &[
+    (
+        "jiary",
+        1,
+        12,
+        &["day summary", "week view", "palette", "release"],
+    ),
+    ("website", 1, 5, &["landing page", "blog engine"]),
+    ("api", 3, 9, &["auth", "rate limits", "docs"]),
+    ("rust book", 5, 9, &["ch. 16", "ch. 17"]),
+    ("blog", 8, 12, &["terminal UIs", "sqlite tips"]),
+    ("infra", 9, 12, &["backups", "ci"]),
+];
+
+/// Writes about 400 days of made-up work days before today straight into
+/// the db file, in one transaction (thousands of single inserts would take
+/// a while).
+fn write_history(path: &std::path::Path) {
+    let mut conn = rusqlite::Connection::open(path).unwrap();
+    let tx = conn.transaction().unwrap();
+    let mut rng = Rng(0x5eed_1234_abcd_9876);
+    let today = Local::now().date_naive();
+    let mut day = today - Duration::days(400);
+    while day < today {
+        for s in work_day(&mut rng, day) {
+            tx.execute(
+                "INSERT INTO sessions (started_at, ended_at, project, task, activity, focus, interruptions)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    s.0.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+                    s.1.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+                    s.2,
+                    s.3,
+                    s.4,
+                    s.5,
+                    s.6
+                ],
+            )
+            .unwrap();
+        }
+        day += Duration::days(1);
+    }
+    tx.commit().unwrap();
+}
+
+/// A made-up session: start, end, project, task, activity, focus,
+/// interruptions.
+type Row = (
+    chrono::DateTime<Utc>,
+    chrono::DateTime<Utc>,
+    Option<&'static str>,
+    Option<&'static str>,
+    &'static str,
+    Option<i32>,
+    i32,
+);
+
+/// One day of made-up sessions: weekdays from about nine to about six, with
+/// a standup, lunch, the odd meeting, break and disruption, and focus that
+/// is better midweek and in some weeks than others. Weekends are mostly
+/// off, and so are two holidays and the odd sick day.
+fn work_day(rng: &mut Rng, day: NaiveDate) -> Vec<Row> {
+    let weekend = matches!(day.weekday(), Weekday::Sat | Weekday::Sun);
+    let holiday = matches!(day.ordinal(), 95..=101 | 213..=226 | 358..);
+    if holiday || rng.chance(0.03) || (weekend && !rng.chance(0.12)) {
+        return Vec::new();
+    }
+    let at = |minutes: i64| {
+        Local
+            .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+            .earliest()
+            .unwrap()
+            .with_timezone(&Utc)
+            + Duration::minutes(minutes)
+    };
+    let projects = PROJECTS
+        .iter()
+        .filter(|p| (p.1..=p.2).contains(&day.month()))
+        .collect::<Vec<_>>();
+    // Some weeks go better than others; Mondays and Fridays a bit worse.
+    let week_form = (day.iso_week().week() * 7 + 3) % 5;
+    let day_form = match day.weekday() {
+        Weekday::Tue | Weekday::Wed | Weekday::Thu => 1,
+        _ => 0,
+    };
+    let form = week_form as i64 + day_form;
+
+    let mut rows = Vec::new();
+    let mut now = rng.range(8 * 60 + 20, 9 * 60 + 50);
+    let end = if weekend {
+        now + rng.range(60, 180)
+    } else {
+        rng.range(17 * 60, 18 * 60 + 40)
+    };
+    let mut lunch = false;
+    if !weekend && rng.chance(0.75) {
+        rows.push((
+            at(now),
+            at(now + 15),
+            Some("team"),
+            Some("standup"),
+            MEETING,
+            None,
+            0,
+        ));
+        now += 15;
+    }
+    while now < end - 20 {
+        if !lunch && now >= 12 * 60 + 15 {
+            let length = rng.range(30, 60);
+            rows.push((at(now), at(now + length), None, None, BREAK, None, 0));
+            now += length;
+            lunch = true;
+            continue;
+        }
+        let roll = rng.next() % 100;
+        let (activity, project, task, length) = if roll < 8 {
+            let length = rng.range(30, 60);
+            (MEETING, Some("team"), Some("planning"), length)
+        } else if roll < 14 {
+            (DISRUPTION, None, None, rng.range(5, 20))
+        } else if roll < 24 {
+            (BREAK, None, None, rng.range(10, 15))
+        } else {
+            let (name, _, _, tasks) = projects[rng.range(0, projects.len() as i64 - 1) as usize];
+            let task = tasks[rng.range(0, tasks.len() as i64 - 1) as usize];
+            let activity = match rng.next() % 10 {
+                0..=5 => "Programming",
+                6 => "Reading",
+                7 | 8 => "Writing",
+                _ => "Administration",
+            };
+            (activity, Some(*name), Some(task), rng.range(25, 110))
+        };
+        let length = length.min(end - now);
+        let work = ![BREAK, DISRUPTION].contains(&activity);
+        let focus = if !work || rng.chance(0.08) {
+            None
+        } else {
+            let roll = rng.range(0, 9) + form;
+            Some(match roll {
+                ..=3 => 1,
+                4..=8 => 2,
+                _ => 3,
+            })
+        };
+        let interruptions = if activity == MEETING || !work {
+            0
+        } else {
+            rng.range(0, 4 - form.min(3)) as i32
+        };
+        rows.push((
+            at(now),
+            at(now + length),
+            project,
+            task,
+            activity,
+            focus,
+            interruptions,
+        ));
+        now += length;
+        // Now and then, a few minutes nobody tracked.
+        if rng.chance(0.15) {
+            now += rng.range(3, 15);
+        }
+    }
+    rows
 }
 
 /// A color as CSS, `None` for the terminal's default.

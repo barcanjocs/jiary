@@ -1,6 +1,6 @@
 # Jiary
 
-![Jiary's main screen: the running session with its notes and the cat, today's sessions, and the day's summary with its timeline and share bars](docs/screenshot.svg)
+![Jiary's main screen: the running session with its notes and the cat, today's sessions, and the day's summary with its timeline and share bars](docs/images/main.svg)
 
 A work diary for the terminal. Jiary keeps a record of your working day as
 it happens: what you worked on, for how long, how focused you were, and what

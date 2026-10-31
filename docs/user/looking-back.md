@@ -21,6 +21,8 @@ colors, on an hour axis that all the days share so they line up, followed by
 the day's tracked time and average focus. A month is grouped by week and
 scrolls.
 
+![The week view: a timeline row per day, the week's totals, activity and project bars, and its focus grid](../images/weekly.svg)
+
 Under the days come the period's totals, like today's summary:
 
 - tracked time, split into work, breaks and disruptions;
@@ -33,6 +35,8 @@ Each day is colored on a gradient from red (1) through yellow to green (3)
 by its average focus. Days you tracked without rating show dark gray, and
 days with nothing tracked show a faint texture.
 
+![The month view: a row per day grouped by week, the month's totals, and its focus grid](../images/monthly.svg)
+
 ## Years
 
 `/yearly` shows the whole year:
@@ -42,6 +46,8 @@ days with nothing tracked show a faint texture.
 2. a row per month, with its activity bar (scaled to your busiest month),
    its tracked time and its focus;
 3. the year's totals.
+
+![The year view: the focus grid for the whole year, a row per month, and the year's totals](../images/yearly.svg)
 
 ## Keys in these views
 

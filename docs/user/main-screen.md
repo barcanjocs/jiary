@@ -1,5 +1,7 @@
 # The main screen
 
+![The main screen: the running session with its notes and the cat, today's sessions, and the day's summary with its graphs](../images/main.svg)
+
 The main screen has three sections, stacked:
 
 - **Active** (top): the running session. Its timer, project, task, activity

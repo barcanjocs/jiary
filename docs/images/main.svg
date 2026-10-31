@@ -100,7 +100,7 @@
 <path d="M909.5,52 Q909.5,42.5 905,42.5" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
 <path d="M18.5,61.5 L18.5,52 M18.5,61.5 L18.5,71" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
 <text x="23" y="66.06" textLength="72" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#56b6c2" font-weight="bold">00:22:00</text>
-<text x="95" y="66.06" textLength="117" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#abb2bf">  since 20:23</text>
+<text x="95" y="66.06" textLength="117" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#abb2bf">  since 20:44</text>
 <rect x="680" y="61.5" width="9" height="9.5" fill="#abb2bf"/>
 <rect x="689" y="61.5" width="9" height="9.5" fill="#abb2bf"/>
 <rect x="698" y="61.5" width="9" height="9.5" fill="#abb2bf"/>
@@ -126,8 +126,7 @@
 <rect x="698" y="71" width="9" height="9.5" fill="#282c34"/>
 <rect x="707" y="71" width="9" height="19" fill="#98c379"/>
 <rect x="707" y="71" width="9" height="9.5" fill="#282c34"/>
-<rect x="716" y="71" width="9" height="19" fill="#98c379"/>
-<rect x="716" y="71" width="9" height="9.5" fill="#282c34"/>
+<rect x="716" y="71" width="9" height="19" fill="#282c34"/>
 <rect x="725" y="71" width="9" height="19" fill="#282c34"/>
 <rect x="734" y="71" width="9" height="19" fill="#abb2bf"/>
 <rect x="770" y="80.5" width="9" height="9.5" fill="#56b6c2"/>
@@ -153,7 +152,8 @@
 <rect x="698" y="90" width="9" height="9.5" fill="#282c34"/>
 <rect x="707" y="90" width="9" height="19" fill="#98c379"/>
 <rect x="707" y="90" width="9" height="9.5" fill="#282c34"/>
-<rect x="716" y="90" width="9" height="19" fill="#282c34"/>
+<rect x="716" y="90" width="9" height="19" fill="#98c379"/>
+<rect x="716" y="90" width="9" height="9.5" fill="#282c34"/>
 <rect x="725" y="90" width="9" height="19" fill="#282c34"/>
 <rect x="734" y="90" width="9" height="19" fill="#abb2bf"/>
 <rect x="770" y="90" width="9" height="9.5" fill="#56b6c2"/>
@@ -428,7 +428,7 @@
 <path d="M900.5,289.5 L905,289.5 M900.5,289.5 L896,289.5" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M909.5,299 Q909.5,289.5 905,289.5" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,308.5 L18.5,299 M18.5,308.5 L18.5,318" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
-<text x="23" y="313.06" textLength="72" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="bold">20:23 – </text>
+<text x="23" y="313.06" textLength="72" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="bold">20:44 – </text>
 <text x="95" y="313.06" textLength="90" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#56b6c2" font-weight="bold">now (22m) </text>
 <text x="185" y="313.06" textLength="36" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#abb2bf"> F- </text>
 <text x="230" y="313.06" textLength="27" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#e06c75" font-weight="bold">I:1</text>
@@ -446,7 +446,7 @@
 <path d="M18.5,365.5 L18.5,356 M18.5,365.5 L18.5,375" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M909.5,365.5 L909.5,356 M909.5,365.5 L909.5,375" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,384.5 L18.5,375 M18.5,384.5 L18.5,394" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
-<text x="23" y="389.06" textLength="117" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="bold">19:35 – 20:23</text>
+<text x="23" y="389.06" textLength="117" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="bold">19:56 – 20:44</text>
 <rect x="203" y="375" width="9" height="19" fill="#e06c75"/>
 <text x="140" y="389.06" textLength="63" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#56b6c2" font-weight="bold"> (48m) </text>
 <rect x="212" y="375" width="9" height="19" fill="#e06c75"/>
@@ -465,7 +465,7 @@
 <path d="M18.5,422.5 L18.5,413 M18.5,422.5 L18.5,432" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M909.5,422.5 L909.5,413 M909.5,422.5 L909.5,432" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,441.5 L18.5,432 M18.5,441.5 L18.5,451" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
-<text x="23" y="446.06" textLength="117" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="bold">18:35 – 19:35</text>
+<text x="23" y="446.06" textLength="117" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="bold">18:56 – 19:56</text>
 <rect x="221" y="432" width="9" height="19" fill="#98c379"/>
 <text x="140" y="446.06" textLength="81" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#56b6c2" font-weight="bold"> (1h 0m) </text>
 <rect x="230" y="432" width="9" height="19" fill="#98c379"/>
@@ -665,6 +665,14 @@
 <path d="M900.5,479.5 L905,479.5 M900.5,479.5 L896,479.5" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M909.5,489 Q909.5,479.5 905,479.5" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,498.5 L18.5,489 M18.5,498.5 L18.5,508" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
+<rect x="131" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="140" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="149" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="158" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="167" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="176" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="185" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="194" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="203" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="212" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="221" y="489" width="9" height="9.5" fill="#98c379"/>
@@ -677,12 +685,12 @@
 <rect x="284" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="293" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="302" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="311" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="320" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="329" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="338" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="347" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="356" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="338" y="489" width="9" height="9.5" fill="#e5c07b"/>
+<rect x="347" y="489" width="9" height="9.5" fill="#e5c07b"/>
+<rect x="356" y="489" width="9" height="9.5" fill="#e5c07b"/>
+<rect x="365" y="489" width="9" height="9.5" fill="#e5c07b"/>
+<rect x="374" y="489" width="9" height="9.5" fill="#e5c07b"/>
+<rect x="383" y="489" width="9" height="9.5" fill="#e5c07b"/>
 <rect x="392" y="489" width="9" height="9.5" fill="#e5c07b"/>
 <rect x="401" y="489" width="9" height="9.5" fill="#e5c07b"/>
 <rect x="410" y="489" width="9" height="9.5" fill="#e5c07b"/>
@@ -698,10 +706,9 @@
 <rect x="500" y="489" width="9" height="9.5" fill="#e5c07b"/>
 <rect x="509" y="489" width="9" height="9.5" fill="#e5c07b"/>
 <rect x="518" y="489" width="9" height="9.5" fill="#e5c07b"/>
-<rect x="527" y="489" width="9" height="9.5" fill="#e5c07b"/>
-<rect x="536" y="489" width="9" height="9.5" fill="#e5c07b"/>
-<rect x="545" y="489" width="9" height="9.5" fill="#e5c07b"/>
-<rect x="554" y="489" width="9" height="9.5" fill="#e5c07b"/>
+<rect x="626" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="635" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="644" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="653" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="662" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="671" y="489" width="9" height="9.5" fill="#98c379"/>
@@ -713,8 +720,8 @@
 <rect x="725" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="734" y="489" width="9" height="9.5" fill="#98c379"/>
 <rect x="743" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="752" y="489" width="9" height="9.5" fill="#98c379"/>
-<rect x="761" y="489" width="9" height="9.5" fill="#98c379"/>
+<rect x="752" y="489" width="9" height="9.5" fill="#e06c75"/>
+<rect x="761" y="489" width="9" height="9.5" fill="#e06c75"/>
 <rect x="770" y="489" width="9" height="9.5" fill="#e06c75"/>
 <rect x="779" y="489" width="9" height="9.5" fill="#e06c75"/>
 <rect x="788" y="489" width="9" height="9.5" fill="#e06c75"/>
@@ -733,6 +740,15 @@
 <path d="M909.5,498.5 L909.5,489 M909.5,498.5 L909.5,508" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,517.5 L18.5,508 M18.5,517.5 L18.5,527" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <text x="23" y="522.06" textLength="90" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#abb2bf">Day       </text>
+<rect x="126.5" y="508" width="4.5" height="19" fill="#7cc4ff"/>
+<rect x="131" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="140" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="149" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="158" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="167" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="176" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="185" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="194" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="203" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="212" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="221" y="508" width="9" height="19" fill="#7cc4ff"/>
@@ -745,15 +761,15 @@
 <rect x="284" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="293" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="302" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="311" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="320" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="329" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="311" y="508" width="9" height="19" fill="#ff7b86"/>
+<rect x="320" y="508" width="9" height="19" fill="#ff7b86"/>
+<rect x="329" y="508" width="9" height="19" fill="#ff7b86"/>
 <rect x="338" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="347" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="356" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="365" y="508" width="9" height="19" fill="#ff7b86"/>
-<rect x="374" y="508" width="9" height="19" fill="#ff7b86"/>
-<rect x="383" y="508" width="9" height="19" fill="#ff7b86"/>
+<rect x="365" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="374" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="383" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="392" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="401" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="410" y="508" width="9" height="19" fill="#7cc4ff"/>
@@ -762,18 +778,17 @@
 <rect x="437" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="446" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="455" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="464" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="473" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="482" y="508" width="9" height="19" fill="#7cc4ff"/>
-<rect x="491" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="464" y="508" width="9" height="19" fill="#c678dd"/>
+<rect x="473" y="508" width="9" height="19" fill="#c678dd"/>
+<rect x="482" y="508" width="9" height="19" fill="#c678dd"/>
+<rect x="491" y="508" width="9" height="19" fill="#c678dd"/>
 <rect x="500" y="508" width="9" height="19" fill="#c678dd"/>
-<rect x="500" y="508" width="4.5" height="19" fill="#7cc4ff"/>
 <rect x="509" y="508" width="9" height="19" fill="#c678dd"/>
 <rect x="518" y="508" width="9" height="19" fill="#c678dd"/>
-<rect x="527" y="508" width="9" height="19" fill="#c678dd"/>
-<rect x="536" y="508" width="9" height="19" fill="#c678dd"/>
-<rect x="545" y="508" width="9" height="19" fill="#c678dd"/>
-<rect x="554" y="508" width="9" height="19" fill="#c678dd"/>
+<rect x="527" y="508" width="9" height="19" fill="#b5e890"/>
+<rect x="536" y="508" width="9" height="19" fill="#b5e890"/>
+<rect x="545" y="508" width="9" height="19" fill="#b5e890"/>
+<rect x="554" y="508" width="9" height="19" fill="#b5e890"/>
 <rect x="563" y="508" width="9" height="19" fill="#b5e890"/>
 <rect x="572" y="508" width="9" height="19" fill="#b5e890"/>
 <rect x="581" y="508" width="9" height="19" fill="#b5e890"/>
@@ -781,9 +796,9 @@
 <rect x="599" y="508" width="9" height="19" fill="#b5e890"/>
 <rect x="608" y="508" width="9" height="19" fill="#b5e890"/>
 <rect x="617" y="508" width="9" height="19" fill="#b5e890"/>
-<rect x="626" y="508" width="9" height="19" fill="#b5e890"/>
-<rect x="635" y="508" width="9" height="19" fill="#b5e890"/>
-<rect x="644" y="508" width="9" height="19" fill="#b5e890"/>
+<rect x="626" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="635" y="508" width="9" height="19" fill="#7cc4ff"/>
+<rect x="644" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="653" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="662" y="508" width="9" height="19" fill="#7cc4ff"/>
 <rect x="671" y="508" width="9" height="19" fill="#7cc4ff"/>
@@ -814,7 +829,7 @@
 <rect x="896" y="508" width="9" height="19" fill="#7cc4ff"/>
 <path d="M909.5,517.5 L909.5,508 M909.5,517.5 L909.5,527" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,536.5 L18.5,527 M18.5,536.5 L18.5,546" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
-<text x="113" y="541.06" textLength="792" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#abb2bf">14           15           16           17           18           19           20        </text>
+<text x="113" y="541.06" textLength="792" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#abb2bf">15            16            17             18            19             20            21</text>
 <path d="M909.5,536.5 L909.5,527 M909.5,536.5 L909.5,546" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <path d="M18.5,555.5 L18.5,546 M18.5,555.5 L18.5,565" stroke="#abb2bf" stroke-width="1.2" fill="none"/>
 <text x="23" y="560.06" textLength="162" lengthAdjust="spacingAndGlyphs" xml:space="preserve">          tracked </text>

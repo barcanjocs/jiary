@@ -35,19 +35,21 @@ Runs everything that must pass before a commit: `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, the build and the tests. Tests
 never touch the real data directory: each opens its own throwaway database.
 
-## The README's screenshot
+## The docs' pictures
 
-`docs/screenshot.svg` is drawn by the real UI code: an ignored test
-(`src/app/screenshot.rs`) fills a throwaway database with a made-up day,
-renders the main screen into a test buffer and writes the buffer out as an
-SVG. Regenerate it after changing how the main screen looks:
+The pictures in `docs/images/` are drawn by the real UI code: ignored tests
+(`src/app/screenshot.rs`) fill throwaway databases with made-up data, render
+a screen into a test buffer and write the buffer out as an SVG. The main
+screen gets a made-up day; the week, month and year views get about 400 days
+of history from a fixed seed, so they come out the same every run (bar the
+dates). Regenerate them after changing how these screens look:
 
 ```sh
 cargo test screenshot -- --ignored
 ```
 
-Run it during the day: the sample day is laid out over the six hours before
-now, and all of it has to fall on today's date.
+Run it during the day: the main screen's day is laid out over the six hours
+before now, and all of it has to fall on today's date.
 
 ## Releasing
 
