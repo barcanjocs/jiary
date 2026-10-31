@@ -1,0 +1,70 @@
+# Builds Jiary for each platform when a version tag is pushed
+# (`git tag v1.0.0 && git push --tags`) and publishes the archives, with
+# their checksums, as a GitHub release; install.sh downloads from there.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          # Built on Apple Silicon too: Apple's clang cross-compiles the
+          # bundled SQLite for Intel without extra setup.
+          - target: x86_64-apple-darwin
+            os: macos-14
+          # glibc builds on the oldest supported Ubuntu, so they run on any
+          # distro from about 2022 on.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # Tests only: fmt and clippy belong to ./check before tagging, and a
+      # new stable lint shouldn't block a release.
+      - run: cargo test --locked
+        if: matrix.target != 'x86_64-apple-darwin' # can't run on this runner
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name=jiary-${{ matrix.target }}
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/jiary" README.md "$name/"
+          tar czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jiary-${{ matrix.target }}
+          path: jiary-${{ matrix.target }}.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            jiary-*.tar.gz*

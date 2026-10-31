@@ -4,6 +4,22 @@ A local-first terminal application for maintaining a personal work diary.
 
 Jiary records what happened during your working day — sessions of programming, reading, writing, meetings — with minimal cognitive overhead. It does not manage tasks, set priorities, or tell you what to do next.
 
+## Install
+
+On macOS or Linux (x86_64 or ARM):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/barcanjocs/jiary/main/install.sh | sh
+```
+
+This downloads the latest release for your system, checks it against its published checksum, and puts `jiary` in `~/.local/bin` (set `JIARY_INSTALL_DIR` to put it elsewhere). Run the same command again to update.
+
+With a Rust toolchain, you can also build and install it from source:
+
+```sh
+cargo install --git https://github.com/barcanjocs/jiary
+```
+
 ## Building
 
 ```sh
@@ -12,7 +28,17 @@ cargo build --release
 
 The binary will be at `target/release/jiary`.
 
-Requires Rust stable. No system dependencies needed (SQLite is bundled).
+Requires Rust stable. No system dependencies needed (SQLite is bundled). `./check` runs everything that must pass before a commit: formatting, lints, build and tests.
+
+### Releasing
+
+Push a version tag (matching the version in `Cargo.toml`):
+
+```sh
+git tag v1.0.0 && git push --tags
+```
+
+The release workflow (`.github/workflows/release.yml`) builds Jiary for macOS and Linux, x86_64 and ARM, and publishes the archives with their checksums as a GitHub release, which is where `install.sh` downloads from.
 
 ## Running
 
