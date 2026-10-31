@@ -15,17 +15,22 @@ use crate::mascot::Mood;
 const BY_ACTIVITY: &[(&str, &[&str])] = &[];
 
 /// No session running.
-const IDLE: &[&str] = &[];
+const IDLE: &[&str] = &["what's next, boss?"];
 /// A work session (unless its activity has its own list above).
-const WORKING: &[&str] = &["working on world domination..."];
+const WORKING: &[&str] = &[
+    "working on world domination...",
+    "it worked on my machine...",
+    "and now the nuke codes...",
+    "don't be evil, don't be evil, don't be evil",
+];
 /// A work session past the drowsy threshold.
-const DROWSY: &[&str] = &[];
+const DROWSY: &[&str] = &["where is that pomodoro timer?"];
 /// A break.
-const SLEEPING: &[&str] = &[];
+const SLEEPING: &[&str] = &["rest is productive", "stress doesn't ship"];
 /// A meeting.
-const MEETING: &[&str] = &[];
+const MEETING: &[&str] = &["teams, am I right?"];
 /// A disruption.
-const GAMING: &[&str] = &[];
+const GAMING: &[&str] = &["probably footabling with Jimmy"];
 
 /// The sentences for `mood`; for a work session, `activity`'s own list
 /// when it has one.
