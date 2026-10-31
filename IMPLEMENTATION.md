@@ -21,10 +21,12 @@ main.rs        event loop: draw → place cursor → poll(100 ms) → handle key
 ```
 
 The loop runs at ~10 fps: `event::poll` times out after 100 ms, so the timer
-in the active-session panel ticks even when no key is pressed. Only key events
-are processed; all other crossterm events are ignored. Quitting is a return
-value, not a state: `App::handle_key` returns `true` only for `q` on the main
-screen, which breaks the loop in `main.rs`.
+in the active-session panel ticks even when no key is pressed. Only key
+*presses* are processed: releases and repeats (reported by some terminals,
+e.g. on Windows) and all other crossterm events are ignored, and Ctrl
+combinations never reach a form as plain letters. Quitting is a return value,
+not a state: `App::handle_key` returns `true` for `q` on the main screen or
+Ctrl+C anywhere, which breaks the loop in `main.rs`.
 
 Data flow is one-way per frame: **state → pixels**. `draw` never mutates and
 never touches the db (it runs ~10×/sec). Key handlers mutate state and hit the
@@ -33,8 +35,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 
 ## Module map
 
-- **`main.rs`** — owns the terminal lifecycle: raw mode + alternate screen on
-  entry (restored on exit), `Terminal::new(CrosstermBackend)`, cursor
+- **`main.rs`** — owns the terminal lifecycle: `ratatui::init()` (raw mode +
+  alternate screen + a panic hook that restores them, chained with one that
+  re-shows the cursor), `ratatui::restore()` on every other exit path, cursor
   show/hide, and the loop. It knows nothing about UI; it calls `app.draw`,
   `app.cursor_position`, `app.handle_key` and nothing else.
 - **`db.rs`** — `Db` wraps a `rusqlite::Connection`. The schema (including the
@@ -97,6 +100,8 @@ Stored as RFC 3339 UTC with an explicit `+00:00` offset. Rows written by
 older versions end in `Z` instead; SQLite's date functions parse both, so
 `date(started_at, 'localtime')` places either on the right local day (pinned
 by `legacy_z_suffixed_timestamps_still_count_as_today`).
+Timestamps have one-second resolution, so every `ORDER BY started_at` also
+orders by `id` to break same-second ties (most recent insert wins).
 "Today" is always the *local-time* start date:
 `date(started_at, 'localtime') = ?`. Display converts to local time in the UI
 (`fmt_time`), never in SQL.
@@ -105,10 +110,15 @@ by `legacy_z_suffixed_timestamps_still_count_as_today`).
 
 rusqlite row-mapper closures can only report `rusqlite::Error`, but turning a
 row into a `Session` requires parsing timestamps, which can fail in a way that
-should surface as `DbError::BadTimestamp`. So queries map into an internal
-`SessionRow` (timestamps still `String`) and `row_to_session` does the
+should surface as `DbError::BadTimestamp`. So queries select
+`SESSION_COLUMNS`, map rows with `read_session_row` into an internal
+`SessionRow` (timestamps still `String`), and `row_to_session` does the
 parsing outside the mapper. Any new query returning sessions must follow this
 two-step pattern.
+
+`create_session` returns the `Session` it inserted (built from the same
+timestamp string it stored), so the in-memory mirror never has its own clock
+reading.
 
 ### Data directory
 
@@ -170,7 +180,8 @@ enum Screen {
 **Form state lives inside the `Screen` variant.** Entering a screen constructs
 a fresh form; leaving (Esc, Enter, …) sets `screen = Screen::Main` and the
 form is dropped. There is no separate "form mode" flag and no persistent
-widget state — picker selections are plain `usize` fields, and `ListState` is
+widget state — the activity index is a plain `usize`, autocomplete selections
+are `Option<usize>` inside each `Autocomplete`, and `ListState` is
 rebuilt from scratch on every draw via `render_stateful_widget`. All UI state
 is therefore plain data that tests can construct directly.
 
@@ -206,12 +217,11 @@ form data*, it **copies the values out first** — call arguments keep their
 borrow alive across the call:
 
 ```rust
-KeyCode::Enter => {
-    let activity = ACTIVITIES[form.activity_index];
-    let project = if form.project_input.is_empty() { None } else { Some(form.project_input.clone()) };
-    ...
-    self.start_session(activity, project, task);  // borrow of `form` is dead here
-}
+let activity = ACTIVITIES[form.activity_index];
+let project = form.project.value();
+let task = form.task.value();
+...
+self.start_session(activity, project, task);  // borrow of `form` is dead here
 ```
 
 These three patterns are load-bearing; the compiler rejects most violations,
@@ -223,32 +233,33 @@ Steps: `Activity → Project → Task` (the tabs row shows progress).
 
 - **Activity** — a fixed list of 7 (`ACTIVITIES` const); ↑/↓ moves the index,
   1–7 selects and advances, Enter advances. No free typing (backlog item C).
-- **Project / Task** — an input line plus fuzzy suggestions. Typed characters
-  push into *both* `*_input` (the value) and `*_query` (the filter); Backspace
-  pops both and resets the selection to 0. Suggestions are
-  `fuzzy_filter(query, candidates)` recomputed per key event and per draw —
-  cheap enough, and it keeps handler and renderer in agreement by construction.
-- On Enter at the Project step, `task_candidates` is computed: all known tasks
-  if the project is empty, else `tasks_for_project(project)`.
-- On Enter at the Task step: copy out activity/project/task (empty string →
-  `None`, so the db stores NULL not `""`), close any active session first
-  (aborting on failure — creating anyway would hit the trigger's generic
-  error instead of the real one), `start_session`, refresh, update
-  `projects`/`tasks` from the db, return to Main.
+- **Project / Task** — each an `Autocomplete` (see *Fuzzy autocomplete*); the
+  step handlers only intercept Enter and forward every other key to it. The
+  project field's candidates are copied from `App::projects` when the form
+  opens; one shared `draw_autocomplete` renders both steps.
+- On Enter at the Project step, the task field is rebuilt with its
+  candidates: all known tasks if the project is blank, else
+  `tasks_for_project(project)` (a failure goes to the error line).
+- On Enter at the Task step: copy out activity/project/task (`value()` maps
+  blank input to `None`, so the db stores NULL not `""`), close any active
+  session first (aborting on failure — creating anyway would hit the
+  trigger's generic error instead of the real one), `start_session`, refresh,
+  `refresh_suggestions`, return to Main.
 
 ### End form
 
 Steps: `Notes → Focus`.
 
-- Notes: Enter appends (if non-empty) and advances; Esc appends (if non-empty)
-  and completes with no rating.
-- Focus: `1`/`2`/`3` sets the rating and completes immediately; Enter/Esc
-  completes with whatever was set (possibly `None`).
+- Notes: Enter advances; the typed notes stay in the form.
+- Focus: `1`/`2`/`3` or Enter (no rating) commits: append the notes (if
+  non-empty), then `complete_active(focus)`.
+- Esc at either step cancels: back to Main with the session still running and
+  nothing written, so an accidental `e` is harmless.
 
 ### Add-note form
 
-Single input line; Enter or Esc appends (if non-empty) and returns to Main.
-Notes are saved immediately — they persist even if the app exits mid-session.
+Single input line; Enter appends (if non-empty) and returns to Main, Esc
+discards the input. Saved notes persist even if the app exits mid-session.
 
 ## Session lifecycle
 
@@ -256,10 +267,8 @@ All lifecycle helpers live on `App` and follow one shape: **take the session
 out of memory, hit the db, restore it on failure** so a db error never leaves
 the UI believing a session ended.
 
-- `start_session(activity, project, task)` — `db.create_session`, then build
-  the in-memory `Session` from the returned id. (Known nit: the in-memory
-  `started_at` is `Utc::now()` at microsecond precision while the db stores
-  seconds; see DEVELOPMENT.md nits.)
+- `start_session(activity, project, task)` — `db.create_session`, whose
+  returned `Session` becomes the active one.
 - `complete_active(focus)` — `db.complete_session(id, focus)`, restore on
   error, then always `refresh_after_session_change`.
 - `close_active_session() -> bool` — completes with no rating. Returns `true`
@@ -272,13 +281,15 @@ the UI believing a session ended.
 
 Main-screen flows built from these:
 
-- **`d` (disrupt)** — only if a session is active: close it, start a
-  `Disruption` session with no project/task.
+- **`d` (disrupt)** — only if a non-Disruption session is active: close it,
+  start a `Disruption` session with no project/task. During a Disruption it
+  is a no-op rather than splitting it in two.
 - **`r` (resume)** — proceeds only when there is no active session or the
-  active one *is* a Disruption. Closes it, looks up
-  `latest_non_disruption` (most recent completed non-Disruption row's
-  activity/project/task), and starts a fresh session with that combo. The
-  round trip `d` … `r` is two keystrokes.
+  active one *is* a Disruption. Looks up `latest_non_disruption` (most recent
+  completed non-Disruption row's activity/project/task) **first**, so the
+  Disruption keeps running when there is nothing to resume; then closes it
+  and starts a fresh session with that combo. The round trip `d` … `r` is two
+  keystrokes.
 - **`i`** — `db.increment_interruptions` (guarded by `ended_at IS NULL` in
   SQL) plus the in-memory counter bump.
 
@@ -367,12 +378,21 @@ are `Paragraph`s that truncate rather than wrap.
 - Otherwise: subsequence match via `SkimMatcherV2`, sorted by score descending,
   capped at **5** results.
 
-Tab semantics (project and task steps): Tab accepts the *highlighted*
-suggestion; it advances to the next one only if the input already equals the
-highlighted value (so a single Tab never skips past a match — pinned by
-`tab_after_typing_accepts_highlighted_not_next`). Typing or Backspace resets
-the selection to 0. Free typing is always allowed: whatever is in the input on
-Enter becomes the value.
+`Autocomplete` (project and task steps) holds `input` (the value), `query`
+(what was typed; suggestions filter on it), `selection: Option<usize>` and its
+`candidates`. Its invariant: **the input line shows exactly what Enter
+submits.**
+
+- Tab/↓ with nothing selected select the best match (a single Tab never skips
+  past it — pinned by `tab_accepts_best_match_first`); after that Tab cycles
+  with wrap-around and ↓ stops at the end.
+- ↑ moves back; past the top it clears the selection and restores the typed
+  text.
+- Selecting copies the suggestion into `input`; nothing is highlighted until
+  something is selected.
+- Typing/Backspace edit `input`, set `query = input` and clear the
+  selection, so typing after accepting a suggestion extends it.
+- Free typing is always allowed; `value()` trims and maps blank to `None`.
 
 (Performance nit: `fuzzy_filter` constructs a `SkimMatcherV2` per call, i.e.
 per frame; see DEVELOPMENT.md nits.)
@@ -393,12 +413,16 @@ removed.
 **Levels of test:**
 
 - *db.rs* — SQL behavior: trigger enforcement, duplicate-active tolerance,
-  timestamp format (`+00:00` suffix), bad-timestamp error path, today query.
-- *app.rs state machine* — key handling against a `TestApp` (real db): Tab
-  completion semantics, selection resets, status-line content. Setup helpers
-  (`on_project_step`, `on_activity_step`, `on_screen`) put the app directly on
-  a screen/step; pushing sessions straight into `today_sessions` is the right
-  level for tests of things `draw` reads from memory.
+  timestamp format (`+00:00` suffix, legacy `Z` rows), bad-timestamp error
+  path, today query and its local-midnight boundary, same-second ordering.
+- *app.rs state machine* — key handling against a `TestApp` (real db):
+  key-event filtering, autocomplete semantics, end/note form commit and
+  cancel, disrupt/resume edge cases, status-line content. Keys go through
+  `press(code)` / `TestApp::key` / `TestApp::typed`. Setup helpers
+  (`on_project_step`, `on_activity_step`, `on_screen`, `empty_form`) put the
+  app directly on a screen/step; pushing sessions straight into
+  `today_sessions` is the right level for tests of things `draw` reads from
+  memory.
 - *app.rs rendering* — a `TestBackend` at a fixed 80×24, drawn once via
   `render(&app) -> Buffer`, asserted with char-based row extractors:
   `line(buf, y)` (row text, trailing padding trimmed), `line_from(buf, y, x)`
@@ -432,8 +456,5 @@ line and tall enough that chrome rows never overlap content.
 
 ## Known nits
 
-Tracked in DEVELOPMENT.md's backlog: the in-memory `started_at` microsecond
-drift, two `unwrap_or_default()` calls that swallow db errors (`tasks_for_
-project` in the start form, `distinct_projects`/`distinct_tasks` refresh after
-session creation), and the per-frame `SkimMatcherV2` allocation in
-`fuzzy_filter`.
+Tracked in DEVELOPMENT.md's backlog: the per-frame `SkimMatcherV2`
+allocation in `fuzzy_filter`.

@@ -21,11 +21,15 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: G (TUI beautification) fully landed (git log `1f204c8..7349d6a`;
-  render-test gotchas now live in IMPLEMENTATION.md). Tree green, 37 tests.
-  New this session: `IMPLEMENTATION.md`, a developer-facing implementation
-  reference (architecture, data layer, state machine, rendering, testing),
-  linked from the file map below.
+- State: fix pass on branch `fix/input-and-resume` (2026-10-31), one commit
+  per fix: terminal restored on error/panic; key presses only + Ctrl+C;
+  add-note Esc discards; end-session Esc cancels (session keeps running);
+  `r` keeps the disruption when there is nothing to resume, `d` is a no-op
+  during one; shared `Autocomplete` (input line = what Enter submits);
+  two nits done (swallowed errors, `create_session` returns the stored
+  session); shared row mapper; same-second `id` tiebreak; corrected the
+  "SQLite ignores `Z`" claim (it parses it; legacy rows are fine); multi-line
+  previous notes. README and IMPLEMENTATION.md synced. Tree green, 51 tests.
 - Next: backlog item C (free-text activities).
 - Blockers / open questions: none.
 
@@ -80,12 +84,6 @@ from its scope note alone, without re-deriving context.
       no-system-deps property. Touches: E's lockfile format, one X11
       activation helper, README.
 - [ ] **Nits** (tiny, do whenever):
-  - In-memory `started_at` (`Utc::now()` in `start_session`) differs from the
-    db's by microseconds; have `create_session` return (or re-read) the stored
-    value so the db stays authoritative.
-  - Two `unwrap_or_default()` calls swallow DB errors: `tasks_for_project` in
-    the start form and the `distinct_projects`/`distinct_tasks` refresh after
-    session creation. Inconsistent with the error-line philosophy.
   - `fuzzy_filter` constructs a `SkimMatcherV2` per call (per frame); make it
     static.
 
@@ -132,8 +130,9 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `IMPLEMENTATION.md` — developer-facing implementation details: architecture,
   data layer, app state, screen state machine, session lifecycle, rendering,
   testing. Keep in sync when architecture changes.
-- `src/main.rs` — entry point: open db, raw mode + alternate screen, 100 ms
-  event loop calling `App::draw` / `App::handle_key`.
+- `src/main.rs` — entry point: open db, `ratatui::init()`/`restore()` (raw
+  mode + alternate screen, restored on error and panic), 100 ms event loop
+  calling `App::draw` / `App::handle_key`.
 - `src/db.rs` — `Db` over rusqlite; schema + single-active trigger; all SQL
   lives here. Unit tests at the bottom.
 - `src/session.rs` — `Session` struct: a db row with parsed timestamps.
@@ -143,5 +142,6 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   (`handle_main`, `handle_start_session` + `start_*_key`,
   `handle_end_session` + `end_*_key`, `handle_add_note`), draw methods
   (`draw_*`), session lifecycle helpers (`start_session`, `complete_active`,
-  `close_active_session`, `append_active_note`), and `fuzzy_filter`. Unit
-  tests at the bottom.
+  `close_active_session`, `append_active_note`), the `Autocomplete` field
+  used by the project/task steps, and `fuzzy_filter`. Unit tests at the
+  bottom.

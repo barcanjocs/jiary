@@ -33,9 +33,9 @@ On first run, a database is created at:
 | `e` | End the active session (notes + focus rating) |
 | `n` | Add a note to the active session |
 | `i` | Increment interruption counter |
-| `d` | Stop current session, start a Disruption session |
+| `d` | Stop current session, start a Disruption session (no-op during one) |
 | `r` | Resume last non-Disruption session |
-| `q` | Quit |
+| `q` / `Ctrl+C` | Quit |
 
 ### Starting a session
 
@@ -71,11 +71,11 @@ When ending a session (`e`), after the notes prompt you'll be asked to rate your
 - `2` — ok
 - `3` — good (deep flow)
 
-Press Enter to skip rating. Esc at either step cancels: the session keeps running and the typed notes are discarded. The rating is shown in the daily history as `(F:N)` or `(F:-)` if not rated.
+Press Enter to skip rating. Esc at either step cancels: the session keeps running and the typed notes are discarded. The rating is shown in the daily history as `F1`–`F3`, or `F-` if not rated.
 
 ### Interruptions
 
-Press `i` at any time during an active session to log a micro-interruption (phone glance, Slack ping, urge to check something). The count is shown in the active session view and in the daily history as `(I:N)`.
+Press `i` at any time during an active session to log a micro-interruption (phone glance, Slack ping, urge to check something). The count is shown in the active session view and in the daily history as `I:N`.
 
 Significant interruptions (conversations, meetings) should be captured as Disruption sessions via `d` rather than as interruption counts.
 
