@@ -26,6 +26,7 @@ use super::graphs::{
     focus_grid, focus_legend, focus_row, half_cells, hour_labels, item_width, share_row,
     start_of_hour, timeline_row, year_focus_grid,
 };
+use super::items::{DAY_TOTAL_WIDTH, day_total};
 use super::main_screen::START_STEP;
 use super::modal::START_MODAL_HEIGHT;
 use super::palette::{COMMANDS, PaletteForm, palette_matches};
@@ -2712,4 +2713,26 @@ fn note_modal_shows_context_and_input() {
     assert!(line_from(&buf, 11, 22).starts_with("› hello"));
     assert_eq!(buf[(22, 11)].fg, Color::Cyan);
     assert_eq!(buf[(24, 11)].fg, Color::Reset);
+}
+
+#[test]
+fn a_months_total_keeps_its_focus_in_the_column() {
+    // A whole month of round-the-clock work: the longest total a row shows.
+    let summary = crate::summary::DaySummary {
+        per_activity: Vec::new(),
+        per_project: Vec::new(),
+        average_focus: Some(2.5),
+        rated: 1,
+        interruptions: 0,
+        disruptions: 0,
+        disruption_time: chrono::Duration::zero(),
+        break_time: chrono::Duration::zero(),
+        span: None,
+        tracked: chrono::Duration::hours(744) + chrono::Duration::minutes(59),
+        blocks: Vec::new(),
+    };
+    let total = day_total(&summary);
+    assert_eq!(item_width(&total), DAY_TOTAL_WIDTH);
+    let text: String = total.iter().map(|span| span.content.as_ref()).collect();
+    assert_eq!(text, " 744h 59m 2.5");
 }

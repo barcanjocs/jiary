@@ -69,7 +69,7 @@ pub(super) const SUMMARY_LABEL_WIDTH: u16 = 10;
 
 /// The columns a day's total and focus take at the end of its row in the
 /// longer views (" 10h 30m 2.5").
-pub(super) const DAY_TOTAL_WIDTH: usize = 12;
+pub(super) const DAY_TOTAL_WIDTH: usize = 13;
 
 /// How a view colors projects (by name; `None`: no project).
 pub(super) type ProjectColors<'a> = &'a dyn Fn(Option<&str>) -> Color;
@@ -152,7 +152,7 @@ pub(super) fn focus_items(summary: &DaySummary) -> Vec<Item> {
 /// row in the longer views (`DAY_TOTAL_WIDTH` columns).
 pub(super) fn day_total(summary: &DaySummary) -> Item {
     vec![
-        Span::styled(format!(" {:>7}", fmt_hms(summary.tracked)), theme::VALUE),
+        Span::styled(format!(" {:>8}", fmt_hms(summary.tracked)), theme::VALUE),
         match summary.average_focus {
             Some(avg) => Span::styled(format!(" {avg:.1}"), theme::VALUE.fg(focus_color(avg))),
             None => Span::styled("   -", theme::DIMMED),
