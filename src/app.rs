@@ -586,20 +586,17 @@ impl App {
         // Global chrome: header on top, status line at the bottom, screen
         // content in between. The rows are fixed (no conditional layout), so
         // the UI never jumps when an error appears or disappears.
-        let [header, content, status] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
-        .areas(area);
+        let [header, content, status] = chrome_layout(area);
 
         frame.render_widget(self.header_line(), header);
 
+        let input = self.wrapped_input(content);
+        let input = input.as_ref();
         match &self.screen {
             Screen::Main => self.draw_main(frame, content),
-            Screen::StartSession(form) => self.draw_start_session(frame, content, form),
-            Screen::EndSession(form) => self.draw_end_session(frame, content, form),
-            Screen::AddNote(form) => self.draw_add_note(frame, content, form),
+            Screen::StartSession(form) => self.draw_start_session(frame, content, form, input),
+            Screen::EndSession(form) => self.draw_end_session(frame, content, form, input),
+            Screen::AddNote(_) => self.draw_add_note(frame, content, input),
         }
 
         frame.render_widget(self.status_line(), status);
@@ -611,40 +608,45 @@ impl App {
     /// state — `Terminal::draw` discards closure return values, so main.rs
     /// calls this after drawing to show or hide the cursor.
     pub fn cursor_position(&self, size: (u16, u16)) -> Option<(u16, u16)> {
-        let area = ratatui::layout::Rect::new(0, 0, size.0, size.1);
+        let [_, content, _] = chrome_layout(ratatui::layout::Rect::new(0, 0, size.0, size.1));
+        let input = self.wrapped_input(content)?;
+        let input_area = match &self.screen {
+            Screen::StartSession(_) => start_modal_layout(content, input.height()).2,
+            _ => small_modal_layout(content, input.height()).2,
+        };
+        Some(input.cursor_in(input_area))
+    }
+
+    /// The current screen's text input, if it has one: (label, value).
+    fn text_input(&self) -> Option<(&'static str, &str)> {
         match &self.screen {
-            Screen::StartSession(form) => {
-                let (_, _, body_area) = start_modal_layout(area);
-                let [input_area, _] =
-                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body_area);
-                match form.step {
-                    Step::Project => Some(input_cursor(
-                        input_area,
-                        "Project".len() + 2,
-                        form.project.input.len(),
-                    )),
-                    Step::Task => Some(input_cursor(
-                        input_area,
-                        "Task".len() + 2,
-                        form.task.input.len(),
-                    )),
-                    Step::Activity => None,
-                }
-            }
-            Screen::EndSession(form) if form.step == EndStep::Notes => {
-                let (_, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
-                let [_, body_area] =
-                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
-                Some(input_cursor(body_area, "Notes".len() + 2, form.notes.len()))
-            }
-            Screen::AddNote(form) => {
-                let (_, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
-                let [_, input_area] =
-                    Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
-                Some(input_cursor(input_area, "Note".len() + 2, form.input.len()))
-            }
+            Screen::StartSession(form) => match form.step {
+                Step::Project => Some(("Project", &form.project.input)),
+                Step::Task => Some(("Task", &form.task.input)),
+                Step::Activity => None,
+            },
+            Screen::EndSession(form) if form.step == EndStep::Notes => Some(("Notes", &form.notes)),
+            Screen::AddNote(form) => Some(("Note", &form.input)),
             _ => None,
         }
+    }
+
+    /// The current screen's text input wrapped to its modal's width, with at
+    /// most as many rows as the modal can grow to on `content`. Shared by
+    /// `draw` and `cursor_position` so the two always agree.
+    fn wrapped_input(&self, content: ratatui::layout::Rect) -> Option<WrappedInput> {
+        let (label, value) = self.text_input()?;
+        let base_height = match self.screen {
+            Screen::StartSession(_) => START_MODAL_HEIGHT,
+            _ => SMALL_MODAL_HEIGHT,
+        };
+        let max_rows = content.height.saturating_sub(base_height - 1).max(1);
+        Some(WrappedInput::new(
+            label,
+            value,
+            modal_inner_width(content),
+            max_rows,
+        ))
     }
 
     /// Top row: name, date, and total time logged today. The total is computed
@@ -922,8 +924,10 @@ impl App {
         frame: &mut Frame,
         area: ratatui::layout::Rect,
         form: &StartSessionForm,
+        input: Option<&WrappedInput>,
     ) {
-        let (modal, tabs_area, body_area) = start_modal_layout(area);
+        let rows = input.map_or(0, WrappedInput::height);
+        let (modal, tabs_area, input_area, list_area) = start_modal_layout(area, rows);
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(" Start session ", theme::TITLE)));
@@ -949,12 +953,15 @@ impl App {
                     .collect::<Vec<_>>();
                 frame.render_stateful_widget(
                     picker_list(items),
-                    body_area,
+                    list_area,
                     &mut ListState::default().with_selected(Some(form.activity_index)),
                 );
             }
-            Step::Project => draw_autocomplete(frame, body_area, "Project", &form.project),
-            Step::Task => draw_autocomplete(frame, body_area, "Task", &form.task),
+            Step::Project => draw_suggestions(frame, list_area, &form.project),
+            Step::Task => draw_suggestions(frame, list_area, &form.task),
+        }
+        if let Some(input) = input {
+            frame.render_widget(input.paragraph(), input_area);
         }
     }
 
@@ -966,15 +973,15 @@ impl App {
         frame: &mut Frame,
         area: ratatui::layout::Rect,
         form: &EndSessionForm,
+        input: Option<&WrappedInput>,
     ) {
-        let (modal, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
+        let rows = input.map_or(1, WrappedInput::height);
+        let (modal, tabs_area, body_area) = small_modal_layout(area, rows);
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(" End session ", theme::TITLE)));
         frame.render_widget(block, modal);
 
-        let [tabs_area, body_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
         let step_index = match form.step {
             EndStep::Notes => 0,
             EndStep::Focus => 1,
@@ -986,14 +993,10 @@ impl App {
             tabs_area,
         );
 
-        match form.step {
-            EndStep::Notes => {
-                frame.render_widget(
-                    Paragraph::new(theme::kv("Notes", form.notes.clone())),
-                    body_area,
-                );
-            }
-            EndStep::Focus => {
+        match (form.step, input) {
+            (EndStep::Notes, Some(input)) => frame.render_widget(input.paragraph(), body_area),
+            (EndStep::Notes, None) => {}
+            (EndStep::Focus, _) => {
                 let line = Line::from(vec![
                     Span::styled("[1] Bad  ", Style::new().fg(theme::BAD)),
                     Span::styled("[2] OK  ", Style::new().fg(theme::OK)),
@@ -1006,16 +1009,20 @@ impl App {
 
     /// Add-note form: small centered modal with a dimmed project·task·activity
     /// context line (the full note history stays on the main screen) and a
-    /// note input line (cursor placed by main.rs).
-    fn draw_add_note(&self, frame: &mut Frame, area: ratatui::layout::Rect, form: &AddNoteForm) {
-        let (modal, inner) = modal_layout(area, MODAL_WIDTH, SMALL_MODAL_HEIGHT);
+    /// note input (cursor placed by main.rs).
+    fn draw_add_note(
+        &self,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        input: Option<&WrappedInput>,
+    ) {
+        let rows = input.map_or(1, WrappedInput::height);
+        let (modal, context_area, input_area) = small_modal_layout(area, rows);
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(" Add note ", theme::TITLE)));
         frame.render_widget(block, modal);
 
-        let [context_area, input_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
         if let Some(session) = &self.active_session {
             let parts = [
                 session.project.as_deref().unwrap_or(""),
@@ -1032,10 +1039,9 @@ impl App {
                 context_area,
             );
         }
-        frame.render_widget(
-            Paragraph::new(theme::kv("Note", form.input.clone())),
-            input_area,
-        );
+        if let Some(input) = input {
+            frame.render_widget(input.paragraph(), input_area);
+        }
     }
 }
 
@@ -1053,21 +1059,9 @@ fn picker_list<'a>(items: Vec<ListItem<'a>>) -> List<'a> {
         .highlight_style(theme::PICKER_HIGHLIGHT)
 }
 
-/// An autocomplete step: the input line, then the suggestion list with the
-/// selected suggestion (if any) highlighted.
-fn draw_autocomplete(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    label: &'static str,
-    field: &Autocomplete,
-) {
-    let [input_area, list_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-    frame.render_widget(
-        Paragraph::new(theme::kv(label, field.input.clone())),
-        input_area,
-    );
-
+/// An autocomplete step's suggestion list, with the selected suggestion (if
+/// any) highlighted. The input itself is drawn as a `WrappedInput`.
+fn draw_suggestions(frame: &mut Frame, area: ratatui::layout::Rect, field: &Autocomplete) {
     let items = field
         .suggestions()
         .into_iter()
@@ -1076,10 +1070,21 @@ fn draw_autocomplete(
     if !items.is_empty() {
         frame.render_stateful_widget(
             picker_list(items),
-            list_area,
+            area,
             &mut ListState::default().with_selected(field.selection),
         );
     }
+}
+
+/// The global chrome: header row, content area, status row. Shared by `draw`
+/// and `cursor_position`.
+fn chrome_layout(area: ratatui::layout::Rect) -> [ratatui::layout::Rect; 3] {
+    Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(area)
 }
 
 /// A fixed-size rect centered in `area`, shrunk to fit when the area is too
@@ -1110,27 +1115,133 @@ fn modal_layout(
     (modal, padded)
 }
 
-/// Layout of the start-session modal: (modal rect, tabs row, body). Shared by
-/// the renderer and `cursor_position` so the two can never disagree.
+/// Layout of the start-session modal: (modal rect, tabs row, input rows,
+/// list). The modal grows by one row per input row beyond the first, so the
+/// list keeps its room; the Activity step passes 0 input rows. Shared by the
+/// renderer and `cursor_position` so the two can never disagree.
 fn start_modal_layout(
     content: ratatui::layout::Rect,
+    input_rows: u16,
+) -> (
+    ratatui::layout::Rect,
+    ratatui::layout::Rect,
+    ratatui::layout::Rect,
+    ratatui::layout::Rect,
+) {
+    let height = START_MODAL_HEIGHT + input_rows.saturating_sub(1);
+    let (modal, inner) = modal_layout(content, MODAL_WIDTH, height);
+    let [tabs_area, input_area, list_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(input_rows),
+        Constraint::Min(0),
+    ])
+    .areas(inner);
+    (modal, tabs_area, input_area, list_area)
+}
+
+/// Layout of the end/note modals: (modal rect, tabs/context row, body). The
+/// body holds `body_rows` rows (the wrapped input, or the rating line) and
+/// the modal grows to fit them. Shared by the renderers and
+/// `cursor_position`.
+fn small_modal_layout(
+    content: ratatui::layout::Rect,
+    body_rows: u16,
 ) -> (
     ratatui::layout::Rect,
     ratatui::layout::Rect,
     ratatui::layout::Rect,
 ) {
-    let (modal, inner) = modal_layout(content, MODAL_WIDTH, START_MODAL_HEIGHT);
-    let [tabs_area, body_area] =
+    let height = SMALL_MODAL_HEIGHT + body_rows.saturating_sub(1);
+    let (modal, inner) = modal_layout(content, MODAL_WIDTH, height);
+    let [top_area, body_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
-    (modal, tabs_area, body_area)
+    (modal, top_area, body_area)
 }
 
-/// Cursor position for an input line rendered as `prefix + text`: right after
-/// the visible text, clamped to the last column so it stays on the line when
-/// the text overflows (Paragraph truncates rather than wraps).
-fn input_cursor(area: ratatui::layout::Rect, prefix_len: usize, text_len: usize) -> (u16, u16) {
-    let col = (prefix_len + text_len).min(area.width.saturating_sub(1) as usize);
-    (area.x + col as u16, area.y)
+/// Text width inside any modal on `content` (border plus padding on each
+/// side), accounting for `centered_rect` shrinking narrow terminals.
+fn modal_inner_width(content: ratatui::layout::Rect) -> u16 {
+    MODAL_WIDTH.min(content.width).saturating_sub(4)
+}
+
+/// A text input wrapped to fit its modal: the dimmed label on the first row,
+/// the value word-wrapped beside it with a hanging indent so every row starts
+/// at the same column, and the cursor right after the last character.
+struct WrappedInput {
+    lines: Vec<Line<'static>>,
+    /// Cursor (column, row), relative to the input area.
+    cursor: (u16, u16),
+}
+
+impl WrappedInput {
+    /// Wraps `value` beside `label` within `width` columns. When that takes
+    /// more than `max_rows` rows, only the last ones are kept: the cursor is
+    /// always on the last row, so it stays visible.
+    fn new(label: &str, value: &str, width: u16, max_rows: u16) -> Self {
+        let indent = label.chars().count() + 2; // as in `theme::kv`
+        let rows = wrap_text(value, (width as usize).saturating_sub(indent));
+        let last = rows.len() - 1;
+        let cursor_col = indent + rows[last].chars().count();
+
+        let mut lines = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| match i {
+                0 => theme::kv(label, row),
+                _ => Line::from(format!("{}{row}", " ".repeat(indent))),
+            })
+            .collect::<Vec<_>>();
+        let hidden = lines.len().saturating_sub(max_rows as usize);
+        lines.drain(..hidden);
+
+        Self {
+            lines,
+            cursor: (cursor_col as u16, (last - hidden) as u16),
+        }
+    }
+
+    fn height(&self) -> u16 {
+        self.lines.len() as u16
+    }
+
+    fn paragraph(&self) -> Paragraph<'static> {
+        Paragraph::new(self.lines.clone())
+    }
+
+    /// Absolute cursor position when drawn at `area`, kept inside it on
+    /// terminals too narrow for the modal.
+    fn cursor_in(&self, area: ratatui::layout::Rect) -> (u16, u16) {
+        let (col, row) = self.cursor;
+        (area.x + col.min(area.width.saturating_sub(1)), area.y + row)
+    }
+}
+
+/// Splits `text` into rows of at most `width` chars, breaking after the last
+/// space that fits, or mid-word when a word is longer than a row. Every char
+/// is kept, so the rows concatenate back to `text`. A trailing empty row is
+/// added when the last one is full, so the cursor after it has a place to go.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    let mut start = 0;
+    while chars.len() - start > width {
+        let window = &chars[start..start + width];
+        let fits_exactly = chars[start + width] == ' ';
+        let end = match window.iter().rposition(|&c| c == ' ') {
+            Some(space) if !fits_exactly => start + space + 1,
+            _ => start + width,
+        };
+        rows.push(chars[start..end].iter().collect());
+        start = end;
+    }
+    let last = chars[start..].iter().collect::<String>();
+    let full = chars.len() - start == width;
+    rows.push(last);
+    if full {
+        rows.push(String::new());
+    }
+    rows
 }
 
 fn fmt_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
@@ -1861,6 +1972,121 @@ mod tests {
 
         let t = TestApp::new();
         assert_eq!(t.app.cursor_position((80, 24)), None); // main screen
+    }
+
+    // --- wrapped inputs ---------------------------------------------------
+
+    #[test]
+    fn wrap_text_breaks_after_the_last_space_that_fits() {
+        assert_eq!(wrap_text("aaa bbb ccc", 8), ["aaa bbb ", "ccc"]);
+        // A word longer than a row is split mid-word.
+        assert_eq!(wrap_text("abcdefghij", 4), ["abcd", "efgh", "ij"]);
+        // A word that exactly fills a row stays whole.
+        assert_eq!(wrap_text("abcd efgh", 5), ["abcd ", "efgh"]);
+        assert_eq!(wrap_text("abcd efg", 4), ["abcd", " efg", ""]);
+        // A full last row gets an empty row after it for the cursor.
+        assert_eq!(wrap_text("abcd", 4), ["abcd", ""]);
+        assert_eq!(wrap_text("", 4), [""]);
+        // Counts chars, not bytes.
+        assert_eq!(wrap_text("café olé", 5), ["café ", "olé"]);
+    }
+
+    #[test]
+    fn wrap_text_keeps_every_char() {
+        for text in [
+            "a b c d e f g",
+            "  leading",
+            "trailing  ",
+            "x".repeat(30).as_str(),
+        ] {
+            for width in 1..12 {
+                let rows = wrap_text(text, width);
+                assert_eq!(rows.concat(), text, "width {width}");
+                assert!(rows.iter().all(|r| r.chars().count() <= width));
+            }
+        }
+    }
+
+    /// Index of the first rendered row containing `needle`.
+    fn row_with(buf: &Buffer, needle: &str) -> u16 {
+        (0..buf.area.height)
+            .find(|&y| line(buf, y).contains(needle))
+            .unwrap_or_else(|| panic!("no row contains {needle:?}"))
+    }
+
+    #[test]
+    fn long_project_input_wraps_inside_the_modal() {
+        let typed = "a very long project name that keeps going";
+        let t = TestApp::new().on_project_step(vec![], typed);
+        let buf = render(&t.app);
+
+        let y = row_with(&buf, "Project  a very long project name");
+        // The value wraps at a word boundary, continuing under itself.
+        assert!(line_from(&buf, y, 22).starts_with("Project  a very long project name "));
+        assert!(line_from(&buf, y + 1, 22).starts_with("         that keeps going "));
+        // Both rows stay inside the modal's right border (x = 59).
+        assert_eq!(buf[(59, y)].symbol(), "│");
+        assert_eq!(buf[(59, y + 1)].symbol(), "│");
+        // The modal grew by one row instead of squeezing the list.
+        let top = row_with(&buf, "╭ Start session ");
+        assert_eq!(
+            line_from(&buf, top + START_MODAL_HEIGHT, 20),
+            "╰──────────────────────────────────────╯"
+        );
+        // The cursor follows the text onto the second row.
+        assert_eq!(
+            t.app.cursor_position((RENDER_WIDTH, RENDER_HEIGHT)),
+            Some((22 + 9 + "that keeps going".len() as u16, y + 1))
+        );
+    }
+
+    #[test]
+    fn long_notes_wrap_and_grow_the_end_modal() {
+        let notes = "fixed the wrapping bug and wrote tests for every input";
+        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
+            notes: notes.into(),
+            step: EndStep::Notes,
+        }));
+        let buf = render(&t.app);
+
+        // "Notes  " leaves 29 columns per row.
+        let y = row_with(&buf, "Notes  fixed");
+        assert!(line_from(&buf, y, 22).starts_with("Notes  fixed the wrapping bug and "));
+        assert!(line_from(&buf, y + 1, 22).starts_with("       wrote tests for every input "));
+        assert_eq!(buf[(59, y + 1)].symbol(), "│");
+        // The modal grew by the extra row, keeping its two spare rows below
+        // the input.
+        assert_eq!(
+            line(&buf, y + 2).trim(),
+            "│                                      │"
+        );
+        assert_eq!(
+            line(&buf, y + 3).trim(),
+            "│                                      │"
+        );
+        assert!(line_from(&buf, y + 4, 20).starts_with("╰"));
+        assert_eq!(
+            t.app.cursor_position((RENDER_WIDTH, RENDER_HEIGHT)),
+            Some((22 + 7 + "wrote tests for every input".len() as u16, y + 1))
+        );
+    }
+
+    #[test]
+    fn input_taller_than_the_terminal_keeps_the_cursor_row_visible() {
+        let note = "word ".repeat(200);
+        let t = TestApp::new().on_screen(Screen::AddNote(AddNoteForm { input: note }));
+        let (width, height) = (RENDER_WIDTH, 12);
+        let input = t
+            .app
+            .wrapped_input(chrome_layout(ratatui::layout::Rect::new(0, 0, width, height))[1])
+            .unwrap();
+        // Content is 10 rows; the small modal's 5 other rows leave 5 for input.
+        assert_eq!(input.height(), 5);
+        let (_, y) = t.app.cursor_position((width, height)).unwrap();
+        assert!(
+            y < height - 1,
+            "cursor row {y} must be above the status line"
+        );
     }
 
     #[test]

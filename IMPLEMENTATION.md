@@ -258,7 +258,7 @@ Steps: `Notes → Focus`.
 
 ### Add-note form
 
-Single input line; Enter appends (if non-empty) and returns to Main, Esc
+Single (wrapping) input; Enter appends (if non-empty) and returns to Main, Esc
 discards the input. Saved notes persist even if the app exits mid-session.
 
 ## Session lifecycle
@@ -324,21 +324,45 @@ activity` line, and dimmed note bullets.
 
 ### Modals
 
-The start/end/add-note screens are centered fixed-size modals:
+The start/end/add-note screens are centered modals of fixed width that grow
+in height only with a wrapped input:
 
 - Start: 40×12 (`MODAL_WIDTH` × `START_MODAL_HEIGHT`) — room for the activity
-  list. End/note: 40×6 (`SMALL_MODAL_HEIGHT`).
+  list. End/note: 40×6 (`SMALL_MODAL_HEIGHT`). Each grows by one row per
+  input row beyond the first, so the suggestion list (start) and the two
+  spare rows (end/note) keep their room.
+- `chrome_layout` splits the frame into header / content / status rows; both
+  `draw` and `cursor_position` use it, so modals are centered in the same
+  content area.
 - `centered_rect` centers a fixed size in the content area and **shrinks to
   fit** on tiny terminals instead of overflowing.
 - `modal_layout` returns (modal rect, inner area) where the inner area is the
   block's interior with one extra column of padding left and right.
-- `start_modal_layout` extends that with the tabs row / body split. It is
-  **shared by the renderer and `cursor_position`** so the two can never
-  disagree about where the input line is.
+- `start_modal_layout(content, input_rows)` (tabs / input / list) and
+  `small_modal_layout(content, body_rows)` (tabs-or-context / body) extend
+  that. They are **shared by the renderers and `cursor_position`** so the two
+  can never disagree about where the input is.
+
+### Wrapped inputs
+
+All four text inputs (Project, Task, Notes, Note) are drawn as a
+`WrappedInput`, built by `App::wrapped_input` from `text_input()` (the
+current screen's label and value) and the modal's inner width
+(`modal_inner_width`):
+
+- Row one is `theme::kv(label, …)`; the value continues on later rows with a
+  hanging indent of `label + 2` columns, so it reads as one column.
+- `wrap_text` breaks after the last space that fits (mid-word only for words
+  longer than a row) and keeps every char, so the rows concatenate back to
+  the value. Widths count chars, not bytes. A full last row gets an empty
+  row after it so the cursor has somewhere to go.
+- The cursor is always after the last char, i.e. on the last row. If the
+  text needs more rows than the modal can grow to on this terminal, only the
+  last rows are kept, so the cursor stays visible.
 
 Modal structure: a `Block::bordered()` (rounded) with a titled accent span, a
 `Tabs` row marking the current step, then the step body (picker `List`, or an
-input line plus suggestion `List`). Picker lists use `theme::picker_symbol()`
+wrapped input plus suggestion `List`). Picker lists use `theme::picker_symbol()`
 (bold accent `>`) and `PICKER_HIGHLIGHT`.
 
 ### Terminal cursor
@@ -355,8 +379,9 @@ it right after the typed text. Two ratatui/crossterm quirks drive this design:
    explicit `show_cursor()`/`hide_cursor()` in the loop (regression-tested by
    `cursor_position_tracks_input_lines`).
 
-`input_cursor` clamps the column to the line's last cell because input lines
-are `Paragraph`s that truncate rather than wrap.
+`WrappedInput::cursor_in` turns the wrapped input's relative cursor into a
+screen position, clamped to the input area on terminals narrower than the
+modal.
 
 ### ratatui gotchas (learned the hard way; render tests pin these)
 
