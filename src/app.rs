@@ -1012,10 +1012,7 @@ impl App {
             Span::styled("JIARY", theme::TITLE),
             Span::styled(format!("  {date}"), theme::DIMMED),
             Span::styled("  ·  ", theme::DIMMED),
-            Span::styled(
-                fmt_hms(self.total_today()),
-                Style::new().add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(fmt_hms(self.total_today()), theme::TIME),
             Span::styled(" today", theme::DIMMED),
         ])
     }
@@ -1602,42 +1599,78 @@ impl App {
             ))];
         };
 
+        // Names in their colors, times in bold, words plain, nothing to
+        // report dimmed.
+        let time = |d: chrono::Duration| Span::styled(fmt_hms(d), theme::VALUE);
+        let dimmed = |text: &str| vec![Span::styled(text.to_string(), theme::DIMMED)];
         let activities = summary
             .per_activity
             .iter()
-            .map(|(activity, d)| format!("{activity} {}", fmt_hms(*d)))
+            .map(|(activity, d)| vec![theme::activity(activity), Span::raw(" "), time(*d)])
             .collect::<Vec<_>>();
         let projects = summary
             .per_project
             .iter()
             .map(|(project, d)| {
-                format!("{} {}", project.as_deref().unwrap_or("(none)"), fmt_hms(*d))
+                vec![
+                    value_or_none(project, Style::new()),
+                    Span::raw(" "),
+                    time(*d),
+                ]
             })
             .collect::<Vec<_>>();
         let focus = vec![
             match summary.average_focus {
-                Some(avg) => format!("avg {avg:.1} ({} rated)", summary.rated),
-                None => "not rated".to_string(),
+                Some(avg) => vec![
+                    Span::raw("avg "),
+                    Span::styled(
+                        format!("{avg:.1}"),
+                        theme::VALUE.fg(match avg.round() as i32 {
+                            ..=1 => theme::BAD,
+                            2 => theme::OK,
+                            _ => theme::GOOD,
+                        }),
+                    ),
+                    Span::styled(format!(" ({} rated)", summary.rated), theme::DIMMED),
+                ],
+                None => vec![Span::styled("not rated", theme::NONE)],
             },
-            plural(summary.interruptions as usize, "interruption"),
+            match summary.interruptions {
+                0 => dimmed("0 interruptions"),
+                n => vec![
+                    interruptions_span(n, ""),
+                    Span::raw(if n == 1 {
+                        " interruption"
+                    } else {
+                        " interruptions"
+                    }),
+                ],
+            },
             match summary.disruptions {
-                0 => "no disruptions".to_string(),
-                n => format!(
-                    "{} ({})",
-                    plural(n, "disruption"),
-                    fmt_hms(summary.disruption_time)
-                ),
+                0 => dimmed("no disruptions"),
+                n => vec![
+                    Span::styled(
+                        plural(n, "disruption"),
+                        theme::VALUE.fg(theme::DISRUPTION_COLOR),
+                    ),
+                    Span::raw(" ("),
+                    time(summary.disruption_time),
+                    Span::raw(")"),
+                ],
             },
         ];
         let day = vec![
-            format!("{} – {}", fmt_time(&start), fmt_time(&end)),
-            format!("tracked {}", fmt_hms(summary.tracked)),
+            vec![Span::styled(
+                format!("{} – {}", fmt_time(&start), fmt_time(&end)),
+                theme::VALUE,
+            )],
+            vec![Span::raw("tracked "), time(summary.tracked)],
             if summary.break_time.is_zero() {
-                "no breaks".to_string()
+                dimmed("no breaks")
             } else {
-                format!("breaks {}", fmt_hms(summary.break_time))
+                vec![Span::raw("breaks "), time(summary.break_time)]
             },
-            format!("gaps {}", fmt_hms(summary.untracked())),
+            vec![Span::raw("gaps "), time(summary.untracked())],
         ];
 
         let mut lines = Vec::new();
@@ -1647,7 +1680,7 @@ impl App {
             ("Focus   ", focus),
             ("Day     ", day),
         ] {
-            lines.extend(hanging_lines(label, wrap_items(&items, width, label)));
+            lines.extend(hanging_lines(label, wrap_items(items, width, label)));
         }
         lines
     }
@@ -1677,32 +1710,25 @@ impl App {
 
         let mut lines = vec![
             Line::from(vec![
-                Span::styled(
-                    format!("{h:02}:{m:02}:{s:02}"),
-                    Style::new().add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(format!("{h:02}:{m:02}:{s:02}"), theme::TITLE),
                 Span::styled(
                     format!("  since {}", fmt_time(&session.started_at)),
                     theme::DIMMED,
                 ),
             ]),
-            theme::kv("Project", session.project.as_deref().unwrap_or("(none)")),
-            theme::kv("Task", session.task.as_deref().unwrap_or("(none)")),
-            theme::kv("Activity", session.activity.as_str()),
+            theme::kv(
+                "Project",
+                vec![value_or_none(&session.project, theme::VALUE)],
+            ),
+            theme::kv("Task", vec![value_or_none(&session.task, Style::new())]),
+            theme::kv("Activity", vec![theme::activity(&session.activity)]),
         ];
 
         let interruptions = session.interruptions.unwrap_or(0);
-        lines.push(Line::from(vec![
-            Span::styled("Interruptions  ", theme::DIMMED),
-            Span::styled(
-                interruptions.to_string(),
-                if interruptions > 0 {
-                    Style::new().fg(theme::BAD)
-                } else {
-                    Style::new()
-                },
-            ),
-        ]));
+        lines.push(theme::kv(
+            "Interruptions",
+            vec![interruptions_span(interruptions, "")],
+        ));
         lines
     }
 
@@ -1717,21 +1743,21 @@ impl App {
         let mut lines = Vec::new();
         // Cached; refreshed whenever the active session changes.
         if !self.previous_notes.is_empty() {
-            lines.push(Line::from(Span::styled("Previous notes:", theme::DIMMED)));
+            lines.push(Line::from(Span::styled("Previous notes:", NOTES_HEADING)));
             // Each entry is one session's notes: newline-separated, one
             // bullet per line.
             for note in self.previous_notes.iter().flat_map(|notes| notes.lines()) {
-                lines.extend(bullet_lines(note, width));
+                lines.extend(bullet_lines(note, width, false));
             }
         }
 
-        // Current session's own notes.
+        // Current session's own notes, brighter than the previous ones.
         if let Some(notes) = &session.notes
             && !notes.is_empty()
         {
-            lines.push(Line::from(Span::styled("Session notes:", theme::DIMMED)));
+            lines.push(Line::from(Span::styled("Session notes:", NOTES_HEADING)));
             for note in notes.lines() {
-                lines.extend(bullet_lines(note, width));
+                lines.extend(bullet_lines(note, width, true));
             }
         }
 
@@ -1742,59 +1768,51 @@ impl App {
     /// count on the first line, project·task·activity below it, then notes.
     fn timeline_item_lines(&self, session: &Session) -> Vec<Line<'static>> {
         let start = fmt_time(&session.started_at);
-        let (range, duration) = match &session.ended_at {
+        let (end, duration) = match &session.ended_at {
             Some(end) => (
-                format!("{start} – {}", fmt_time(end)),
+                Span::styled(fmt_time(end), theme::VALUE),
                 fmt_duration(&session.started_at, end),
             ),
             // The active session appears here too, still running.
             None => (
-                format!("{start} – now"),
+                Span::styled("now", theme::TIME),
                 fmt_hms(Utc::now() - session.started_at),
             ),
         };
 
-        let focus = match session.focus {
-            Some(1) => Span::styled(" F1", Style::new().fg(theme::BAD)),
-            Some(2) => Span::styled(" F2", Style::new().fg(theme::OK)),
-            Some(3) => Span::styled(" F3", Style::new().fg(theme::GOOD)),
-            _ => Span::styled(" F-", theme::DIMMED),
-        };
-
         let interruptions = session.interruptions.unwrap_or(0);
-        let interruptions_span = Span::styled(
-            format!(" I:{interruptions}"),
-            if interruptions > 0 {
-                Style::new().fg(theme::BAD)
-            } else {
-                theme::DIMMED
-            },
-        );
-
-        let mut lines = vec![Line::from(vec![
-            Span::styled(range, Style::new().add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!(" ({duration})"),
-                Style::new().add_modifier(Modifier::BOLD),
-            ),
-            focus,
-            interruptions_span,
-        ])];
-
-        let parts = [
-            session.project.as_deref().unwrap_or(""),
-            session.task.as_deref().unwrap_or(""),
-            &session.activity,
-        ]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" · ");
-        if !parts.is_empty() {
-            // Bright: default style.
-            lines.push(Line::from(Span::raw(parts)));
+        let mut first = vec![
+            Span::styled(format!("{start} – "), theme::VALUE),
+            end,
+            Span::styled(format!(" ({duration}) "), theme::TIME),
+        ];
+        // Breaks and disruptions are never rated, so they get no badge.
+        if session::asks_focus(&session.activity) {
+            first.extend([theme::focus_badge(session.focus), Span::raw(" ")]);
         }
+        first.push(interruptions_span(interruptions, "I:"));
+        let mut lines = vec![Line::from(first)];
+
+        // Project in bold, task plain, activity in its color.
+        let mut parts = Vec::new();
+        for part in [
+            session
+                .project
+                .as_deref()
+                .map(|p| Span::styled(p.to_string(), theme::VALUE)),
+            session.task.as_deref().map(|t| Span::raw(t.to_string())),
+            Some(theme::activity(&session.activity)),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|span| !span.content.is_empty())
+        {
+            if !parts.is_empty() {
+                parts.push(Span::styled(" · ", theme::DIMMED));
+            }
+            parts.push(part);
+        }
+        lines.push(Line::from(parts));
 
         if let Some(notes) = &session.notes {
             for line in notes.lines() {
@@ -2045,9 +2063,10 @@ fn text_width(inner_width: u16) -> u16 {
     }
 }
 
-/// One note as dimmed `  • ` bullet rows, word-wrapped to `width` with
-/// continuation rows indented under the text.
-fn bullet_lines(note: &str, width: u16) -> Vec<Line<'static>> {
+/// One note as `  • ` bullet rows, word-wrapped to `width` with
+/// continuation rows indented under the text: dimmed, or for the session's
+/// own (`current`) notes an accent bullet and plain text.
+fn bullet_lines(note: &str, width: u16, current: bool) -> Vec<Line<'static>> {
     const BULLET: &str = "  • ";
     let indent = BULLET.chars().count();
     let mut rows = wrap_text(note, (width as usize).saturating_sub(indent));
@@ -2062,7 +2081,12 @@ fn bullet_lines(note: &str, width: u16) -> Vec<Line<'static>> {
             } else {
                 " ".repeat(indent)
             };
-            Line::from(Span::styled(format!("{prefix}{row}"), theme::DIMMED))
+            let (bullet, text) = if current {
+                (Style::new().fg(theme::ACCENT), Style::new())
+            } else {
+                (theme::DIMMED, theme::DIMMED)
+            };
+            Line::from(vec![Span::styled(prefix, bullet), Span::styled(row, text)])
         })
         .collect()
 }
@@ -2299,46 +2323,77 @@ impl WrappedInput {
 
 /// `label` beside the first row (as `theme::kv` draws it), the other rows
 /// indented to line up under the first row's value.
-fn hanging_lines(label: &str, rows: Vec<String>) -> Vec<Line<'static>> {
+fn hanging_lines(label: &str, rows: Vec<Vec<Span<'static>>>) -> Vec<Line<'static>> {
     let indent = " ".repeat(label.chars().count() + 2);
     rows.into_iter()
         .enumerate()
         .map(|(i, row)| match i {
             0 => theme::kv(label, row),
-            _ => Line::from(format!("{indent}{row}")),
+            _ => Line::from([vec![Span::raw(indent.clone())], row].concat()),
         })
         .collect()
 }
 
-/// Packs `items` into rows joined by " · ", for display beside `label`
-/// within `width` columns. An item only wraps (mid-item, via `wrap_text`)
-/// when it is wider than a whole row.
-fn wrap_items(items: &[String], width: u16, label: &str) -> Vec<String> {
+/// A styled summary item: its spans.
+type Item = Vec<Span<'static>>;
+
+/// Packs `items` into rows joined by a dimmed " · ", for display beside
+/// `label` within `width` columns. An item only wraps (mid-item, via
+/// `wrap_text`, losing its styling) when it is wider than a whole row.
+fn wrap_items(items: Vec<Item>, width: u16, label: &str) -> Vec<Item> {
     let width = (width as usize)
         .saturating_sub(label.chars().count() + 2)
         .max(1);
+    let row_len = |row: &Item| row.iter().map(Span::width).sum::<usize>();
     let mut rows = Vec::new();
-    let mut row = String::new();
+    let mut row: Item = Vec::new();
     for item in items {
-        let len = item.chars().count();
-        if !row.is_empty() && row.chars().count() + 3 + len <= width {
-            row.push_str(" · ");
-            row.push_str(item);
+        let len = row_len(&item);
+        if !row.is_empty() && row_len(&row) + 3 + len <= width {
+            row.push(Span::styled(" · ", theme::DIMMED));
+            row.extend(item);
             continue;
         }
         if !row.is_empty() {
             rows.push(std::mem::take(&mut row));
         }
-        let mut pieces = wrap_text(item, width);
+        if len <= width {
+            row = item;
+            continue;
+        }
+        let text: String = item.iter().map(|span| span.content.as_ref()).collect();
+        let mut pieces = wrap_text(&text, width);
         if pieces.len() > 1 && pieces.last().is_some_and(String::is_empty) {
             pieces.pop(); // the cursor row wrap_text adds after a full row
         }
-        row = pieces.pop().unwrap_or_default();
-        rows.extend(pieces);
+        row = vec![Span::raw(pieces.pop().unwrap_or_default())];
+        rows.extend(pieces.into_iter().map(|piece| vec![Span::raw(piece)]));
     }
     rows.push(row);
     rows
 }
+
+/// A value, or a dimmed italic "(none)" when it is missing.
+fn value_or_none(value: &Option<String>, style: Style) -> Span<'static> {
+    match value {
+        Some(value) => Span::styled(value.clone(), style),
+        None => Span::styled("(none)", theme::NONE),
+    }
+}
+
+/// An interruption count after `prefix`: bold red when there were any,
+/// dimmed otherwise.
+fn interruptions_span(count: i32, prefix: &str) -> Span<'static> {
+    let style = if count > 0 {
+        theme::VALUE.fg(theme::BAD)
+    } else {
+        theme::DIMMED
+    };
+    Span::styled(format!("{prefix}{count}"), style)
+}
+
+/// The "Previous notes:" / "Session notes:" headings.
+const NOTES_HEADING: Style = theme::DIMMED.add_modifier(Modifier::BOLD);
 
 /// The help screen: every key, in groups with an accent heading and a rule
 /// under it. Two columns (sessions; sections and mouse) keep it short
@@ -3078,15 +3133,40 @@ mod tests {
         let buf = render(&t.app);
         // Below the 10-row active section (the cat, a gap and its caption); inner text starts at column 1.
         assert!(line(&buf, 11).starts_with("╭ ▾ TODAY · 1 session "));
-        assert!(line_from(&buf, 12, 1).starts_with("10:00 – 11:30 (1h 30m) F- I:0 "));
+        assert!(line_from(&buf, 12, 1).starts_with("10:00 – 11:30 (1h 30m)  F-  I:0 "));
         assert!(buf[(1, 12)].modifier.contains(Modifier::BOLD)); // time range
         let dur_col = col_of(&buf, 12, "1h 30m");
-        assert!(buf[(dur_col, 12)].modifier.contains(Modifier::BOLD)); // duration
+        assert_eq!(buf[(dur_col, 12)].fg, Color::Cyan); // duration
+        assert!(buf[(dur_col, 12)].modifier.contains(Modifier::BOLD));
         assert!(line_from(&buf, 13, 1).starts_with("alpha · beta · Programming "));
+        // Project bold, separators dimmed, the activity in its color.
+        assert!(buf[(1, 13)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(col_of(&buf, 13, "·"), 13)].fg, Color::Gray);
+        assert_eq!(
+            buf[(col_of(&buf, 13, "Programming"), 13)].fg,
+            Color::LightBlue
+        );
     }
 
     #[test]
-    fn timeline_focus_badge_uses_semantic_colors() {
+    fn breaks_and_disruptions_get_no_focus_badge() {
+        let mut t = TestApp::new();
+        let start = chrono::Local
+            .with_ymd_and_hms(2026, 9, 24, 10, 0, 0)
+            .unwrap();
+        let end = chrono::Local
+            .with_ymd_and_hms(2026, 9, 24, 10, 15, 0)
+            .unwrap();
+        let mut pause = finished_session(start, end, None);
+        pause.activity = BREAK.into();
+        t.app.today_sessions.push(pause);
+        let buf = render(&t.app);
+        assert!(line_from(&buf, 12, 1).starts_with("10:00 – 10:15 (15m) I:0"));
+        assert_eq!(buf[(col_of(&buf, 13, "Break"), 13)].fg, Color::LightGreen);
+    }
+
+    #[test]
+    fn timeline_focus_badges_use_semantic_colors() {
         let mut t = TestApp::new();
         for focus in [Some(1), Some(2), Some(3), None] {
             let start = chrono::Local
@@ -3105,17 +3185,24 @@ mod tests {
         t.app.layout.active_height = Some(3);
         let buf = render(&t.app);
         // Items stack three rows apart (range, parts, spacing), from row 5.
+        // Rated: black on the outcome color, padded a cell each side.
         let expectations = [
             ("F1", Color::Red),
             ("F2", Color::Yellow),
             ("F3", Color::Green),
-            ("F-", Color::Gray),
         ];
         for (i, (badge, color)) in expectations.iter().enumerate() {
             let y = 5 + 3 * i as u16;
             let col = col_of(&buf, y, badge);
-            assert_eq!(buf[(col, y)].fg, *color);
+            for x in col - 1..col + 3 {
+                assert_eq!(buf[(x, y)].bg, *color, "{badge}");
+            }
+            assert_eq!(buf[(col, y)].fg, Color::Black);
         }
+        // Unrated: just dimmed.
+        let col = col_of(&buf, 14, "F-");
+        assert_eq!(buf[(col, 14)].fg, Color::Gray);
+        assert_eq!(buf[(col, 14)].bg, Color::Reset);
     }
 
     // --- forms ------------------------------------------------------------
@@ -3300,7 +3387,8 @@ mod tests {
         t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 0));
         t.app.layout.active_height = Some(5);
         let buf = render(&t.app);
-        assert!((1..79).all(|x| (2..5).all(|y| buf[(x, y)].fg != Color::Cyan)));
+        // (The timer on the left is cyan too; the cat would be on the right.)
+        assert!((54..79).all(|x| (2..5).all(|y| buf[(x, y)].fg != Color::Cyan)));
 
         // Too narrow to keep 24 columns of text beside it.
         let mut t = TestApp::new();
@@ -3310,7 +3398,8 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| t.app.draw(frame)).unwrap();
         let buf = terminal.backend().buffer();
-        assert!((1..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Cyan)));
+        // Where it would be: columns 14–37, right of the timer.
+        assert!((14..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Cyan)));
     }
 
     /// The caption rows under the cat (rows 8–9, after a gap row; the cat's

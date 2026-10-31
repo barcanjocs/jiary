@@ -75,9 +75,14 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 - **`session.rs`** — `Session`: a plain data struct mirroring one db row, with
   timestamps already parsed to `DateTime<Utc>`. Nothing else.
 - **`theme.rs`** — the 16-color palette (`ACCENT`, `MUTED`, `GOOD`, `OK`,
-  `BAD`) and shared styles (`TITLE`, `DIMMED`, `ERROR`, `kv()`,
+  `BAD`), a color per kind of activity (`activity_color`: work, meeting,
+  break, disruption) and shared styles (`TITLE`, `DIMMED`, `VALUE`, `TIME`,
+  `NONE`, `ERROR`, `kv()`, `activity()`, `focus_badge()`,
   `picker_symbol()`). All widgets take their styles from here so the look is
   tweaked in one place. No truecolor, so the app looks decent on any terminal.
+  The rule on the main screen: labels and words dimmed or plain, values
+  bold, times in bold accent, activities in their color, missing values
+  dimmed italic.
 - **`app.rs`** — everything else: `App` state, the `Screen` enum and forms,
   per-screen key handlers, draw methods, session lifecycle helpers,
   `fuzzy_filter`, layout helpers, and the test harness. Unit tests at the
@@ -419,7 +424,7 @@ Main-screen flows built from these:
 status line (1). The rows are unconditional — no conditional layout — so the
 UI never jumps when an error appears or disappears.
 
-- **Header** — `JIARY` (bold accent) · local date · total time today (bold) ·
+- **Header** — `JIARY` (bold accent) · local date · total time today (`TIME`) ·
   "today". The total is computed from in-memory sessions only: completed
   durations plus the active session's elapsed time.
 - **Status line** — the red `✗ <error>` when `error` is set, otherwise the
@@ -431,10 +436,12 @@ UI never jumps when an error appears or disappears.
 Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
 
 - **Active** (` ACTIVE `) — two columns. Left: the session info, pinned
-  (`active_lines`: bold timer, dimmed label/value rows via `theme::kv`,
-  interruptions red when > 0; a dimmed hint when there is no session), and
-  directly below it the notes (`note_lines`: cached previous notes, then
-  the session's own, as bullets word-wrapped to the text column by
+  (`active_lines`: bold accent timer, dimmed labels via `theme::kv` with
+  the project bold, the task plain, the activity in its color, "(none)"
+  dimmed italic, interruptions bold red when > 0; a dimmed hint when there
+  is no session), and directly below it the notes (`note_lines`: under bold
+  dimmed headings, cached previous notes dimmed, then the session's own
+  with accent bullets and plain text, as bullets word-wrapped to the text column by
   `bullet_lines` with continuation rows indented under the text; scrolling
   and the section height count wrapped rows), scrolled by `notes_scroll` in
   the rest of
@@ -450,16 +457,21 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
   would get under 24 columns.
 - **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
   (completed and the running one), newest first, separated by blank rows:
-  bold time range + duration, a focus badge (`F1` red / `F2` yellow / `F3`
-  green / `F-` dimmed), an interruption count (`I:N`, red when > 0), a bright
-  `project · task · activity` line, and dimmed note bullets. Drawn as one
+  a bold time range ("now" in accent while running), the duration in bold
+  accent, a focus badge (`theme::focus_badge`: ` F1 `–` F3 ` black on red /
+  yellow / green, ` F- ` dimmed; none for breaks and disruptions, which are
+  never rated), an interruption count (`I:N`, bold red when > 0), a
+  `project · task · activity` line (project bold, activity in its color,
+  dimmed separators), and dimmed note bullets. Drawn as one
   `Paragraph` scrolled by `today_scroll`, with a scrollbar on the right
   border when the items don't fit (`draw_scrollbar`, shared with the
   notes).
 - **Summary** (` ▾ SUMMARY `) — `summary_lines`: `Activity` / `Project` /
-  `Focus` / `Day` rows from `summarize`, items joined by ` · ` and packed by
-  `wrap_items` (an item only splits when wider than a whole row), continuing
-  under the value via `hanging_lines`.
+  `Focus` / `Day` rows from `summarize`. Items are styled spans (activity
+  names in their colors, times bold, the focus average in its outcome
+  color, nothing to report dimmed), joined by a dimmed ` · ` and packed by
+  `wrap_items` (an item only splits when wider than a whole row, losing its
+  styling), continuing under the value via `hanging_lines`.
 
 Sizing: Active and Summary default to their content height
 (`content_heights`), Today fills the rest; a fixed height replaces the

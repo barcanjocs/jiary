@@ -121,7 +121,7 @@ Or ignore it and carry on: starting the next thing is fine, and the session simp
 
 Ended by mistake? `u` undoes the last start or end: the session you ended is running again (its rating cleared), and any session that replaced it is removed.
 
-The rating is shown in the daily history as `F1`–`F3`, or `F-` if not rated.
+The rating is shown in the daily history as a colored badge, `F1` (red) to `F3` (green), or `F-` if not rated.
 
 ### Fixing the times
 
