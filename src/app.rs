@@ -1530,7 +1530,7 @@ impl App {
     }
 
     /// Picks another sentence for the caption: a different one when the
-    /// list has more than one (a few tries; seeds come from the clock).
+    /// list has more than one (a few random tries).
     fn resample_caption(&mut self) {
         let before = self.caption();
         for _ in 0..8 {
@@ -2183,12 +2183,15 @@ fn caption_lines(caption: &str, mood: Mood, width: u16) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// A seed for picking captions: the clock's nanoseconds, plenty random for
-/// choosing a sentence.
+/// A random seed for picking captions, from std's randomly keyed hasher
+/// (each `RandomState` gets new keys). Not the clock: on macOS it only
+/// ticks in microseconds, so its nanoseconds are always a multiple of 1000
+/// and would pick the same sentence from a list of 4 (or 8) all second.
 fn fresh_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos() as u64 ^ d.as_secs())
+    use std::hash::{BuildHasher, Hasher};
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
 }
 
 /// The global chrome: header row, content area, status row. Shared by `draw`
@@ -3428,6 +3431,16 @@ mod tests {
                 row.trim().to_string()
             })
             .collect()
+    }
+
+    #[test]
+    fn fresh_seeds_pick_every_sentence_of_a_short_list() {
+        // The clock-based seed this replaces landed on one sentence of 4
+        // for a whole second.
+        let picks = (0..64)
+            .map(|_| fresh_seed() % 4)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(picks.len(), 4);
     }
 
     #[test]
