@@ -119,7 +119,7 @@ impl Db {
             // external edits), deterministically pick the most recent one.
             &format!(
                 "SELECT {SESSION_COLUMNS} FROM sessions WHERE ended_at IS NULL
-                 ORDER BY started_at DESC LIMIT 1"
+                 ORDER BY started_at DESC, id DESC LIMIT 1"
             ),
             [],
             read_session_row,
@@ -150,7 +150,7 @@ impl Db {
             .prepare(&format!(
                 "SELECT {SESSION_COLUMNS} FROM sessions
                  WHERE date(started_at, 'localtime') = ?1
-                 ORDER BY started_at DESC"
+                 ORDER BY started_at DESC, id DESC"
             ))
             .map_err(DbError::Sqlite)?;
         let rows = stmt
@@ -169,7 +169,7 @@ impl Db {
                 "SELECT notes FROM sessions
          WHERE project = ?1 AND task = ?2 AND ended_at IS NOT NULL
            AND notes IS NOT NULL
-         ORDER BY started_at DESC LIMIT 5",
+         ORDER BY started_at DESC, id DESC LIMIT 5",
             )
             .map_err(DbError::Sqlite)?;
 
@@ -242,7 +242,7 @@ impl Db {
         let result = self.conn.query_row(
             "SELECT activity, project, task FROM sessions
          WHERE activity != 'Disruption' AND ended_at IS NOT NULL
-         ORDER BY started_at DESC LIMIT 1",
+         ORDER BY started_at DESC, id DESC LIMIT 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         );
@@ -432,6 +432,26 @@ mod tests {
                 .contains("another session is already active"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn sessions_started_in_the_same_second_sort_newest_first() {
+        // Timestamps have one-second resolution; the id breaks ties so
+        // "latest" means the last one inserted.
+        let tmp = TmpDb::new();
+        for activity in ["Reading", "Writing"] {
+            let session = tmp.db.create_session(activity, None, None).unwrap();
+            tmp.db.complete_session(session.id, None).unwrap();
+        }
+        tmp.db
+            .conn
+            .execute(
+                "UPDATE sessions SET started_at = '2026-01-01T10:00:00+00:00'",
+                [],
+            )
+            .unwrap();
+        let (activity, _, _) = tmp.db.latest_non_disruption().unwrap().unwrap();
+        assert_eq!(activity, "Writing");
     }
 
     #[test]
