@@ -21,11 +21,11 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State (2026-10-31): **v1.0.2 tagged**
-  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.2); its release
-  run was still building when the session ended, so check that it
-  published and that `install.sh` gets 1.0.2 (`jiary --version`). Tree
-  green, 180 tests, everything pushed. In place: sessions with one-key
+- State (2026-10-31): **v1.0.2 released**
+  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.2): all four
+  builds and the publish passed, 8 assets, and `install.sh` from the live
+  release installs `jiary 1.0.2` (checked on Apple silicon). Tree green,
+  180 tests, everything pushed. In place: sessions with one-key
   `e`, a 5 s rating bar and `u` undo; recent picks; `[`/`]` to move the
   start; away/idle detection; detours (`d`/`b`/`m`, `r`); the main screen
   with activity and project colors, the cat and the day's graphs; the `/`
