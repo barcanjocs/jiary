@@ -309,6 +309,22 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
     }
 
+    /// Every project, in the order it was first used: what gives each its
+    /// color, so colors stay put as new projects come along.
+    pub fn projects_by_first_use(&self) -> Result<Vec<String>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT project FROM sessions WHERE project IS NOT NULL AND project != ''
+                 GROUP BY project ORDER BY MIN(id)",
+            )
+            .map_err(DbError::Sqlite)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
     pub fn distinct_projects(&self) -> Result<Vec<String>, DbError> {
         let mut stmt = self.conn.prepare(
         "SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL AND project != '' ORDER BY project",

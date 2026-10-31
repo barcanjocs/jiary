@@ -1,7 +1,9 @@
 //! Centralized palette and style helpers for the UI.
 //!
-//! Only the 16 named colors are used (no truecolor), so the app looks
-//! decent on any terminal. All widgets should take their styles from here
+//! The 16 named colors are used for everything but projects (no
+//! truecolor), so the app looks decent on any terminal. Projects, an open
+//! set, take their colors from the 256-color palette, which any modern
+//! terminal supports. All widgets should take their styles from here
 //! instead of hardcoding them, so the look can be tweaked in one place.
 
 use ratatui::style::{Color, Modifier, Style};
@@ -105,6 +107,29 @@ pub const VALUE: Style = Style::new().add_modifier(Modifier::BOLD);
 pub const NONE: Style = Style::new().fg(MUTED).add_modifier(Modifier::ITALIC);
 /// Times and durations worth spotting: bold accent.
 pub const TIME: Style = Style::new().fg(ACCENT).add_modifier(Modifier::BOLD);
+
+/// Project colors, from the 256-color palette: hand-picked hues that stay
+/// apart from each other and from the activity, focus and accent colors,
+/// readable on dark and light backgrounds. Projects take them in the order
+/// they were first used (see `project_color`).
+pub const PROJECT_PALETTE: [Color; 8] = [
+    Color::Indexed(208), // orange
+    Color::Indexed(141), // lavender
+    Color::Indexed(211), // pink
+    Color::Indexed(179), // gold
+    Color::Indexed(67),  // steel blue
+    Color::Indexed(108), // sage
+    Color::Indexed(139), // mauve
+    Color::Indexed(173), // copper
+];
+/// Time without a project.
+pub const NO_PROJECT: Color = MUTED;
+
+/// The color of the project that was `rank`-th to be used (0 first);
+/// past the palette's end, colors repeat.
+pub fn project_color(rank: usize) -> Color {
+    PROJECT_PALETTE[rank % PROJECT_PALETTE.len()]
+}
 
 /// Bold accent — panel titles, active tab, the running timer.
 pub const TITLE: Style = Style::new().fg(ACCENT).add_modifier(Modifier::BOLD);

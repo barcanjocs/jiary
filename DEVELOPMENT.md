@@ -166,7 +166,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   time-based frame schedule. Pure; unit tests at the bottom.
 - `src/summary.rs` — `summarize`: the day summary over in-memory sessions.
   Pure; unit tests at the bottom.
-- `src/theme.rs` — palette (16 named colors) and shared style helpers; all
+- `src/theme.rs` — palette (16 named colors, plus 256-color project
+  colors) and shared style helpers; all
   widgets take their styles from here so the look is tweaked in one place.
 - `src/app.rs` — all UI: `App` state, `Screen` enum, per-screen key handlers
   (`handle_main`, `handle_start_session` + `start_*_key`,

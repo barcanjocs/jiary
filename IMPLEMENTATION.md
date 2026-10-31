@@ -78,13 +78,23 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   timestamps already parsed to `DateTime<Utc>`. Nothing else.
 - **`theme.rs`** — the 16-color palette (`ACCENT`, `MUTED`, `GOOD`, `OK`,
   `BAD`), a color per kind of activity (`activity_color`: work, meeting,
-  break, disruption) and shared styles (`TITLE`, `DIMMED`, `VALUE`, `TIME`,
-  `NONE`, `ERROR`, `kv()`, `activity()`, `focus_badge()`,
-  `picker_symbol()`). All widgets take their styles from here so the look is
-  tweaked in one place. No truecolor, so the app looks decent on any terminal.
+  break, disruption), the project palette (`PROJECT_PALETTE`: 8
+  hand-picked 256-color hues, apart from each other and from the activity,
+  focus and accent colors; `NO_PROJECT` gray) and shared styles (`TITLE`,
+  `DIMMED`, `VALUE`, `TIME`, `NONE`, `ERROR`, `kv()`, `activity()`,
+  `focus_badge()`, `picker_symbol()`). All widgets take their styles from
+  here so the look is tweaked in one place. Everything but projects uses
+  the 16 named colors (no truecolor), so it looks decent on any terminal;
+  projects, an open set, need more hues than that leaves, and any modern
+  terminal has the 256-color palette.
   The rule on the main screen: labels and words dimmed or plain, values
-  bold, times in bold accent, activities in their color, missing values
-  dimmed italic.
+  bold, times in bold accent, activities and projects in their colors,
+  missing values dimmed italic.
+
+  Project colors go by the order projects were first used
+  (`db.projects_by_first_use`, loaded into `App::project_order` with the
+  suggestions; `App::project_color`), so a project keeps its color from day
+  to day and none share one until there are more than 8.
 - **`app.rs`** — everything else: `App` state, the `Screen` enum and forms,
   per-screen key handlers, draw methods, session lifecycle helpers,
   `fuzzy_filter`, layout helpers, and the test harness. Unit tests at the
@@ -478,7 +488,8 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
   middle, over `DaySummary::blocks`) and its hours (`hour_labels`, local
   time, dropped where they would collide; the span then leaves the `Day`
   text, which would repeat it); under `Activity` the share bar
-  (`share_row`: halves split by cumulative time, longest first). Both go
+  (`share_row`: halves split by cumulative time, longest first), and under
+  `Project` the same for projects, in their colors. Both go
   through `half_cells`, which packs two colors per cell with `▌` (left as
   foreground, right as background), like the cat's `▀` does vertically.
   With the graphs, a blank row also separates the four groups (counted in

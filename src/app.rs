@@ -47,6 +47,9 @@ pub struct App {
     /// fresh database.
     activities: Vec<String>,
     projects: Vec<String>,
+    /// Projects in the order they were first used, which picks their
+    /// colors (`project_color`).
+    project_order: Vec<String>,
     tasks: Vec<String>,
     screen: Screen,
     /// "Previous notes" for the active session's project/task. Cached because
@@ -231,6 +234,7 @@ impl App {
             today_sessions: Vec::new(),
             activities: Vec::new(),
             projects: Vec::new(),
+            project_order: Vec::new(),
             tasks: Vec::new(),
             screen: Screen::Main,
             previous_notes: Vec::new(),
@@ -306,6 +310,10 @@ impl App {
         }
         match self.db.distinct_projects() {
             Ok(projects) => self.projects = projects,
+            Err(e) => self.set_error(e),
+        }
+        match self.db.projects_by_first_use() {
+            Ok(order) => self.project_order = order,
             Err(e) => self.set_error(e),
         }
         match self.db.distinct_tasks() {
@@ -1540,6 +1548,32 @@ impl App {
         }
     }
 
+    /// A project's color: by the order projects were first used, so each
+    /// keeps its color from day to day; gray for no project.
+    fn project_color(&self, project: Option<&str>) -> Color {
+        let Some(project) = project else {
+            return theme::NO_PROJECT;
+        };
+        let rank = self
+            .project_order
+            .iter()
+            .position(|p| p == project)
+            // Not loaded yet (a fresh project mid-refresh): after the rest.
+            .unwrap_or(self.project_order.len());
+        theme::project_color(rank)
+    }
+
+    /// A project's name, bold in its color, or a dimmed italic "(none)".
+    fn project_span(&self, project: Option<&str>) -> Span<'static> {
+        match project {
+            Some(name) => Span::styled(
+                name.to_string(),
+                theme::VALUE.fg(self.project_color(project)),
+            ),
+            None => Span::styled("(none)", theme::NONE),
+        }
+    }
+
     /// The caption under the cat for the current mood and session
     /// activity, if its list has any.
     fn caption(&self) -> Option<&'static str> {
@@ -1663,7 +1697,7 @@ impl App {
             .iter()
             .map(|(project, d)| {
                 vec![
-                    value_or_none(project, Style::new()),
+                    self.project_span(project.as_deref()),
                     Span::raw(" "),
                     time(*d),
                 ]
@@ -1739,6 +1773,7 @@ impl App {
         let graph_width = width.saturating_sub(SUMMARY_LABEL_WIDTH) as usize;
         let mut day_rows = Vec::new();
         let mut activity_rows = Vec::new();
+        let mut project_rows = Vec::new();
         if graphs {
             // From the hour the day began, so the hours line up from the
             // left edge; the minutes before the first start show blank.
@@ -1751,6 +1786,12 @@ impl App {
                 .map(|(activity, d)| (theme::activity_color(activity), *d))
                 .collect::<Vec<_>>();
             activity_rows.push(share_row(&activity_shares, graph_width));
+            let project_shares = summary
+                .per_project
+                .iter()
+                .map(|(project, d)| (self.project_color(project.as_deref()), *d))
+                .collect::<Vec<_>>();
+            project_rows.push(share_row(&project_shares, graph_width));
             // The hours under the timeline already show the span.
             day.remove(0);
         }
@@ -1759,7 +1800,7 @@ impl App {
         for (label, graph_rows, items) in [
             ("Day     ", day_rows, day),
             ("Activity", activity_rows, activities),
-            ("Project ", Vec::new(), projects),
+            ("Project ", project_rows, projects),
             ("Focus   ", Vec::new(), focus),
         ] {
             // With the graphs there is room to breathe: a blank row
@@ -1806,7 +1847,7 @@ impl App {
             ]),
             theme::kv(
                 "Project",
-                vec![value_or_none(&session.project, theme::VALUE)],
+                vec![self.project_span(session.project.as_deref())],
             ),
             theme::kv("Task", vec![value_or_none(&session.task, Style::new())]),
             theme::kv("Activity", vec![theme::activity(&session.activity)]),
@@ -1881,13 +1922,13 @@ impl App {
         first.push(interruptions_span(interruptions, "I:"));
         let mut lines = vec![Line::from(first)];
 
-        // Project in bold, task plain, activity in its color.
+        // Project and activity in their colors, task plain.
         let mut parts = Vec::new();
         for part in [
             session
                 .project
                 .as_deref()
-                .map(|p| Span::styled(p.to_string(), theme::VALUE)),
+                .map(|p| self.project_span(Some(p))),
             session.task.as_deref().map(|t| Span::raw(t.to_string())),
             Some(theme::activity(&session.activity)),
         ]
@@ -2469,9 +2510,9 @@ fn wrap_items(items: Vec<Item>, width: u16, label: &str) -> Vec<Item> {
 const SUMMARY_LABEL_WIDTH: u16 = 10;
 /// Narrower than this, the summary's graphs are left out.
 const MIN_GRAPH_WIDTH: usize = 10;
-/// Rows the graphs add to the summary: the timeline, its hours, the share
-/// bar, and a blank row between each of the four groups.
-const GRAPH_ROWS: u16 = 3 + 3;
+/// Rows the graphs add to the summary: the timeline, its hours, the two
+/// share bars, and a blank row between each of the four groups.
+const GRAPH_ROWS: u16 = 4 + 3;
 /// Rows today's sessions keep for the summary to show its graphs: about two
 /// sessions.
 const TODAY_ROOM_FOR_GRAPHS: u16 = 8;
@@ -2558,8 +2599,8 @@ fn start_of_hour(at: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
         .map_or(at, |t| t.with_timezone(&Utc))
 }
 
-/// Shares of the tracked time (each activity's, as its color and time) as
-/// one bar `width` cells wide, in the order given.
+/// Shares of the tracked time (an activity's or a project's, as its
+/// color and time) as one bar `width` cells wide, in the order given.
 /// Shares are rounded to half cells, so a sliver of a few minutes may not
 /// show.
 fn share_row(shares: &[(Color, chrono::Duration)], width: usize) -> Item {
@@ -3290,7 +3331,9 @@ mod tests {
         assert!(buf[(1, 2)].modifier.contains(Modifier::BOLD));
         assert!(line(&buf, 3).starts_with("│Project  alpha"));
         assert_eq!(buf[(1, 3)].fg, Color::Gray); // dimmed label
-        assert_eq!(buf[(10, 3)].fg, Color::Reset); // plain value
+        // The project in its color (the first project's: orange), bold.
+        assert_eq!(buf[(10, 3)].fg, Color::Indexed(208));
+        assert!(buf[(10, 3)].modifier.contains(Modifier::BOLD));
         assert!(line(&buf, 4).starts_with("│Task  beta"));
         assert!(line(&buf, 5).starts_with("│Activity  Programming"));
         assert!(line(&buf, 6).starts_with("│Interruptions  0"));
@@ -4027,9 +4070,13 @@ mod tests {
         assert!((first..=last).all(|x| buf[(x, y + 4)].fg == Color::LightBlue));
         assert!(line_from(buf, y + 5, first).starts_with("Programming 1h 0m"));
         assert_eq!(line_from(buf, y + 6, 1).trim_end_matches(['│', ' ']), "");
-        assert!(line_from(buf, y + 7, 1).starts_with("Project   alpha 1h 0m"));
-        assert_eq!(line_from(buf, y + 8, 1).trim_end_matches(['│', ' ']), "");
-        assert!(line_from(buf, y + 9, 1).starts_with("Focus     "));
+        // The project bar: all alpha, in its color.
+        assert!(line_from(buf, y + 7, 1).starts_with("Project   "));
+        assert!((first..=last).all(|x| buf[(x, y + 7)].fg == Color::Indexed(208)));
+        assert!(line_from(buf, y + 8, first).starts_with("alpha 1h 0m"));
+        assert_eq!(buf[(first, y + 8)].fg, Color::Indexed(208));
+        assert_eq!(line_from(buf, y + 9, 1).trim_end_matches(['│', ' ']), "");
+        assert!(line_from(buf, y + 10, 1).starts_with("Focus     "));
     }
 
     #[test]
@@ -4086,6 +4133,30 @@ mod tests {
                 (" ", None, None),
             ]
         );
+    }
+
+    #[test]
+    fn projects_keep_colors_in_the_order_they_were_first_used() {
+        let mut t = TestApp::new();
+        for project in ["zeta", "alpha", "zeta", "mid"] {
+            t.app.close_active_session();
+            t.app
+                .start_session("Programming", Some(project.into()), None);
+        }
+        t.app.refresh_suggestions();
+        let color = |t: &TestApp, p| t.app.project_color(Some(p));
+        // Not alphabetical: zeta came first.
+        assert_eq!(color(&t, "zeta"), theme::PROJECT_PALETTE[0]);
+        assert_eq!(color(&t, "alpha"), theme::PROJECT_PALETTE[1]);
+        assert_eq!(color(&t, "mid"), theme::PROJECT_PALETTE[2]);
+        assert_eq!(t.app.project_color(None), theme::NO_PROJECT);
+        // All distinct, and none an activity's.
+        let palette = theme::PROJECT_PALETTE;
+        let distinct = palette.iter().collect::<std::collections::HashSet<_>>();
+        assert_eq!(distinct.len(), palette.len());
+        for activity in ["Programming", MEETING, BREAK, DISRUPTION] {
+            assert!(!palette.contains(&theme::activity_color(activity)));
+        }
     }
 
     #[test]
