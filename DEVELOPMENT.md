@@ -33,7 +33,9 @@ truth for state — this file plus `git log` is all that is needed to resume.
   GitHub-style focus grid; length-weighted focus averages; `--version` /
   `--help`; single-instance lock (`lock.rs`, backlog E); release workflow
   (`.github/workflows/release.yml`) and `install.sh` (curl one-liner in the
-  README).
+  README). Since then: `src/app.rs` split into `src/app/` (2026-10-31;
+  one file per screen plus shared pieces, code moved unchanged, see the
+  file map).
 - Next, in order:
   1. **README revamp** (docs). It has grown feature by feature: restructure
      around install → first session → daily loop (s/e/rating/n/i/detours)
@@ -43,12 +45,7 @@ truth for state — this file plus `git log` is all that is needed to resume.
      `./check`, releasing) moves to its own section or to this file.
   2. **Docs drift.** IMPLEMENTATION.md has grown long paragraphs; tighten
      it to match the code (module map, screens, lifecycle, rendering).
-  3. **Split `src/app.rs`** (~6,000 lines): into an `app/` module with one
-     file per screen (main, start/note forms, palette, period views) plus
-     the shared summary pieces and graph helpers (`half_cells`,
-     `timeline_row`, `share_row`, `focus_grid`, ...). Mostly moving code;
-     the render tests make it safe. Keep `./check` green per step.
-  4. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
+  3. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
      with its limits) and A (browse past days, likely `/day` with ←→ like
      the period views).
 - Releasing: bump `version` in Cargo.toml, commit, then tag and push the
@@ -121,8 +118,8 @@ from its scope note alone, without re-deriving context.
       hotkey registration — Wayland forbids it and it breaks the
       no-system-deps property. Touches: E's lockfile format, one X11
       activation helper, README.
-- [ ] **J. Day context: sleep and mood** (medium; best after the `app.rs`
-      split, since it touches the db, the start flow and the period views).
+- [ ] **J. Day context: sleep and mood** (medium; touches the db, the start
+      flow and the period views).
       Two once-a-day ratings to set the day's work against. Discussed
       2026-10-31; the limits are the point, so keep them:
       - Exactly two, fixed: sleep and mood, on focus's 1–3 scale. No custom
@@ -144,6 +141,8 @@ from its scope note alone, without re-deriving context.
         and year views. No correlation coefficients, trend lines or
         predictions.
 - [ ] **Nits** (tiny, do whenever):
+  - `app/tests.rs` (~2,700 lines) is still one file; it could follow the
+    code into one test file per screen, with the harness in `tests/mod.rs`.
   - `fuzzy_filter` constructs a `SkimMatcherV2` per call (per frame); make it
     static.
 
@@ -169,7 +168,7 @@ from its scope note alone, without re-deriving context.
   `form` before any `&mut self` call (call arguments keep their borrow alive
   across the call).
 - **Tests:** temp dirs need a unique prefix per module (`jiary-test-` in
-  db.rs, `jiary-app-test-` in app.rs) plus pid and an atomic counter, with
+  db.rs, `jiary-app-test-` in app/tests.rs) plus pid and an atomic counter, with
   Drop cleanup — parallel tests share one process and would otherwise delete
   each other's live databases.
 - **Commits:** small, lowercase imperative, one concern each; keep the
@@ -208,10 +207,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/theme.rs` — palette (16 named colors, plus 256-color project
   colors) and shared style helpers; all
   widgets take their styles from here so the look is tweaked in one place.
-- `src/app.rs` — all UI: `App` state, `Screen` enum, per-screen key handlers
-  (`handle_main`, `handle_start_session` + `start_*_key`,
-  `handle_end_session` + `end_*_key`, `handle_add_note`), draw methods
-  (`draw_*`), session lifecycle helpers (`start_session`, `complete_active`,
-  `close_active_session`, `append_active_note`), the `Autocomplete` field
-  used by the project/task steps, and `fuzzy_filter`. Unit tests at the
-  bottom.
+- `src/app/` — all UI, one `impl App` block per file: `mod.rs` (`App`
+  state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
+  file per screen (`main_screen`, `forms`, `palette`, `period_view`,
+  `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
+  `items`, `graphs`, `text`), and `tests.rs`. See IMPLEMENTATION.md.

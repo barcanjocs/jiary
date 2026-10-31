@@ -14,7 +14,7 @@ transient UI state that is rebuilt from the db on startup.
 
 ```
 main.rs        event loop: size → draw → place cursor → poll(100 ms) → key/mouse
-  └─ App       all UI state + a Db handle          (app.rs)
+  └─ App       all UI state + a Db handle          (app/)
        ├─ Db   rusqlite connection; all SQL lives here (db.rs)
        ├─ Session  one db row with parsed timestamps (session.rs)
        ├─ LayoutPrefs  main-screen section geometry + layout file (layout.rs)
@@ -107,10 +107,20 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   times change. On the main screen the view is today's projects
   (`App::project_color`); the multi-day views will do the same over their
   period, with a wider pool.
-- **`app.rs`** — everything else: `App` state, the `Screen` enum and forms,
-  per-screen key handlers, draw methods, session lifecycle helpers,
-  `fuzzy_filter`, layout helpers, and the test harness. Unit tests at the
-  bottom.
+- **`app/`** — everything else, one `impl App` block per file:
+  - `mod.rs` — `App` state, the `Screen` enum, the session lifecycle
+    (`start_session`, `close_active_session`, `rate`, `undo`, notes), and
+    the `handle_key` / `draw` dispatch on `Screen`.
+  - Screens: `main_screen.rs` (`handle_main`, the three sections' lines),
+    `forms.rs` (start and note forms, `Autocomplete`, `fuzzy_filter`),
+    `palette.rs` (`COMMANDS`, `/`), `period_view.rs` (week/month/year),
+    `away.rs` (`observe_idle` and the absence question), `help.rs`.
+  - Shared: `sections.rs` (main-screen geometry, scrolling, mouse),
+    `chrome.rs` (header, status line, cursor), `cat.rs` (mood, reactions,
+    captions), `modal.rs` (modal geometry, `WrappedInput`, picker list),
+    `items.rs` (the summary's styled items and their wrapping),
+    `graphs.rs` (timeline, focus line, share bars, focus grids), `text.rs`.
+  - `tests.rs` — the test harness and every UI test.
 
 ## Data layer (`db.rs`)
 
@@ -184,7 +194,7 @@ reading.
 `create_dir_all` on open. `Db::open_at` is the test seam: tests open a db at a
 temp path and never touch the real data dir.
 
-## App state (`app.rs`)
+## App state (`app/mod.rs`)
 
 ```rust
 pub struct App {
@@ -757,12 +767,13 @@ per frame; see DEVELOPMENT.md nits.)
 
 ## Testing
 
-All tests are plain unit tests at the bottom of their module; there is no
+All tests are plain unit tests at the bottom of their module (the UI's in
+`app/tests.rs`); there is no
 integration-test directory and no shared fixture — each test opens its own
 throwaway db.
 
 **Temp dirs.** Parallel tests share one process, so each test module uses a
-unique prefix (`jiary-test-` in db.rs, `jiary-app-test-` in app.rs) plus the
+unique prefix (`jiary-test-` in db.rs, `jiary-app-test-` in app/tests.rs) plus the
 pid and an atomic counter, with `Drop` cleanup. A shared directory would let
 one test delete another's live database. In `TestApp`, the `app` field is
 declared before `dir` so the `Db` connection drops before the directory is
@@ -777,7 +788,7 @@ removed.
   collapsed/resized combination and small or tiny areas, resize clamping,
   layout file round-trip and junk tolerance; summary totals, ordering, the
   running session's in-memory copy, focus/disruption figures.
-- *app.rs state machine* — key handling against a `TestApp` (real db):
+- *app/ state machine* — key handling against a `TestApp` (real db):
   key-event filtering, autocomplete semantics, end/note form commit and
   cancel, detour (d/b/m) and resume edge cases, section focus/collapse/resize/scroll,
   mouse drag/click/wheel (`mouse`, `drag` helpers), layout persistence
@@ -788,7 +799,7 @@ removed.
   `today_sessions` (or `with_sessions(t, n)`) is the right level for tests of
   things `draw` reads from memory. `TestApp` sets the 80×24 render size so
   handlers see the same geometry as `render`.
-- *app.rs rendering* — a `TestBackend` at a fixed 80×24, drawn once via
+- *app/ rendering* — a `TestBackend` at a fixed 80×24, drawn once via
   `render(&app) -> Buffer`, asserted with char-based row extractors:
   `line(buf, y)` (row text, trailing padding trimmed), `line_from(buf, y, x)`
   (row from char column `x`), `col_of(buf, y, needle)` (char column of first
