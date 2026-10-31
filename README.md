@@ -56,7 +56,7 @@ The main screen has three stacked sections:
 
 A collapsed section shrinks to one line that still shows a short summary (e.g. `▸ TODAY · 6 sessions · 4h 12m`). Today's sessions take whatever space the other sections leave; when Today is collapsed, the summary does.
 
-With the mouse: drag the border under a section to resize it, click a section to focus it, click the title of Today or Summary to collapse or expand it, and use the wheel to scroll today's sessions. Because Jiary captures the mouse, select text with `Shift` held (in most terminals).
+With the mouse: drag the line between two sections to resize them (grab either of its two border rows), click a section to focus it, click the title text of Today or Summary (`▾ TODAY …`) to collapse or expand it, and use the wheel to scroll today's sessions. A drag never collapses anything, even when it starts on a title. Because Jiary captures the mouse, select text with `Shift` held (in most terminals).
 
 Section sizes and collapsed sections are remembered between runs, in `layout.conf` next to the database.
 

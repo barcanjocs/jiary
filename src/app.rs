@@ -64,8 +64,13 @@ pub struct App {
     /// main screen out from it, so they see exactly what was drawn.
     size: (u16, u16),
     /// While a border is dragged with the mouse: the section whose height
-    /// it sets (see `border_at`).
-    drag: Option<Section>,
+    /// it sets (see `border_at`) and which of the border's two rows was
+    /// grabbed (0: the upper section's bottom border, 1: the lower one's
+    /// top border), so the border follows the pointer without jumping.
+    drag: Option<(Section, u16)>,
+    /// A press on a collapsible section's title, pending until release: it
+    /// toggles only if the mouse didn't move (a click, not a drag).
+    title_press: Option<Section>,
 }
 
 enum Screen {
@@ -190,6 +195,7 @@ impl App {
             scroll: 0,
             size: (0, 0),
             drag: None,
+            title_press: None,
         };
 
         if let Some(path) = &app.layout_path {
@@ -846,10 +852,11 @@ impl App {
 
     // --- main screen: mouse -----------------------------------------------
 
-    /// Handles a mouse event; only the main screen uses the mouse. Dragging
-    /// a section border resizes, clicking focuses the section under the
-    /// pointer (and clicking a collapsible section's title row collapses or
-    /// expands it), and the wheel scrolls today's sessions.
+    /// Handles a mouse event; only the main screen uses the mouse. A press
+    /// focuses the section under the pointer. Dragging the line between two
+    /// sections resizes; clicking a collapsible section's title text (press
+    /// and release without moving) collapses or expands it. The wheel
+    /// scrolls today's sessions.
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         if !matches!(self.screen, Screen::Main) {
             return;
@@ -862,62 +869,104 @@ impl App {
             MouseEventKind::ScrollUp => self.scroll_today(-3),
             MouseEventKind::ScrollDown => self.scroll_today(3),
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(section) = self.border_at(&areas, row) {
-                    self.drag = Some(section);
-                    self.focus = section;
-                    return;
-                }
                 let position = ratatui::layout::Position::new(column, row);
-                let Some(section) = [Section::Active, Section::Today, Section::Summary]
+                if let Some(section) = [Section::Active, Section::Today, Section::Summary]
                     .into_iter()
                     .find(|&s| areas.get(s).contains(position))
-                else {
+                {
+                    self.focus = section;
+                }
+                // A title can sit on a border row, so a press may be both;
+                // the release (or a move) decides which it was.
+                self.drag = self.border_at(&areas, row);
+                self.title_press = [Section::Today, Section::Summary]
+                    .into_iter()
+                    .find(|&s| self.title_hit(s, areas.get(s), column, row));
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.title_press = None; // moved: not a click
+                let Some((section, grabbed_row)) = self.drag else {
                     return;
                 };
                 self.focus = section;
-                if section != Section::Active && row == areas.get(section).y {
-                    self.layout.toggle_collapsed(section);
-                    self.save_layout();
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
+                // Where the upper section's bottom border should now be.
+                let border = row.saturating_sub(grabbed_row) as i32;
                 let heights = self.content_heights(content.width);
-                match self.drag {
-                    Some(Section::Active) => {
-                        let height = row as i32 - areas.active.y as i32 + 1;
+                match section {
+                    Section::Active => {
+                        let height = border - areas.active.y as i32 + 1;
                         self.layout.set_active_height(height, content, heights);
                     }
-                    Some(Section::Summary) => {
-                        let height = content.bottom() as i32 - row as i32 - 1;
+                    _ => {
+                        let height = content.bottom() as i32 - border - 1;
                         self.layout.set_summary_height(height, content, heights);
                     }
-                    _ => {}
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) if self.drag.is_some() => {
-                self.drag = None;
-                self.save_layout();
+            MouseEventKind::Up(MouseButton::Left) => {
+                let toggled = self.title_press.take();
+                if let Some(section) = toggled {
+                    self.layout.toggle_collapsed(section);
+                }
+                if self.drag.take().is_some() || toggled.is_some() {
+                    self.save_layout();
+                }
             }
             _ => {}
         }
     }
 
-    /// The draggable border on `row`, as the section whose height it sets:
-    /// the active section's bottom border sets the active section's height,
-    /// and today's bottom border sets the summary's (only while both are
-    /// expanded; otherwise the summary just fills the space).
-    fn border_at(&self, areas: &Areas, row: u16) -> Option<Section> {
-        let bottom_border = |area: Rect| area.height > 0 && row + 1 == area.bottom();
-        if bottom_border(areas.active) {
-            Some(Section::Active)
-        } else if !self.layout.today_collapsed
-            && !self.layout.summary_collapsed
-            && bottom_border(areas.today)
-        {
-            Some(Section::Summary)
-        } else {
-            None
+    /// The draggable line between two sections on `row`, as (the section
+    /// whose height it sets, which of its rows: 0 or 1). The line is two
+    /// rows (the upper section's bottom border and the lower one's top
+    /// border) and either grabs it. The line under the active section sets
+    /// the active section's height; the one under today's sessions sets the
+    /// summary's, only while both are expanded (otherwise the summary just
+    /// fills the space).
+    fn border_at(&self, areas: &Areas, row: u16) -> Option<(Section, u16)> {
+        let line = |upper: Rect, lower: Rect, lower_expanded: bool| {
+            if upper.height > 0 && row + 1 == upper.bottom() {
+                Some(0)
+            } else if lower_expanded && lower.height > 0 && row == lower.y {
+                Some(1)
+            } else {
+                None
+            }
+        };
+        let today_expanded = !self.layout.today_collapsed;
+        if let Some(grabbed) = line(areas.active, areas.today, today_expanded) {
+            return Some((Section::Active, grabbed));
         }
+        if today_expanded && !self.layout.summary_collapsed {
+            return line(areas.today, areas.summary, true).map(|g| (Section::Summary, g));
+        }
+        None
+    }
+
+    /// The title of a section as drawn: in its top border when expanded, the
+    /// whole row when collapsed. Shared with `title_hit`.
+    fn section_title(&self, section: Section) -> String {
+        let sessions = plural(self.today_sessions.len(), "session");
+        match (section, self.layout.collapsed(section)) {
+            (Section::Active, _) => " ACTIVE ".to_string(),
+            (Section::Today, false) => format!(" ▾ TODAY · {sessions} "),
+            (Section::Today, true) => {
+                format!("▸ TODAY · {sessions} · {}", fmt_hms(self.total_today()))
+            }
+            (Section::Summary, false) => " ▾ SUMMARY ".to_string(),
+            (Section::Summary, true) => format!("▸ {}", self.summary_one_liner()),
+        }
+    }
+
+    /// Whether (`column`, `row`) is on `section`'s title text: right after
+    /// the border's corner when expanded, from the left edge when collapsed.
+    fn title_hit(&self, section: Section, area: Rect, column: u16, row: u16) -> bool {
+        if area.height == 0 || row != area.y {
+            return false;
+        }
+        let start = area.x + if self.layout.collapsed(section) { 0 } else { 1 };
+        let width = self.section_title(section).chars().count() as u16;
+        (start..start + width).contains(&column)
     }
 
     // --- main screen: geometry --------------------------------------------
@@ -992,32 +1041,31 @@ impl App {
     fn draw_main(&self, frame: &mut Frame, area: Rect) {
         let areas = self.resolve_layout(area);
 
-        let block = self.section_block(Section::Active, " ACTIVE ".to_string());
+        let block = self.section_block(Section::Active);
         let inner = block.inner(areas.active);
         frame.render_widget(block, areas.active);
         frame.render_widget(Paragraph::new(self.active_lines()), inner);
 
-        let sessions = plural(self.today_sessions.len(), "session");
         if self.layout.today_collapsed {
-            let text = format!("TODAY · {sessions} · {}", fmt_hms(self.total_today()));
-            self.draw_collapsed(frame, areas.today, Section::Today, text);
+            self.draw_collapsed(frame, areas.today, Section::Today);
         } else {
-            self.draw_today(frame, areas.today, &sessions);
+            self.draw_today(frame, areas.today);
         }
 
         if self.layout.summary_collapsed {
-            let text = self.summary_one_liner();
-            self.draw_collapsed(frame, areas.summary, Section::Summary, text);
+            self.draw_collapsed(frame, areas.summary, Section::Summary);
         } else {
-            let block = self.section_block(Section::Summary, " ▾ SUMMARY ".to_string());
+            let block = self.section_block(Section::Summary);
             let inner = block.inner(areas.summary);
             frame.render_widget(block, areas.summary);
             frame.render_widget(Paragraph::new(self.summary_lines(inner.width)), inner);
         }
     }
 
-    /// A section's rounded border: accent while focused, dimmed otherwise.
-    fn section_block(&self, section: Section, title: String) -> Block<'static> {
+    /// A section's rounded border with its title: accent while focused,
+    /// dimmed otherwise.
+    fn section_block(&self, section: Section) -> Block<'static> {
+        let title = self.section_title(section);
         let border = if self.focus == section {
             Style::new().fg(theme::ACCENT)
         } else {
@@ -1030,22 +1078,22 @@ impl App {
     }
 
     /// A collapsed section: one unbordered `▸` line, accent while focused.
-    fn draw_collapsed(&self, frame: &mut Frame, area: Rect, section: Section, text: String) {
+    fn draw_collapsed(&self, frame: &mut Frame, area: Rect, section: Section) {
         let style = if self.focus == section {
             theme::TITLE
         } else {
             theme::DIMMED.add_modifier(Modifier::BOLD)
         };
         frame.render_widget(
-            Paragraph::new(Span::styled(format!("▸ {text}"), style)),
+            Paragraph::new(Span::styled(self.section_title(section), style)),
             area,
         );
     }
 
     /// Today's sessions, scrolled to `scroll` (clamped to the content), with
     /// a scrollbar on the right border when they don't all fit.
-    fn draw_today(&self, frame: &mut Frame, area: Rect, sessions: &str) {
-        let block = self.section_block(Section::Today, format!(" ▾ TODAY · {sessions} "));
+    fn draw_today(&self, frame: &mut Frame, area: Rect) {
+        let block = self.section_block(Section::Today);
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -2772,21 +2820,75 @@ mod tests {
         assert_eq!(row_with(&render(&t.app), "╭ ▾ SUMMARY "), border - 3);
     }
 
+    fn click(t: &mut TestApp, column: u16, row: u16) {
+        mouse(t, MouseEventKind::Down(MouseButton::Left), column, row);
+        mouse(t, MouseEventKind::Up(MouseButton::Left), column, row);
+    }
+
     #[test]
-    fn clicking_focuses_and_title_rows_toggle_collapse() {
+    fn clicking_focuses_and_clicking_a_title_toggles_collapse() {
         let mut t = TestApp::new();
-        let click = MouseEventKind::Down(MouseButton::Left);
         let buf = render(&t.app);
         let today = row_with(&buf, "╭ ▾ TODAY ");
 
-        mouse(&mut t, click, 10, today + 1); // inside the body: focus only
+        click(&mut t, 10, today + 1); // inside the body: focus only
         assert_eq!(t.app.focus, Section::Today);
         assert!(!t.app.layout.today_collapsed);
 
-        mouse(&mut t, click, 10, today); // the title row
+        click(&mut t, 4, today); // on " ▾ TODAY · 0 sessions "
         assert!(t.app.layout.today_collapsed);
-        mouse(&mut t, click, 10, today); // now the collapsed line
+        click(&mut t, 4, today); // on the collapsed "▸ TODAY …" line
         assert!(!t.app.layout.today_collapsed);
+    }
+
+    #[test]
+    fn pressing_a_title_only_toggles_on_release() {
+        let mut t = TestApp::new();
+        let today = row_with(&render(&t.app), "╭ ▾ TODAY ");
+        mouse(&mut t, MouseEventKind::Down(MouseButton::Left), 4, today);
+        assert!(!t.app.layout.today_collapsed);
+        mouse(&mut t, MouseEventKind::Up(MouseButton::Left), 4, today);
+        assert!(t.app.layout.today_collapsed);
+    }
+
+    #[test]
+    fn clicking_a_border_away_from_the_title_never_collapses() {
+        let mut t = TestApp::new();
+        let buf = render(&t.app);
+        let today = row_with(&buf, "╭ ▾ TODAY ");
+        let summary = row_with(&buf, "╭ ▾ SUMMARY ");
+        click(&mut t, 60, today);
+        click(&mut t, 60, summary);
+        assert_eq!(t.app.layout, LayoutPrefs::default());
+    }
+
+    #[test]
+    fn either_row_of_the_line_between_sections_drags_it() {
+        // No session: the active section's bottom border is row 3, today's
+        // top border row 4. Grabbing row 4 moves the same line, keeping the
+        // grab offset (no jump on the first move).
+        let mut t = TestApp::new();
+        drag(&mut t, 4, 8);
+        assert_eq!(t.app.layout.active_height, Some(7));
+        assert!(!t.app.layout.today_collapsed);
+        assert_eq!(row_with(&render(&t.app), "╭ ▾ TODAY "), 8);
+
+        // Same for the summary's top border, even when grabbed on the title.
+        let mut t = TestApp::new();
+        let summary = row_with(&render(&t.app), "╭ ▾ SUMMARY ");
+        drag(&mut t, summary, summary - 4);
+        assert_eq!(row_with(&render(&t.app), "╭ ▾ SUMMARY "), summary - 4);
+        assert!(!t.app.layout.summary_collapsed);
+        let mut t = TestApp::new();
+        drag(&mut t, summary, summary - 2);
+        assert_eq!(t.app.layout.summary_height, Some(5));
+        let mut t = TestApp::new();
+        let left = MouseButton::Left;
+        mouse(&mut t, MouseEventKind::Down(left), 4, summary); // on "▾ SUMMARY"
+        mouse(&mut t, MouseEventKind::Drag(left), 4, summary - 2);
+        mouse(&mut t, MouseEventKind::Up(left), 4, summary - 2);
+        assert!(!t.app.layout.summary_collapsed);
+        assert_eq!(t.app.layout.summary_height, Some(5));
     }
 
     #[test]

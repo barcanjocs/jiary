@@ -378,12 +378,18 @@ terminal width: hints are added in priority order while they fit, and
 `handle_mouse` acts only on the main screen, using the same `main_areas`
 geometry as the last frame:
 
-- Left-press on a draggable border starts a drag (`border_at`): the active
-  section's bottom border sets its height; today's bottom border sets the
-  summary's (only while both are expanded). Drag events move it with the
-  same clamping as `+`/`-`; release saves the layout.
-- Left-press elsewhere focuses the section under the pointer; on the title
-  row of Today or Summary (or their collapsed line) it also toggles collapse.
+- The line between two sections is two rows (the upper section's bottom
+  border, the lower one's top border); a left-press on either starts a drag
+  (`border_at`), remembering which row was grabbed so the border follows the
+  pointer without jumping. The line under the active section sets its
+  height; the one under today's sessions sets the summary's (only while both
+  are expanded). Drag events apply the same clamping as `+`/`-`; release
+  saves the layout.
+- A left-press focuses the section under the pointer. On the title text of
+  Today or Summary (`title_hit`, using the same `section_title` the
+  renderer draws) it is recorded in `title_press`, and toggles collapse on
+  release only if no drag event came in between, so a drag that starts on a
+  title (which sits on a border row) never collapses anything.
 - The wheel scrolls today's sessions by 3 rows.
 
 Mouse capture means terminals no longer select text on a plain drag;
