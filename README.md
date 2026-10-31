@@ -44,9 +44,9 @@ On first run, a database is created at:
 
 The main screen has three stacked sections:
 
-- **Active** (top) — the running session: timer, project, task, activity, interruptions and notes, with a small blue pixel-art cat on the right (shown when the section has room for it).
+- **Active** (top) — the running session: timer, project, task, activity and interruptions, with a small blue pixel-art cat on the right (shown when the section has room for it), pinned at the top; below them, the notes (previous notes for the project/task, then this session's), which scroll as they grow.
 
-The cat follows what you're doing: it idles when nothing is running, types on a laptop during work (and dozes off over it after 25 minutes), sleeps on a break, chats with a friend in a meeting, and plays video games when disrupted. It also flinches when you count an interruption, writes your note down in a notebook when you add one, and reacts to your focus rating when you end a session.
+The cat follows what you're doing: it idles when nothing is running, types on a laptop during work (and dozes off over it after 25 minutes), sleeps on a break, chats with a friend in a meeting, and plays video games when disrupted. It also flinches when you count an interruption, writes your note down in a notebook when you add one, and reacts to your focus rating when you end a session. Under it, a short caption in faded italic says what it's up to (e.g. *working on world domination...*), picked from a list per state and, for work sessions, per activity (see `src/captions.rs`).
 - **Today** (middle) — today's sessions, newest first. Scrollable.
 - **Summary** (bottom) — time per activity and per project, average focus, interruptions and disruptions, and the day's span with tracked time, breaks and gaps.
 
@@ -56,11 +56,11 @@ The cat follows what you're doing: it idles when nothing is running, types on a 
 | `Space` | Collapse or expand the focused section (Today and Summary) |
 | `+` / `-` | Grow or shrink the focused section |
 | `=` | Reset section sizes to fit their content |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll today's sessions |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll the focused section: the notes in Active, otherwise today's sessions |
 
 A collapsed section shrinks to one line that still shows a short summary (e.g. `▸ TODAY · 6 sessions · 4h 12m`). Today's sessions take whatever space the other sections leave; when Today is collapsed, the summary does.
 
-With the mouse: drag the line between two sections to resize them (grab either of its two border rows), click a section to focus it, click the title text of Today or Summary (`▾ TODAY …`) to collapse or expand it, and use the wheel to scroll today's sessions. A drag never collapses anything, even when it starts on a title. Because Jiary captures the mouse, select text with `Shift` held (in most terminals).
+With the mouse: drag the line between two sections to resize them (grab either of its two border rows), click a section to focus it, click the title text of Today or Summary (`▾ TODAY …`) to collapse or expand it, and use the wheel to scroll the section under the pointer (notes or today's sessions). A drag never collapses anything, even when it starts on a title. Because Jiary captures the mouse, select text with `Shift` held (in most terminals).
 
 Section sizes and collapsed sections are remembered between runs, in `layout.conf` next to the database.
 

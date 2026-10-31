@@ -11,6 +11,7 @@ use ratatui::widgets::{
     ScrollbarOrientation, ScrollbarState, Tabs,
 };
 
+use crate::captions;
 use crate::db::Db;
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
 use crate::mascot::{self, Mood, Reaction};
@@ -62,7 +63,10 @@ pub struct App {
     /// The main-screen section that Space and +/- act on.
     focus: Section,
     /// First visible row of today's sessions.
-    scroll: usize,
+    today_scroll: usize,
+    /// First visible row of the active session's notes (below the pinned
+    /// session info and cat).
+    notes_scroll: usize,
     /// Terminal size as of the last frame. Key and mouse handlers lay the
     /// main screen out from it, so they see exactly what was drawn.
     size: (u16, u16),
@@ -77,6 +81,9 @@ pub struct App {
     /// The cat's current one-off reaction and when it started; it shows
     /// for the reaction's `duration`, then the cat goes back to its mood.
     reaction: Option<(Reaction, Instant)>,
+    /// Picks the caption under the cat; renewed on every session change so
+    /// the caption only changes then (or when the mood does).
+    caption_seed: u64,
 }
 
 /// After this long in a work session the cat gets drowsy, a nudge to take a
@@ -202,11 +209,13 @@ impl App {
             layout: LayoutPrefs::default(),
             layout_path,
             focus: Section::Active,
-            scroll: 0,
+            today_scroll: 0,
+            notes_scroll: 0,
             size: (0, 0),
             drag: None,
             title_press: None,
             reaction: None,
+            caption_seed: fresh_seed(),
         };
 
         if let Some(path) = &app.layout_path {
@@ -243,6 +252,8 @@ impl App {
     /// Reloads the lists shown on the main screen. Called whenever the active
     /// session changes.
     fn refresh_after_session_change(&mut self) {
+        self.caption_seed = fresh_seed();
+        self.notes_scroll = 0;
         match self.db.sessions_for_today() {
             Ok(sessions) => self.today_sessions = sessions,
             Err(e) => self.set_error(e),
@@ -405,14 +416,24 @@ impl App {
                 self.save_layout();
             }
 
-            // Today's sessions is the only section that scrolls, so the
-            // scroll keys act on it whichever section has focus.
-            KeyCode::Up | KeyCode::Char('k') => self.scroll_today(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.scroll_today(1),
-            KeyCode::PageUp => self.scroll_today(-(self.today_viewport() as isize)),
-            KeyCode::PageDown => self.scroll_today(self.today_viewport() as isize),
-            KeyCode::Home => self.scroll = 0,
-            KeyCode::End => self.scroll = self.max_scroll(),
+            // Scroll the focused section: the active session's notes, or
+            // today's sessions (also when the summary, which doesn't
+            // scroll, has focus).
+            KeyCode::Up | KeyCode::Char('k') => self.scroll(self.scroll_target(), -1),
+            KeyCode::Down | KeyCode::Char('j') => self.scroll(self.scroll_target(), 1),
+            KeyCode::PageUp => {
+                let target = self.scroll_target();
+                self.scroll(target, -(self.viewport(target) as isize));
+            }
+            KeyCode::PageDown => {
+                let target = self.scroll_target();
+                self.scroll(target, self.viewport(target) as isize);
+            }
+            KeyCode::Home => *self.scroll_position(self.scroll_target()) = 0,
+            KeyCode::End => {
+                let target = self.scroll_target();
+                *self.scroll_position(target) = self.max_scroll(target);
+            }
 
             KeyCode::Char('i') => {
                 if let Some(id) = self.active_session.as_ref().map(|s| s.id) {
@@ -695,6 +716,8 @@ impl App {
                     let note = form.input.clone();
                     self.append_active_note(&note);
                     self.react(Reaction::Noted);
+                    // Bring the new note into view.
+                    self.notes_scroll = self.max_scroll(Section::Active);
                 }
                 self.screen = Screen::Main;
             }
@@ -929,8 +952,21 @@ impl App {
         let (column, row) = (mouse.column, mouse.row);
 
         match mouse.kind {
-            MouseEventKind::ScrollUp => self.scroll_today(-3),
-            MouseEventKind::ScrollDown => self.scroll_today(3),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                // The section under the pointer; elsewhere, today's sessions.
+                let pointer = ratatui::layout::Position::new(column, row);
+                let target = if areas.active.contains(pointer) {
+                    Section::Active
+                } else {
+                    Section::Today
+                };
+                let delta = if mouse.kind == MouseEventKind::ScrollUp {
+                    -3
+                } else {
+                    3
+                };
+                self.scroll(target, delta);
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 let position = ratatui::layout::Position::new(column, row);
                 if let Some(section) = [Section::Active, Section::Today, Section::Summary]
@@ -1053,36 +1089,75 @@ impl App {
     /// Content-fitting heights of the active section and the summary,
     /// borders included.
     fn content_heights(&self, width: u16) -> ContentHeights {
-        let mut active = self.active_lines().len() as u16;
-        if cat_fits(width.saturating_sub(2)) {
-            // Tall enough for the cat, even with no session running.
-            active = active.max(mascot::HEIGHT);
-        }
+        let inner_width = width.saturating_sub(2);
+        let active = self.pinned_height(inner_width) + self.note_lines().len() as u16;
         ContentHeights {
             active: active + 2,
             summary: self.summary_lines(width.saturating_sub(2)).len() as u16 + 2,
         }
     }
 
-    /// Rows of today's sessions visible inside the section's border.
-    fn today_viewport(&self) -> usize {
-        if self.layout.today_collapsed {
-            return 0;
+    /// Rows at the top of the active section that stay put while its notes
+    /// scroll: the session info, beside the cat and its caption when the
+    /// cat fits. The caption rows are kept even without a caption, so the
+    /// layout doesn't jump when one appears.
+    fn pinned_height(&self, inner_width: u16) -> u16 {
+        let info = self.active_lines().len() as u16;
+        if cat_fits(inner_width) {
+            info.max(mascot::HEIGHT + CAPTION_GAP + CAPTION_ROWS)
+        } else {
+            info
         }
-        self.main_areas().today.height.saturating_sub(2) as usize
     }
 
-    fn max_scroll(&self) -> usize {
-        self.timeline_lines()
-            .len()
-            .saturating_sub(self.today_viewport())
+    /// The section the scroll keys act on: the focused one if it scrolls,
+    /// else today's sessions.
+    fn scroll_target(&self) -> Section {
+        match self.focus {
+            Section::Active => Section::Active,
+            _ => Section::Today,
+        }
     }
 
-    fn scroll_today(&mut self, delta: isize) {
-        self.scroll = self
-            .scroll
-            .saturating_add_signed(delta)
-            .min(self.max_scroll());
+    fn scroll_position(&mut self, section: Section) -> &mut usize {
+        match section {
+            Section::Active => &mut self.notes_scroll,
+            _ => &mut self.today_scroll,
+        }
+    }
+
+    /// Scrollable rows of a section: the active session's notes, or
+    /// today's sessions.
+    fn scroll_lines(&self, section: Section) -> usize {
+        match section {
+            Section::Active => self.note_lines().len(),
+            _ => self.timeline_lines().len(),
+        }
+    }
+
+    /// Rows of a section's scrollable part visible on screen.
+    fn viewport(&self, section: Section) -> usize {
+        let areas = self.main_areas();
+        match section {
+            Section::Active => {
+                let inner = areas.active.height.saturating_sub(2);
+                let pinned = self.pinned_height(areas.active.width.saturating_sub(2));
+                inner.saturating_sub(pinned) as usize
+            }
+            _ if self.layout.today_collapsed => 0,
+            _ => areas.today.height.saturating_sub(2) as usize,
+        }
+    }
+
+    fn max_scroll(&self, section: Section) -> usize {
+        self.scroll_lines(section)
+            .saturating_sub(self.viewport(section))
+    }
+
+    fn scroll(&mut self, section: Section, delta: isize) {
+        let max = self.max_scroll(section);
+        let position = self.scroll_position(section);
+        *position = position.saturating_add_signed(delta).min(max);
     }
 
     fn resize_focused(&mut self, delta: i32) {
@@ -1112,10 +1187,44 @@ impl App {
         let block = self.section_block(Section::Active);
         let inner = block.inner(areas.active);
         frame.render_widget(block, areas.active);
-        let (text_area, cat_area) = split_for_cat(inner);
+        // Session info and the cat stay pinned at the top; the notes below
+        // them scroll.
+        let pinned = self.pinned_height(inner.width).min(inner.height);
+        let [pinned_area, notes_area] =
+            Layout::vertical([Constraint::Length(pinned), Constraint::Min(0)]).areas(inner);
+        let notes = self.note_lines();
+        let offset = self
+            .notes_scroll
+            .min(notes.len().saturating_sub(notes_area.height as usize));
+        frame.render_widget(
+            Paragraph::new(notes.clone()).scroll((offset as u16, 0)),
+            notes_area,
+        );
+        let track = Rect::new(
+            areas.active.right().saturating_sub(1),
+            notes_area.y,
+            1,
+            notes_area.height,
+        );
+        draw_scrollbar(
+            frame,
+            track,
+            notes.len(),
+            notes_area.height as usize,
+            offset,
+        );
+        let (text_area, cat_area, caption_area) = split_for_cat(pinned_area);
         frame.render_widget(Paragraph::new(self.active_lines()), text_area);
         if let Some(cat_area) = cat_area {
             frame.render_widget(Paragraph::new(self.cat_lines()), cat_area);
+        }
+        if let (Some(area), Some(caption)) = (caption_area, self.caption()) {
+            frame.render_widget(
+                Paragraph::new(Span::styled(caption, theme::CAPTION))
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                area,
+            );
         }
 
         if self.layout.today_collapsed {
@@ -1162,7 +1271,7 @@ impl App {
         );
     }
 
-    /// Today's sessions, scrolled to `scroll` (clamped to the content), with
+    /// Today's sessions, scrolled to `today_scroll` (clamped to the content), with
     /// a scrollbar on the right border when they don't all fit.
     fn draw_today(&self, frame: &mut Frame, area: Rect) {
         let block = self.section_block(Section::Today);
@@ -1172,23 +1281,9 @@ impl App {
         let lines = self.timeline_lines();
         let total = lines.len();
         let visible = inner.height as usize;
-        let offset = self.scroll.min(total.saturating_sub(visible));
+        let offset = self.today_scroll.min(total.saturating_sub(visible));
         frame.render_widget(Paragraph::new(lines).scroll((offset as u16, 0)), inner);
-
-        if total > visible {
-            let mut state = ScrollbarState::new(total.saturating_sub(visible))
-                .position(offset)
-                .viewport_content_length(visible);
-            frame.render_stateful_widget(
-                Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                    .begin_symbol(None)
-                    .end_symbol(None)
-                    .track_symbol(Some("│"))
-                    .thumb_style(Style::new().fg(theme::ACCENT)),
-                area.inner(Margin::new(0, 1)),
-                &mut state,
-            );
-        }
+        draw_scrollbar(frame, area.inner(Margin::new(0, 1)), total, visible, offset);
     }
 
     // --- the cat ------------------------------------------------------------
@@ -1211,6 +1306,13 @@ impl App {
             }
             _ => Mood::Working,
         }
+    }
+
+    /// The caption under the cat for the current mood and session
+    /// activity, if its list has any.
+    fn caption(&self) -> Option<&'static str> {
+        let activity = self.active_session.as_ref().map(|s| s.activity.as_str());
+        captions::caption(self.mood(), activity, self.caption_seed)
     }
 
     /// Starts a one-off reaction, replacing any still playing.
@@ -1237,10 +1339,11 @@ impl App {
         }
     }
 
-    /// Body of the active section: the running session, or a hint.
+    /// The pinned part of the active section: the running session's info,
+    /// or a hint.
     fn active_lines(&self) -> Vec<Line<'static>> {
         match &self.active_session {
-            Some(session) => self.active_panel_lines(session),
+            Some(session) => self.active_info_lines(session),
             None => vec![Line::from(Span::styled(
                 "No active session. Press s to start one.",
                 theme::DIMMED,
@@ -1349,9 +1452,9 @@ impl App {
         }
     }
 
-    /// Lines inside the active-session panel: bold timer, dimmed label/value
-    /// rows, interruptions colored when > 0, notes as dimmed bullets.
-    fn active_panel_lines(&self, session: &Session) -> Vec<Line<'static>> {
+    /// The running session's info: bold timer, dimmed label/value rows,
+    /// interruptions colored when > 0.
+    fn active_info_lines(&self, session: &Session) -> Vec<Line<'static>> {
         let elapsed = Utc::now() - session.started_at;
         let (h, m, s) = (
             elapsed.num_hours(),
@@ -1381,7 +1484,16 @@ impl App {
                 },
             ),
         ]));
+        lines
+    }
 
+    /// The scrollable part of the active section: previous notes for the
+    /// project/task, then the session's own, as dimmed bullets.
+    fn note_lines(&self) -> Vec<Line<'static>> {
+        let Some(session) = &self.active_session else {
+            return Vec::new();
+        };
+        let mut lines = Vec::new();
         // Cached; refreshed whenever the active session changes.
         if !self.previous_notes.is_empty() {
             lines.push(Line::from(Span::styled("Previous notes:", theme::DIMMED)));
@@ -1660,13 +1772,39 @@ fn cat_fits(inner_width: u16) -> bool {
     inner_width >= MIN_TEXT_WIDTH + CAT_COLUMNS
 }
 
+/// A scrollbar in `track` (a border column) when `total` rows don't fit in
+/// `visible`; nothing otherwise.
+fn draw_scrollbar(frame: &mut Frame, track: Rect, total: usize, visible: usize, offset: usize) {
+    if total <= visible || track.height == 0 {
+        return;
+    }
+    let mut state = ScrollbarState::new(total.saturating_sub(visible))
+        .position(offset)
+        .viewport_content_length(visible);
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some("│"))
+            .thumb_style(Style::new().fg(theme::ACCENT)),
+        track,
+        &mut state,
+    );
+}
+
+/// Rows kept under the cat for its caption (wrapped to the cat's width),
+/// after a blank gap row so the caption doesn't crowd the cat.
+const CAPTION_GAP: u16 = 1;
+const CAPTION_ROWS: u16 = 2;
+
 /// Splits the active section's interior into the session text and, when it
-/// fits, the cat on the right (top-aligned, one column in from the border).
-/// The cat is left out rather than squeezing the text below
-/// `MIN_TEXT_WIDTH` or being cut off vertically.
-fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>) {
+/// fits, the cat on the right (top-aligned, one column in from the border)
+/// with its caption rows below. The cat is left out rather than squeezing
+/// the text below `MIN_TEXT_WIDTH` or being cut off vertically; the caption
+/// is left out when only the cat fits.
+fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>, Option<Rect>) {
     if !cat_fits(inner.width) || inner.height < mascot::HEIGHT {
-        return (inner, None);
+        return (inner, None, None);
     }
     let text = Rect {
         width: inner.width - CAT_COLUMNS,
@@ -1678,7 +1816,20 @@ fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>) {
         mascot::WIDTH,
         mascot::HEIGHT,
     );
-    (text, Some(cat))
+    let caption = (inner.height >= mascot::HEIGHT + CAPTION_GAP + CAPTION_ROWS).then(|| Rect {
+        y: cat.bottom() + CAPTION_GAP,
+        height: CAPTION_ROWS,
+        ..cat
+    });
+    (text, Some(cat), caption)
+}
+
+/// A seed for picking captions: the clock's nanoseconds, plenty random for
+/// choosing a sentence.
+fn fresh_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos() as u64 ^ d.as_secs())
 }
 
 /// The global chrome: header row, content area, status row. Shared by `draw`
@@ -1898,8 +2049,8 @@ fn draw_help(frame: &mut Frame, content: Rect) {
                 ("Space", "collapse or expand"),
                 ("+ / -", "grow or shrink"),
                 ("=", "reset sizes"),
-                ("↑↓ j k PgUp PgDn", "scroll today"),
-                ("Home / End", "first / last session"),
+                ("↑↓ j k PgUp PgDn", "scroll notes / today"),
+                ("Home / End", "top / bottom"),
             ],
         ),
         (
@@ -1907,7 +2058,7 @@ fn draw_help(frame: &mut Frame, content: Rect) {
             &[
                 ("drag a border", "resize"),
                 ("click a title", "collapse or expand"),
-                ("wheel", "scroll today"),
+                ("wheel", "scroll under pointer"),
             ],
         ),
     ];
@@ -2505,8 +2656,9 @@ mod tests {
         assert!(line(&buf, 1).starts_with("╭ ACTIVE "));
         assert!(line(&buf, 2).starts_with("│No active session. Press s to start one.  "));
         assert_eq!(buf[(1, 2)].fg, Color::Gray);
-        // As tall as the idling cat beside the hint: border, 5 rows, border.
-        assert!(line(&buf, 7).starts_with("╰"));
+        // As tall as the idling cat and its caption rows beside the hint:
+        // border, 8 rows (cat, gap, caption), border.
+        assert!(line(&buf, 10).starts_with("╰"));
     }
 
     #[test]
@@ -2589,13 +2741,13 @@ mod tests {
             .today_sessions
             .push(finished_session(start, end, None));
         let buf = render(&t.app);
-        // Below the 7-row active section (tall enough for the cat); inner text starts at column 1.
-        assert!(line(&buf, 8).starts_with("╭ ▾ TODAY · 1 session "));
-        assert!(line_from(&buf, 9, 1).starts_with("10:00 – 11:30 (1h 30m) F- I:0 "));
-        assert!(buf[(1, 9)].modifier.contains(Modifier::BOLD)); // time range
-        let dur_col = col_of(&buf, 9, "1h 30m");
-        assert!(buf[(dur_col, 9)].modifier.contains(Modifier::BOLD)); // duration
-        assert!(line_from(&buf, 10, 1).starts_with("alpha · beta · Programming "));
+        // Below the 10-row active section (the cat, a gap and its caption); inner text starts at column 1.
+        assert!(line(&buf, 11).starts_with("╭ ▾ TODAY · 1 session "));
+        assert!(line_from(&buf, 12, 1).starts_with("10:00 – 11:30 (1h 30m) F- I:0 "));
+        assert!(buf[(1, 12)].modifier.contains(Modifier::BOLD)); // time range
+        let dur_col = col_of(&buf, 12, "1h 30m");
+        assert!(buf[(dur_col, 12)].modifier.contains(Modifier::BOLD)); // duration
+        assert!(line_from(&buf, 13, 1).starts_with("alpha · beta · Programming "));
     }
 
     #[test]
@@ -2612,10 +2764,12 @@ mod tests {
                 .today_sessions
                 .push(finished_session(start, end, focus));
         }
-        // With the summary collapsed, all four items fit.
+        // With the summary collapsed and the active section shrunk to its
+        // 3-row minimum, all four items fit.
         t.app.layout.summary_collapsed = true;
+        t.app.layout.active_height = Some(3);
         let buf = render(&t.app);
-        // Items stack three rows apart (range, parts, spacing), from row 9.
+        // Items stack three rows apart (range, parts, spacing), from row 5.
         let expectations = [
             ("F1", Color::Red),
             ("F2", Color::Yellow),
@@ -2623,7 +2777,7 @@ mod tests {
             ("F-", Color::Gray),
         ];
         for (i, (badge, color)) in expectations.iter().enumerate() {
-            let y = 9 + 3 * i as u16;
+            let y = 5 + 3 * i as u16;
             let col = col_of(&buf, y, badge);
             assert_eq!(buf[(col, y)].fg, *color);
         }
@@ -2875,6 +3029,43 @@ mod tests {
         assert!((1..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Cyan)));
     }
 
+    /// The caption rows under the cat (rows 8–9, after a gap row; the cat's
+    /// columns 54–77),
+    /// each trimmed.
+    fn caption_rows(buf: &Buffer) -> Vec<String> {
+        (8..10)
+            .map(|y| {
+                let row: String = line_from(buf, y, 54).chars().take(24).collect();
+                row.trim().to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_caption_shows_under_the_cat_in_faded_italic() {
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::minutes(1), 0));
+        let buf = render(&t.app);
+        let rows = caption_rows(&buf);
+        // Wrapped to the cat's width.
+        assert_eq!(rows.join(" "), "working on world domination...");
+        assert!(rows.iter().all(|r| !r.is_empty()), "{rows:?}");
+        let x = 54
+            + line_from(&buf, 8, 54)
+                .chars()
+                .position(|c| c != ' ')
+                .unwrap() as u16;
+        assert_eq!(buf[(x, 8)].fg, Color::Gray);
+        assert!(buf[(x, 8)].modifier.contains(Modifier::ITALIC));
+    }
+
+    #[test]
+    fn moods_without_sentences_show_no_caption() {
+        // Nothing has been written for idling yet.
+        let t = TestApp::new();
+        assert_eq!(caption_rows(&render(&t.app)), ["", ""]);
+    }
+
     #[test]
     fn the_cats_mood_follows_the_session() {
         let mut t = TestApp::new();
@@ -2948,6 +3139,77 @@ mod tests {
         assert!(t.app.current_reaction().is_none());
     }
 
+    // --- scrolling the active session's notes ------------------------------
+
+    /// A running session with notes "note 1" … "note n", in an active
+    /// section fixed at 13 rows: of its 11 inner rows, 8 are pinned (info
+    /// beside the cat, gap and caption), leaving rows 10–12 for the notes.
+    fn with_notes(n: usize) -> TestApp {
+        let mut t = TestApp::new();
+        let mut session = running_session(chrono::Duration::minutes(1), 0);
+        session.notes = Some((1..=n).map(|i| format!("note {i}\n")).collect());
+        t.app.active_session = Some(session);
+        t.app.layout.active_height = Some(13);
+        t
+    }
+
+    #[test]
+    fn notes_scroll_under_the_pinned_session_info_and_cat() {
+        let mut t = with_notes(10);
+        // "Session notes:" + 10 bullets = 11 rows in a 3-row viewport.
+        assert_eq!(t.app.viewport(Section::Active), 3);
+        assert_eq!(t.app.max_scroll(Section::Active), 8);
+
+        t.key(KeyCode::Down);
+        t.key(KeyCode::Char('j'));
+        assert_eq!(t.app.notes_scroll, 2);
+        let buf = render(&t.app);
+        // Pinned: the timer and the cat's ear stay at the top.
+        assert!(line(&buf, 2).starts_with("│00:01:00"));
+        assert_eq!(buf[(65, 2)].symbol(), "▄");
+        // The notes below have moved.
+        assert!(line_from(&buf, 10, 1).starts_with("  • note 2 "));
+        // With a scrollbar on the border beside them.
+        assert_ne!(buf[(79, 11)].symbol(), " ");
+
+        t.key(KeyCode::End);
+        assert!(line_from(&render(&t.app), 12, 1).starts_with("  • note 10 "));
+        t.key(KeyCode::Home);
+        assert!(line_from(&render(&t.app), 10, 1).starts_with("Session notes:"));
+    }
+
+    #[test]
+    fn adding_a_note_scrolls_it_into_view() {
+        let mut t = TestApp::new();
+        t.app.start_session("Writing", None, None);
+        t.app.layout.active_height = Some(13);
+        for i in 1..=6 {
+            t.key(KeyCode::Char('n'));
+            t.typed(&format!("note {i}"));
+            t.key(KeyCode::Enter);
+        }
+        assert_eq!(t.app.notes_scroll, t.app.max_scroll(Section::Active));
+        assert!(line_from(&render(&t.app), 12, 1).starts_with("  • note 6 "));
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_section_under_the_pointer() {
+        let mut t = with_notes(10);
+        mouse(&mut t, MouseEventKind::ScrollDown, 10, 5); // over the active section
+        assert_eq!(t.app.notes_scroll, 3);
+        assert_eq!(t.app.today_scroll, 0);
+    }
+
+    #[test]
+    fn with_the_summary_focused_the_keys_scroll_todays_sessions() {
+        let mut t = with_sessions(with_notes(10), 10);
+        t.key(KeyCode::Tab);
+        t.key(KeyCode::Tab); // summary: it doesn't scroll
+        t.key(KeyCode::Down);
+        assert_eq!(t.app.today_scroll, 1);
+        assert_eq!(t.app.notes_scroll, 0);
+    }
+
     // --- main screen sections ----------------------------------------------
 
     /// `n` completed 30-minute sessions today, newest first.
@@ -2993,23 +3255,23 @@ mod tests {
         t.key(KeyCode::Tab);
         t.key(KeyCode::Char(' '));
         let buf = render(&t.app);
-        assert_eq!(line(&buf, 8), "▸ TODAY · 2 sessions · 1h 0m");
-        assert_eq!(buf[(0, 8)].fg, Color::Cyan); // still focused
+        assert_eq!(line(&buf, 11), "▸ TODAY · 2 sessions · 1h 0m");
+        assert_eq!(buf[(0, 11)].fg, Color::Cyan); // still focused
         // The summary takes the freed rows.
-        assert!(line(&buf, 9).starts_with("╭ ▾ SUMMARY "));
+        assert!(line(&buf, 12).starts_with("╭ ▾ SUMMARY "));
         assert!(line(&buf, RENDER_HEIGHT - 2).starts_with("╰"));
 
         t.key(KeyCode::Tab);
         t.key(KeyCode::Char(' '));
         let buf = render(&t.app);
         assert_eq!(
-            line(&buf, 9),
+            line(&buf, 12),
             "▸ SUMMARY · tracked 1h 0m · Programming 1h 0m"
         );
-        assert_eq!(line(&buf, 10), "");
+        assert_eq!(line(&buf, 13), "");
 
         t.key(KeyCode::Char(' ')); // and back
-        assert!(line(&render(&t.app), 9).starts_with("╭ ▾ SUMMARY "));
+        assert!(line(&render(&t.app), 12).starts_with("╭ ▾ SUMMARY "));
     }
 
     #[test]
@@ -3038,27 +3300,29 @@ mod tests {
 
     #[test]
     fn scrolling_is_clamped_to_the_content() {
-        let mut t = with_sessions(TestApp::new(), 2);
+        let mut t = with_sessions(TestApp::new(), 1);
+        t.key(KeyCode::Tab); // the keys scroll the focused section
         t.key(KeyCode::Down); // everything fits: nothing to scroll
-        assert_eq!(t.app.scroll, 0);
+        assert_eq!(t.app.today_scroll, 0);
 
         let mut t = with_sessions(TestApp::new(), 10);
-        // 10 items × 2 rows + 9 separators = 29 rows; the viewport is 7.
-        assert_eq!(t.app.today_viewport(), 7);
-        assert_eq!(t.app.max_scroll(), 22);
+        t.key(KeyCode::Tab);
+        // 10 items × 2 rows + 9 separators = 29 rows; the viewport is 4.
+        assert_eq!(t.app.viewport(Section::Today), 4);
+        assert_eq!(t.app.max_scroll(Section::Today), 25);
         t.key(KeyCode::Down);
         t.key(KeyCode::Char('j'));
-        assert_eq!(t.app.scroll, 2);
+        assert_eq!(t.app.today_scroll, 2);
         t.key(KeyCode::PageDown);
-        assert_eq!(t.app.scroll, 9);
-        t.key(KeyCode::PageDown);
-        t.key(KeyCode::PageDown);
-        t.key(KeyCode::PageDown);
-        assert_eq!(t.app.scroll, 22);
+        assert_eq!(t.app.today_scroll, 6);
+        for _ in 0..5 {
+            t.key(KeyCode::PageDown);
+        }
+        assert_eq!(t.app.today_scroll, 25);
         t.key(KeyCode::Home);
-        assert_eq!(t.app.scroll, 0);
+        assert_eq!(t.app.today_scroll, 0);
         t.key(KeyCode::Up);
-        assert_eq!(t.app.scroll, 0);
+        assert_eq!(t.app.today_scroll, 0);
         t.key(KeyCode::End);
         let buf = render(&t.app);
         // The oldest session is the last visible item.
@@ -3072,10 +3336,10 @@ mod tests {
         let mut t = TestApp::new();
         t.key(KeyCode::Char('+'));
         t.key(KeyCode::Char('+'));
-        assert_eq!(t.app.layout.active_height, Some(9));
-        assert!(line(&render(&t.app), 9).starts_with("╰"));
+        assert_eq!(t.app.layout.active_height, Some(12));
+        assert!(line(&render(&t.app), 12).starts_with("╰"));
         t.key(KeyCode::Char('-'));
-        assert_eq!(t.app.layout.active_height, Some(8));
+        assert_eq!(t.app.layout.active_height, Some(11));
 
         t.key(KeyCode::Tab);
         t.key(KeyCode::Tab);
@@ -3120,7 +3384,7 @@ mod tests {
         assert_eq!(
             app.layout,
             LayoutPrefs {
-                active_height: Some(8),
+                active_height: Some(11),
                 today_collapsed: true,
                 ..Default::default()
             }
@@ -3148,14 +3412,14 @@ mod tests {
     #[test]
     fn dragging_the_active_border_resizes_it() {
         let mut t = TestApp::new();
-        // No session: the active section is rows 1–7 (tall enough for the
-        // cat), its border on row 7.
-        drag(&mut t, 7, 11);
-        assert_eq!(t.app.layout.active_height, Some(11));
-        assert!(line(&render(&t.app), 11).starts_with("╰"));
+        // No session: the active section is rows 1–10 (tall enough for the
+        // cat and its caption), its border on row 10.
+        drag(&mut t, 10, 14);
+        assert_eq!(t.app.layout.active_height, Some(14));
+        assert!(line(&render(&t.app), 14).starts_with("╰"));
         assert!(t.app.drag.is_none());
         // Clamped so today's sessions keep their minimum.
-        drag(&mut t, 11, 100);
+        drag(&mut t, 14, 100);
         let buf = render(&t.app);
         assert_eq!(
             row_with(&buf, "╭ ▾ SUMMARY ") - row_with(&buf, "╭ ▾ TODAY "),
@@ -3218,14 +3482,14 @@ mod tests {
 
     #[test]
     fn either_row_of_the_line_between_sections_drags_it() {
-        // No session: the active section's bottom border is row 7, today's
-        // top border row 8. Grabbing row 8 moves the same line, keeping the
-        // grab offset (no jump on the first move).
+        // No session: the active section's bottom border is row 10, today's
+        // top border row 11. Grabbing row 11 moves the same line, keeping
+        // the grab offset (no jump on the first move).
         let mut t = TestApp::new();
-        drag(&mut t, 8, 12);
-        assert_eq!(t.app.layout.active_height, Some(11));
+        drag(&mut t, 11, 15);
+        assert_eq!(t.app.layout.active_height, Some(14));
         assert!(!t.app.layout.today_collapsed);
-        assert_eq!(row_with(&render(&t.app), "╭ ▾ TODAY "), 12);
+        assert_eq!(row_with(&render(&t.app), "╭ ▾ TODAY "), 15);
 
         // Same for the summary's top border, even when grabbed on the title.
         let mut t = TestApp::new();
@@ -3248,11 +3512,11 @@ mod tests {
     #[test]
     fn wheel_scrolls_todays_sessions() {
         let mut t = with_sessions(TestApp::new(), 10);
-        mouse(&mut t, MouseEventKind::ScrollDown, 10, 10);
-        assert_eq!(t.app.scroll, 3);
-        mouse(&mut t, MouseEventKind::ScrollUp, 10, 10);
-        mouse(&mut t, MouseEventKind::ScrollUp, 10, 10);
-        assert_eq!(t.app.scroll, 0);
+        mouse(&mut t, MouseEventKind::ScrollDown, 10, 13);
+        assert_eq!(t.app.today_scroll, 3);
+        mouse(&mut t, MouseEventKind::ScrollUp, 10, 13);
+        mouse(&mut t, MouseEventKind::ScrollUp, 10, 13);
+        assert_eq!(t.app.today_scroll, 0);
     }
 
     #[test]

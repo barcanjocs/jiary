@@ -1,4 +1,5 @@
 mod app;
+mod captions;
 mod db;
 mod layout;
 mod mascot;

@@ -59,6 +59,8 @@ pub const ERROR: Style = Style::new().fg(BAD).add_modifier(Modifier::BOLD);
 pub const PROMPT: Style = Style::new().fg(ACCENT).add_modifier(Modifier::BOLD);
 /// Dimmed italic hint shown in an empty text input.
 pub const PLACEHOLDER: Style = Style::new().fg(MUTED).add_modifier(Modifier::ITALIC);
+/// Faded italic caption under the cat.
+pub const CAPTION: Style = Style::new().fg(MUTED).add_modifier(Modifier::ITALIC);
 /// Highlight symbol for selected items in picker `List`s: a bold accent `>`.
 pub fn picker_symbol() -> Span<'static> {
     Span::styled(">", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))

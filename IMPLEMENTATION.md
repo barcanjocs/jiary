@@ -20,6 +20,7 @@ main.rs        event loop: size → draw → place cursor → poll(100 ms) → k
        ├─ LayoutPrefs  main-screen section geometry + layout file (layout.rs)
        ├─ summarize  day totals over in-memory sessions (summary.rs)
        ├─ mascot  the cat's pixel-art frames + animation (mascot.rs)
+       ├─ captions  lines shown under the cat (captions.rs)
        └─ theme  palette + shared style helpers    (theme.rs)
 ```
 
@@ -53,6 +54,10 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 - **`mascot.rs`** — the cat: sprites as palette-character grids (two pixel
   rows per terminal row), `render` to half-block `Line`s, and the frame
   schedule (`lines(millis)`). Pure; colors come from `theme::CAT_*`.
+- **`captions.rs`** — the sentences shown under the cat, one list per
+  `Mood` plus optional per-activity lists for work sessions, and
+  `caption(mood, activity, seed)` to pick one. Adding a caption means adding
+  a sentence to a list.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
   activity and project, focus, interruptions, disruptions, breaks, span and
   gaps.
@@ -160,7 +165,8 @@ pub struct App {
     layout: LayoutPrefs,               // section sizes + collapsed state (persisted)
     layout_path: Option<PathBuf>,      // where `layout` is saved; None in tests
     focus: Section,                    // section that Space and +/- act on
-    scroll: usize,                     // first visible row of today's sessions
+    today_scroll: usize,               // first visible row of today's sessions
+    notes_scroll: usize,               // first visible row of the active session's notes
     size: (u16, u16),                  // terminal size as of the last frame
     drag: Option<Section>,             // section whose border the mouse is dragging
 }
@@ -168,9 +174,13 @@ pub struct App {
 
 `size` exists so key and mouse handlers can lay the main screen out exactly
 as the last frame did (`main_areas`): main.rs calls `set_size` before every
-draw. `scroll` is clamped against the content in the handlers
-(`scroll_today`, `max_scroll`) and again at draw time, since the content can
-shrink between frames.
+draw. Both scroll positions are clamped against the content in the handlers
+(`scroll(section, delta)`, `max_scroll(section)`, `viewport(section)`) and
+again at draw time, since the content can shrink between frames. The scroll
+keys act on `scroll_target()`: the notes when the active section has focus,
+today's sessions otherwise (the summary doesn't scroll). `notes_scroll`
+resets on every session change, and jumps to the bottom when a note is added
+with `n` so the new note is in view.
 
 **The UI mirrors the db in memory.** `draw` runs ~10×/sec and must never query
 the db, so everything it needs is a field on `App`. The mirror is refreshed by
@@ -359,14 +369,19 @@ UI never jumps when an error appears or disappears.
 
 Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
 
-- **Active** (` ACTIVE `) — bold timer, dimmed label/value rows via
-  `theme::kv`, interruptions red when > 0, cached previous notes, then the
-  session's own notes as bullets; a dimmed hint when there is no session.
-  Never collapses. While the cat fits the width (`cat_fits`), the section
-  is at least the cat's height, even with no session. The cat sits
-  top-right (`split_for_cat`), one column in
-  from the border, and is left out when the section is shorter than the
-  sprite or the text would get under 24 columns.
+- **Active** (` ACTIVE `) — two parts. Pinned at the top
+  (`pinned_height`): the session info (`active_lines`: bold timer, dimmed
+  label/value rows via `theme::kv`, interruptions red when > 0; a dimmed
+  hint when there is no session) beside the cat, its gap row and caption
+  rows, as tall as the taller of the two. Below it, the notes
+  (`note_lines`: cached previous notes, then the session's own, as bullets)
+  across the full width, scrolled by `notes_scroll`, with a scrollbar on
+  the right border beside them when they don't fit. Never collapses. While
+  the cat fits the width (`cat_fits`), the pinned part is always the cat's
+  full height, even with no session. The cat sits top-right
+  (`split_for_cat`), one column in from the border, and is left out when
+  the section is shorter than the sprite or the text would get under 24
+  columns.
 
 ### The cat (`mascot.rs`)
 
@@ -399,13 +414,28 @@ What it shows (`App::cat_lines`):
 All frames share one size, and the cat's body sits on the same columns in
 every scene where it is alone (pinned by a test), so switching moods or
 starting a reaction never makes it jump.
+
+**Caption.** Under the cat, after a blank `CAPTION_GAP` row (so it doesn't
+crowd the cat), `CAPTION_ROWS` (2) rows hold a faded italic
+caption (`theme::CAPTION`), centered and wrapped to the cat's width. The
+sentence comes from `captions::caption`: the list for the current mood, or
+for a work session whose activity has its own list (`BY_ACTIVITY`, matched
+ignoring case); an empty list shows nothing. `App::caption_seed` picks the
+sentence and is renewed in `refresh_after_session_change`, so a caption
+stays put until the session changes (or the mood does, e.g. turning
+drowsy); there is no random-number dependency, the seed is the clock's
+nanoseconds. The caption rows are part of the active section's content
+height whenever the cat fits, caption or not, so the layout never jumps
+when one appears; a section shrunk below cat + caption keeps the cat and
+drops the caption.
 - **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
   (completed and the running one), newest first, separated by blank rows:
   bold time range + duration, a focus badge (`F1` red / `F2` yellow / `F3`
   green / `F-` dimmed), an interruption count (`I:N`, red when > 0), a bright
   `project · task · activity` line, and dimmed note bullets. Drawn as one
-  `Paragraph` scrolled by `scroll`, with a `Scrollbar` on the right border
-  when the items don't fit.
+  `Paragraph` scrolled by `today_scroll`, with a scrollbar on the right
+  border when the items don't fit (`draw_scrollbar`, shared with the
+  notes).
 - **Summary** (` ▾ SUMMARY `) — `summary_lines`: `Activity` / `Project` /
   `Focus` / `Day` rows from `summarize`, items joined by ` · ` and packed by
   `wrap_items` (an item only splits when wider than a whole row), continuing
@@ -447,7 +477,8 @@ geometry as the last frame:
   renderer draws) it is recorded in `title_press`, and toggles collapse on
   release only if no drag event came in between, so a drag that starts on a
   title (which sits on a border row) never collapses anything.
-- The wheel scrolls today's sessions by 3 rows.
+- The wheel scrolls the section under the pointer by 3 rows: the notes over
+  the active section, today's sessions elsewhere.
 
 Mouse capture means terminals no longer select text on a plain drag;
 Shift-drag still selects in most of them.
