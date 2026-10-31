@@ -13,7 +13,7 @@ use ratatui::widgets::{
 use crate::db::Db;
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
 use crate::mascot;
-use crate::session::{self, BREAK, DISRUPTION, Session};
+use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
 use crate::summary::{DaySummary, summarize};
 use crate::theme;
 use crossterm::event::{
@@ -29,7 +29,7 @@ const DEFAULT_ACTIVITIES: &[&str] = &[
     "Programming",
     "Reading",
     "Writing",
-    "Meeting",
+    MEETING,
     "Administration",
     DISRUPTION,
     BREAK,
@@ -420,11 +420,12 @@ impl App {
                 }
             }
             KeyCode::Char('r') => {
-                // Resume ends a pause (disruption or break), or picks work
-                // back up when nothing is running; it never ends work.
+                // Resume ends a detour (disruption, break or meeting), or
+                // picks work back up when nothing is running; it never ends
+                // work.
                 let should_proceed = match &self.active_session {
                     None => true,
-                    Some(s) => session::is_pause(&s.activity),
+                    Some(s) => session::is_detour(&s.activity),
                 };
 
                 if !should_proceed {
@@ -455,8 +456,11 @@ impl App {
                 self.refresh_after_session_change();
             }
 
-            KeyCode::Char('d') => self.pause(DISRUPTION),
-            KeyCode::Char('b') => self.pause(BREAK),
+            // Disruptions and breaks pause something; a meeting is work in
+            // its own right, so it can also start from nothing.
+            KeyCode::Char('d') => self.detour(DISRUPTION, true),
+            KeyCode::Char('b') => self.detour(BREAK, true),
+            KeyCode::Char('m') => self.detour(MEETING, false),
             KeyCode::Char('s') => {
                 self.screen = Screen::StartSession(Box::new(StartSessionForm {
                     step: Step::Activity,
@@ -483,16 +487,16 @@ impl App {
         false
     }
 
-    /// Ends the active session and starts a pause (`DISRUPTION` or `BREAK`)
-    /// with no project or task; `r` later resumes the work it interrupted.
-    /// Only when there is a session to pause, and not on top of the same
-    /// kind of pause (switching between a disruption and a break is fine).
-    fn pause(&mut self, kind: &str) {
-        let pausable = self
-            .active_session
-            .as_ref()
-            .is_some_and(|s| s.activity != kind);
-        if pausable && self.close_active_session() {
+    /// Ends the active session (if any) and starts a detour of `kind` with
+    /// no project or task; `r` later resumes the work it interrupted. A
+    /// no-op on top of the same kind of detour (switching between kinds is
+    /// fine), and without a running session when `needs_session`.
+    fn detour(&mut self, kind: &str, needs_session: bool) {
+        let startable = match &self.active_session {
+            Some(s) => s.activity != kind,
+            None => !needs_session,
+        };
+        if startable && self.close_active_session() {
             self.start_session(kind, None, None);
             self.refresh_after_session_change();
         }
@@ -792,8 +796,9 @@ impl App {
                     ("e", "end"),
                     ("n", "note"),
                     ("i", "interrupt"),
-                    ("d", "disrupt"),
-                    ("b", "break"),
+                    // One hint for the three detour keys keeps [r] on an
+                    // 80-column line; `?` help lists them separately.
+                    ("d/b/m", "away"),
                     ("r", "resume"),
                     HELP_HINT,
                     ("Tab", "sections"),
@@ -1781,7 +1786,8 @@ fn draw_help(frame: &mut Frame, content: Rect) {
             ("i", "count an interruption"),
             ("d", "start a disruption"),
             ("b", "start a break"),
-            ("r", "resume after either"),
+            ("m", "start a meeting"),
+            ("r", "resume after d, b or m"),
             ("q / Ctrl+C", "quit"),
         ],
     )];
@@ -2313,7 +2319,7 @@ mod tests {
         let buf = render(&t.app);
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
-            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [b] break  [?] help"
+            "[s] start  [e] end  [n] note  [i] interrupt  [d/b/m] away  [r] resume  [?] help"
         );
     }
 
@@ -3353,6 +3359,26 @@ mod tests {
         assert_eq!(activity(&t), Some(BREAK));
         t.key(KeyCode::Char('r')); // past the break and the disruption
         assert_eq!(activity(&t), Some("Writing"));
+    }
+
+    #[test]
+    fn meeting_starts_from_work_or_from_nothing_and_resume_returns() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('m')); // nothing running: starts anyway
+        assert_eq!(activity(&t), Some(MEETING));
+        t.key(KeyCode::Char('m')); // no-op on top of a meeting
+        assert_eq!(t.app.today_sessions.len(), 1);
+        t.key(KeyCode::Char('r')); // nothing to go back to: keeps meeting
+        assert_eq!(activity(&t), Some(MEETING));
+
+        t.app.complete_active(None);
+        t.app.start_session("Writing", Some("p".into()), None);
+        t.key(KeyCode::Char('m'));
+        t.key(KeyCode::Char('b')); // a break straight after the meeting
+        t.key(KeyCode::Char('r')); // back to work, past both detours
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.activity, "Writing");
+        assert_eq!(active.project.as_deref(), Some("p"));
     }
 
     #[test]

@@ -35,7 +35,8 @@ On first run, a database is created at:
 | `i` | Increment interruption counter |
 | `d` | Stop current session, start a Disruption session (no-op during one) |
 | `b` | Stop current session, start a Break session (no-op during one) |
-| `r` | Resume the last work session (ends a disruption or break) |
+| `m` | Stop current session (if any), start a Meeting session (no-op during one) |
+| `r` | Resume the last work session (ends a disruption, break or meeting) |
 | `?` | Show all keys |
 | `q` / `Ctrl+C` | Quit |
 
@@ -73,7 +74,7 @@ Activity is required; project and task are optional (press Enter on an empty fie
 
 Activities are free text, like projects: type any name to use a new one. Suggestions are the activities you have used, most recent first, so `s`, Tab, Enter repeats your last one. A new database suggests a starter set (Programming, Reading, Writing, Meeting, Administration, Disruption, Break, Other) until you have history; after that, built-ins you never use drop out of the list.
 
-`Disruption` and `Break` are the activities `d` and `b` start and `r` resumes from.
+`Disruption`, `Break` and `Meeting` are the activities `d`, `b` and `m` start and `r` resumes from.
 
 ### Autocomplete
 
@@ -87,11 +88,19 @@ Press `n` at any time during an active session to append a note. Notes are saved
 
 You can also add a note when ending a session (press `e`).
 
-### Disruptions, Breaks & Resume
+### Detours: disruptions, breaks, meetings & resume
 
-If you're interrupted (colleague conversation, phone call, context switch), press `d` to instantly stop your current session and start a "Disruption" session. When you're taking a break on purpose (coffee, lunch, a walk), press `b` instead to start a "Break" session. When you're ready to get back to work, press `r` to end the disruption or break and restart your previous activity/project/task.
+Three keys step you out of what you're doing with a single keystroke:
 
-The full round-trip is two keystrokes: `d` (or `b`) … `r`. `r` always goes back to the last session that was actual work, so a break that turns into a disruption (`b`, then `d`) still resumes your work. Both need a running session to pause.
+- `d` — you're interrupted (colleague conversation, phone call, context switch): starts a "Disruption" session.
+- `b` — you're taking a break on purpose (coffee, lunch, a walk): starts a "Break" session.
+- `m` — you're jumping into a meeting: starts a "Meeting" session. Unlike the other two it also works when nothing is running (e.g. the morning standup), and meeting time counts as work in the summary.
+
+When you're done, press `r` to end the detour and restart your previous activity/project/task. The status line groups the three as `[d/b/m] away`; `?` lists them separately.
+
+The full round-trip is two keystrokes: `d`, `b` or `m` … `r`. `r` always goes back to the last session that wasn't a detour, so a meeting followed by a break (`m`, then `b`) still resumes your work. Disruptions and breaks need a running session to pause.
+
+Meetings you start with `s` (activity "Meeting") are detours too, so `r` never resumes into a meeting.
 
 ### Focus rating
 

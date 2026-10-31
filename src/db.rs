@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, Row, params};
 
-use crate::session::{BREAK, DISRUPTION, Session};
+use crate::session::{BREAK, DISRUPTION, MEETING, Session};
 
 /// The (activity, project, task) of a session, as returned by
 /// [`Db::latest_work_session`] for resuming work.
@@ -255,14 +255,14 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
     }
 
-    /// The most recent completed session that is work, not a pause
-    /// (disruption or break): what `r` resumes.
+    /// The most recent completed session that isn't a detour (disruption,
+    /// break or meeting): what `r` resumes.
     pub fn latest_work_session(&self) -> Result<Option<SessionCombo>, DbError> {
         let result = self.conn.query_row(
             "SELECT activity, project, task FROM sessions
-         WHERE activity NOT IN (?1, ?2) AND ended_at IS NOT NULL
+         WHERE activity NOT IN (?1, ?2, ?3) AND ended_at IS NOT NULL
          ORDER BY started_at DESC, id DESC LIMIT 1",
-            params![DISRUPTION, BREAK],
+            params![DISRUPTION, BREAK, MEETING],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         );
 
@@ -544,9 +544,9 @@ mod tests {
     }
 
     #[test]
-    fn latest_work_session_skips_disruptions_and_breaks() {
+    fn latest_work_session_skips_detours() {
         let tmp = TmpDb::new();
-        for activity in ["Writing", DISRUPTION, BREAK, DISRUPTION] {
+        for activity in ["Writing", DISRUPTION, BREAK, MEETING, DISRUPTION] {
             let session = tmp.db.create_session(activity, Some("p"), None).unwrap();
             tmp.db.complete_session(session.id, None).unwrap();
         }

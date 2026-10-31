@@ -316,17 +316,21 @@ the UI believing a session ended.
 
 Main-screen flows built from these:
 
-- **`d` (disrupt) / `b` (break)** — `pause(kind)`: only if a session is
-  active and isn't already that kind of pause: close it, start a
-  `DISRUPTION` / `BREAK` session with no project/task. Repeating the same key
-  is a no-op rather than splitting the pause in two; the other key switches
-  between disruption and break. Both are *pauses* (`session::is_pause`).
+- **`d` (disrupt) / `b` (break) / `m` (meeting)** — `detour(kind,
+  needs_session)`: close the active session (if any) and start a
+  `DISRUPTION` / `BREAK` / `MEETING` session with no project/task. Repeating
+  the same key is a no-op rather than splitting the detour in two; the other
+  keys switch kinds. `d` and `b` need a running session to pause; `m` also
+  starts from nothing (a meeting is work in its own right). All three are
+  *detours* (`session::DETOURS`, `is_detour`).
 - **`r` (resume)** — proceeds only when there is no active session or the
-  active one is a pause. Looks up `latest_work_session` (most recent
-  completed row that is not a pause) **first**, so the pause keeps running
+  active one is a detour. Looks up `latest_work_session` (most recent
+  completed row that is not a detour) **first**, so the detour keeps running
   when there is nothing to resume; then closes it and starts a fresh session
-  with that activity/project/task. The round trip `d`/`b` … `r` is two
-  keystrokes.
+  with that activity/project/task. The round trip `d`/`b`/`m` … `r` is two
+  keystrokes. Known limitation: the activity alone decides what is a detour,
+  so a meeting started with `s` is skipped by `r` too; recording which
+  session each detour interrupted would fix that (needs a schema change).
 - **`i`** — `db.increment_interruptions` (guarded by `ended_at IS NULL` in
   SQL) plus the in-memory counter bump.
 
@@ -565,7 +569,7 @@ removed.
   running session's in-memory copy, focus/disruption figures.
 - *app.rs state machine* — key handling against a `TestApp` (real db):
   key-event filtering, autocomplete semantics, end/note form commit and
-  cancel, disrupt/break/resume edge cases, section focus/collapse/resize/scroll,
+  cancel, detour (d/b/m) and resume edge cases, section focus/collapse/resize/scroll,
   mouse drag/click/wheel (`mouse`, `drag` helpers), layout persistence
   across two `App`s, status-line content and width fitting. Keys go through
   `press(code)` / `TestApp::key` / `TestApp::typed`. Setup helpers

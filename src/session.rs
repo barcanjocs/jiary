@@ -1,13 +1,16 @@
 use chrono::{DateTime, Utc};
 
-/// Activities that pause work instead of being work: `d` starts a
-/// disruption, `b` a break, and `r` ends either by resuming the last
-/// session that is neither.
+/// Detours: activities you step into from your work and come back from.
+/// `d` starts a disruption, `b` a break, `m` a meeting, and `r` ends any of
+/// them by resuming the last session that isn't a detour. A meeting counts
+/// as work time in the summary; the others don't.
 pub const DISRUPTION: &str = "Disruption";
 pub const BREAK: &str = "Break";
+pub const MEETING: &str = "Meeting";
+pub const DETOURS: [&str; 3] = [DISRUPTION, BREAK, MEETING];
 
-pub fn is_pause(activity: &str) -> bool {
-    activity == DISRUPTION || activity == BREAK
+pub fn is_detour(activity: &str) -> bool {
+    DETOURS.contains(&activity)
 }
 
 #[derive(Debug)]
