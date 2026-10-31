@@ -54,6 +54,9 @@ pub const GOOD: Color = Color::Green;
 pub const OK: Color = Color::Yellow;
 /// Bad outcome (focus 1), errors, interruption counts.
 pub const BAD: Color = Color::Red;
+/// A session that could have been rated but wasn't (the summary's focus
+/// line).
+pub const UNRATED: Color = Color::DarkGray;
 
 /// Activities, each in its own color wherever it shows (the active
 /// session, today's list, the summary): work in light blue, meetings in the

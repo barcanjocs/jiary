@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::session::{BREAK, DISRUPTION, Session};
+use crate::session::{self, BREAK, DISRUPTION, Session};
 
 #[derive(Debug, PartialEq)]
 pub struct DaySummary {
@@ -22,9 +22,27 @@ pub struct DaySummary {
     /// First start and last end (now, while a session runs).
     pub span: Option<(DateTime<Utc>, DateTime<Utc>)>,
     pub tracked: Duration,
-    /// Each session as (start, end, activity), earliest first: the day's
+    /// Each session as a block of time, earliest first: the day's
     /// timeline.
-    pub blocks: Vec<(DateTime<Utc>, DateTime<Utc>, String)>,
+    pub blocks: Vec<Block>,
+}
+
+/// One session on the day's timeline.
+#[derive(Debug, PartialEq)]
+pub struct Block {
+    pub start: DateTime<Utc>,
+    /// Now, while it runs.
+    pub end: DateTime<Utc>,
+    pub activity: String,
+    pub focus: Option<i32>,
+}
+
+impl Block {
+    /// Whether this session asks for a focus rating (not breaks and
+    /// disruptions), rated or not.
+    pub fn rateable(&self) -> bool {
+        session::asks_focus(&self.activity)
+    }
 }
 
 impl DaySummary {
@@ -42,14 +60,13 @@ impl DaySummary {
         self.tracked - self.break_time - self.disruption_time
     }
 
-    /// The activity going on at `at`, if any (the latest started, should
+    /// The session going on at `at`, if any (the latest started, should
     /// sessions overlap).
-    pub fn activity_at(&self, at: DateTime<Utc>) -> Option<&str> {
+    pub fn block_at(&self, at: DateTime<Utc>) -> Option<&Block> {
         self.blocks
             .iter()
             .rev()
-            .find(|(start, end, _)| *start <= at && at < *end)
-            .map(|(_, _, activity)| activity.as_str())
+            .find(|block| block.start <= at && at < block.end)
     }
 }
 
@@ -108,9 +125,14 @@ pub fn summarize(today: &[Session], active: Option<&Session>, now: DateTime<Utc>
         blocks: {
             let mut blocks = sessions
                 .iter()
-                .map(|s| (s.started_at, s.ended_at.unwrap_or(now), s.activity.clone()))
+                .map(|s| Block {
+                    start: s.started_at,
+                    end: s.ended_at.unwrap_or(now),
+                    activity: s.activity.clone(),
+                    focus: s.focus,
+                })
                 .collect::<Vec<_>>();
-            blocks.sort_by_key(|(start, _, _)| *start);
+            blocks.sort_by_key(|block| block.start);
             blocks
         },
     }
@@ -157,24 +179,31 @@ mod tests {
     }
 
     #[test]
-    fn blocks_follow_the_day_and_tell_the_activity_at_a_time() {
+    fn blocks_follow_the_day_and_tell_what_ran_at_a_time() {
         let active = session(at(11, 0), None, "Reading", None);
+        let mut programming = session(at(9, 0), Some(at(10, 0)), "Programming", None);
+        programming.focus = Some(3);
         let today = [
             session(at(10, 0), Some(at(10, 30)), BREAK, None),
-            session(at(9, 0), Some(at(10, 0)), "Programming", None),
+            programming,
         ];
         let s = summarize(&today, Some(&active), at(12, 0));
         let activities = s
             .blocks
             .iter()
-            .map(|(_, _, a)| a.as_str())
+            .map(|b| b.activity.as_str())
             .collect::<Vec<_>>();
         assert_eq!(activities, ["Programming", BREAK, "Reading"]);
-        assert_eq!(s.blocks[2].1, at(12, 0), "running: up to now");
-        assert_eq!(s.activity_at(at(9, 59)), Some("Programming"));
-        assert_eq!(s.activity_at(at(10, 0)), Some(BREAK));
-        assert_eq!(s.activity_at(at(10, 45)), None, "a gap");
-        assert_eq!(s.activity_at(at(11, 30)), Some("Reading"));
+        assert_eq!(s.blocks[2].end, at(12, 0), "running: up to now");
+        let activity = |t| s.block_at(t).map(|b| b.activity.as_str());
+        assert_eq!(activity(at(9, 59)), Some("Programming"));
+        assert_eq!(activity(at(10, 0)), Some(BREAK));
+        assert_eq!(activity(at(10, 45)), None, "a gap");
+        assert_eq!(activity(at(11, 30)), Some("Reading"));
+        // With its rating, and whether it could have one.
+        assert_eq!(s.block_at(at(9, 30)).unwrap().focus, Some(3));
+        assert!(!s.block_at(at(10, 0)).unwrap().rateable());
+        assert!(s.block_at(at(11, 30)).unwrap().rateable());
     }
 
     #[test]

@@ -1819,15 +1819,25 @@ impl App {
         }
 
         let mut lines = Vec::new();
-        for (label, graph_rows, items) in [
+        if graphs {
+            // The focus line sits on top of the timeline, under no label.
+            let from = start_of_hour(start);
+            let indent = Span::raw(" ".repeat(SUMMARY_LABEL_WIDTH as usize));
+            let focus = focus_row(&summary, from, end, graph_width);
+            lines.push(Line::from([vec![indent], focus].concat()));
+        }
+        for (i, (label, graph_rows, items)) in [
             ("Day     ", day_rows, day),
             ("Activity", activity_rows, activities),
             ("Project ", project_rows, projects),
             ("Focus   ", Vec::new(), focus),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             // With the graphs there is room to breathe: a blank row
             // between groups.
-            if graphs && !lines.is_empty() {
+            if graphs && i > 0 {
                 lines.push(Line::default());
             }
             let rows = [graph_rows, wrap_items(items, width, label)].concat();
@@ -2532,9 +2542,10 @@ fn wrap_items(items: Vec<Item>, width: u16, label: &str) -> Vec<Item> {
 const SUMMARY_LABEL_WIDTH: u16 = 10;
 /// Narrower than this, the summary's graphs are left out.
 const MIN_GRAPH_WIDTH: usize = 10;
-/// Rows the graphs add to the summary: the timeline, its hours, the two
-/// share bars, and a blank row between each of the four groups.
-const GRAPH_ROWS: u16 = 4 + 3;
+/// Rows the graphs add to the summary: the focus line, the timeline, its
+/// hours, the two share bars, and a blank row between each of the four
+/// groups.
+const GRAPH_ROWS: u16 = 5 + 3;
 /// Rows today's sessions keep for the summary to show its graphs: about two
 /// sessions.
 const TODAY_ROOM_FOR_GRAPHS: u16 = 8;
@@ -2572,10 +2583,41 @@ fn timeline_row(
         .map(|i| {
             let offset = span * (i as f64 + 0.5) / halves as f64;
             let at = start + chrono::Duration::milliseconds(offset as i64);
-            summary.activity_at(at).map(theme::activity_color)
+            summary
+                .block_at(at)
+                .map(|block| theme::activity_color(&block.activity))
         })
         .collect::<Vec<_>>();
     half_cells(&colors)
+}
+
+/// A line over the timeline (`━`, mid-row, so it lifts off the bar) in the
+/// focus rating of what ran at each cell's middle: red, yellow, green, or
+/// dimmed for a session that could be rated but wasn't. Blank over breaks,
+/// disruptions and gaps, which are never rated.
+fn focus_row(
+    summary: &DaySummary,
+    start: chrono::DateTime<Utc>,
+    end: chrono::DateTime<Utc>,
+    width: usize,
+) -> Item {
+    let span = (end - start).num_milliseconds().max(1) as f64;
+    (0..width)
+        .map(|i| {
+            let offset = span * (i as f64 + 0.5) / width as f64;
+            let at = start + chrono::Duration::milliseconds(offset as i64);
+            let color = match summary.block_at(at) {
+                Some(block) if block.rateable() => match block.focus {
+                    Some(1) => theme::BAD,
+                    Some(2) => theme::OK,
+                    Some(3) => theme::GOOD,
+                    _ => theme::UNRATED,
+                },
+                _ => return Span::raw(" "),
+            };
+            Span::styled("━", Style::new().fg(color))
+        })
+        .collect()
 }
 
 /// The hours (local time) under the timeline, each at the cell where it
@@ -4069,6 +4111,20 @@ mod tests {
         assert_eq!(buf[(last, y)].fg, Color::LightBlue);
         let timeline: String = line_from(buf, y, first).chars().take(68).collect();
         assert!(timeline.trim_start().contains(' '), "the gap: {timeline:?}");
+        // On top, the focus line: green over the two rated (3) sessions,
+        // blank over the gap.
+        let focus: String = line_from(buf, y - 1, first).chars().take(68).collect();
+        assert_eq!(buf[(last, y - 1)].symbol(), "━");
+        assert_eq!(buf[(last, y - 1)].fg, Color::Green);
+        assert!(focus.trim().contains(' '), "the gap: {focus:?}");
+        assert_eq!(
+            line_from(buf, y - 1, 1)
+                .chars()
+                .take(10)
+                .collect::<String>()
+                .trim(),
+            ""
+        );
         // Hours under it, the first at the left edge, then the day in
         // words, without the span again.
         let hours: String = line_from(buf, y + 1, first).chars().take(68).collect();
@@ -4135,6 +4191,51 @@ mod tests {
         let row = timeline_row(&summary, from, local(11, 30), 10);
         let symbols = row.iter().map(|s| s.content.as_ref()).collect::<String>();
         assert_eq!(symbols, "  ████████", "09:00–09:30 of 2h 30m: 2 cells");
+    }
+
+    #[test]
+    fn the_focus_line_shows_ratings_and_skips_breaks() {
+        let local = |h, m| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, 31, h, m, 0)
+                .unwrap()
+        };
+        let mut t = TestApp::new();
+        for (from, to, activity, focus) in [
+            ((9, 0), (9, 30), "Programming", Some(1)),
+            ((9, 30), (10, 0), BREAK, None),
+            ((10, 0), (10, 30), "Programming", None),
+            ((10, 30), (11, 0), MEETING, Some(3)),
+        ] {
+            let mut s = finished_session(local(from.0, from.1), local(to.0, to.1), focus);
+            s.activity = activity.into();
+            t.app.today_sessions.insert(0, s);
+        }
+        let summary = t.app.day_summary();
+        let row = focus_row(
+            &summary,
+            local(9, 0).with_timezone(&Utc),
+            local(11, 0).with_timezone(&Utc),
+            8,
+        );
+        let shown = row
+            .iter()
+            .map(|s| (s.content.as_ref(), s.style.fg))
+            .collect::<Vec<_>>();
+        let (red, gray, green) = (Some(Color::Red), Some(Color::DarkGray), Some(Color::Green));
+        assert_eq!(
+            shown,
+            [
+                ("━", red),
+                ("━", red),
+                (" ", None),
+                (" ", None),
+                ("━", gray),
+                ("━", gray),
+                ("━", green),
+                ("━", green),
+            ]
+        );
     }
 
     #[test]
