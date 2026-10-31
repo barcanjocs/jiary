@@ -1,3 +1,4 @@
+use super::text::{fmt_time, wrap_text};
 use super::*;
 use crate::db::Db;
 use crate::idle;
