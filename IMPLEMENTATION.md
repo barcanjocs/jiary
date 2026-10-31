@@ -356,25 +356,41 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
 - **Active** (` ACTIVE `) — bold timer, dimmed label/value rows via
   `theme::kv`, interruptions red when > 0, cached previous notes, then the
   session's own notes as bullets; a dimmed hint when there is no session.
-  Never collapses. The cat sits top-right (`split_for_cat`), one column in
+  Never collapses. While the cat fits the width (`cat_fits`), the section
+  is at least the cat's height, even with no session. The cat sits
+  top-right (`split_for_cat`), one column in
   from the border, and is left out when the section is shorter than the
   sprite or the text would get under 24 columns.
 
 ### The cat (`mascot.rs`)
 
-Pixel art drawn with half blocks: each sprite is 14×10 pixels (14×5 cells),
-each cell showing a top and a bottom pixel. `render` picks per cell: blank
-for two transparent pixels, `█` for two equal colors, `▀`/`▄` in the
-pixel's color when one half is transparent (the terminal background shows
-through), and `▀` with fg = top, bg = bottom otherwise. Palette characters
-map to `theme::CAT_*`: a slim blue kitten whose fur is the app's accent
-(`CAT_FUR = ACCENT`), with a `LightCyan` muzzle and belly, so it reads on
-dark and light backgrounds.
+Pixel art drawn with half blocks on a 24×10-pixel canvas (24×5 cells), each
+cell showing a top and a bottom pixel. `render` picks per cell: blank for
+two transparent pixels, `█` for two equal colors, `▀`/`▄` in the pixel's
+color when one half is transparent (the terminal background shows through),
+and `▀` with fg = top, bg = bottom otherwise. A frame can also carry text
+over transparent cells (`z`, `…`, `!`, `✓`, `♥`, `♪`, each with its own
+color), for symbols that read better as characters than as pixels. Palette
+characters map to `theme::CAT_*`: a slim blue kitten whose fur is the app's
+accent (`CAT_FUR = ACCENT`), a pink friend, and props.
 
-Animation is a schedule of (milliseconds, frame) steps looped by wall-clock
-time, so it runs at the same pace regardless of how often the app redraws
-(~10×/sec). All frames share one size so swapping them never shifts the
-layout. The idle loop is mostly still, with blinks and tail flicks.
+What it shows (`App::cat_lines`):
+
+- **`Mood`**, from the session (`App::mood`): `Idle` with none, `Working`
+  (writing in a notebook) in a work session, `Drowsy` once a work session
+  passes `DROWSY_AFTER_MINUTES` (25, a candidate for a setting), `Sleeping`
+  on a break, `Meeting` (talking with the friend) in a meeting, `Gaming` in
+  a disruption. Moods loop by wall-clock time, so they run at the same pace
+  regardless of how often the app redraws (~10×/sec).
+- **`Reaction`**, a one-off shown for `REACTION_MS` (1.5 s) from the moment
+  it is triggered (`App::react`, timed with `Instant`): `Flinch` on `i`,
+  `Noted` when a note is added, `Rated(n)` when a session ends with a focus
+  rating (hearts / a tune / drooped ears). Skipping the rating or saving an
+  empty note triggers nothing.
+
+All frames share one size, and the cat's body sits on the same columns in
+every scene where it is alone (pinned by a test), so switching moods or
+starting a reaction never makes it jump.
 - **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
   (completed and the running one), newest first, separated by blank rows:
   bold time range + duration, a focus badge (`F1` red / `F2` yellow / `F3`

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use chrono::Utc;
 use ratatui::Frame;
@@ -12,7 +13,7 @@ use ratatui::widgets::{
 
 use crate::db::Db;
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
-use crate::mascot;
+use crate::mascot::{self, Mood, Reaction};
 use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
 use crate::summary::{DaySummary, summarize};
 use crate::theme;
@@ -73,7 +74,14 @@ pub struct App {
     /// A press on a collapsible section's title, pending until release: it
     /// toggles only if the mouse didn't move (a click, not a drag).
     title_press: Option<Section>,
+    /// The cat's current one-off reaction and when it started; it shows
+    /// for `mascot::REACTION_MS`, then the cat goes back to its mood.
+    reaction: Option<(Reaction, Instant)>,
 }
+
+/// After this long in a work session the cat gets drowsy, a nudge to take a
+/// break. (A candidate for a user setting.)
+const DROWSY_AFTER_MINUTES: i64 = 25;
 
 enum Screen {
     Main,
@@ -198,6 +206,7 @@ impl App {
             size: (0, 0),
             drag: None,
             title_press: None,
+            reaction: None,
         };
 
         if let Some(path) = &app.layout_path {
@@ -415,6 +424,7 @@ impl App {
                                 session.interruptions =
                                     Some(session.interruptions.unwrap_or(0) + 1);
                             }
+                            self.react(Reaction::Flinch);
                         }
                     }
                 }
@@ -647,6 +657,9 @@ impl App {
             self.append_active_note(&notes);
         }
         self.complete_active(focus);
+        if let Some(focus) = focus {
+            self.react(Reaction::Rated(focus));
+        }
         self.screen = Screen::Main;
     }
 
@@ -664,6 +677,7 @@ impl App {
                 if !form.input.is_empty() {
                     let note = form.input.clone();
                     self.append_active_note(&note);
+                    self.react(Reaction::Noted);
                 }
                 self.screen = Screen::Main;
             }
@@ -1019,8 +1033,13 @@ impl App {
     /// Content-fitting heights of the active section and the summary,
     /// borders included.
     fn content_heights(&self, width: u16) -> ContentHeights {
+        let mut active = self.active_lines().len() as u16;
+        if cat_fits(width.saturating_sub(2)) {
+            // Tall enough for the cat, even with no session running.
+            active = active.max(mascot::HEIGHT);
+        }
         ContentHeights {
-            active: self.active_lines().len() as u16 + 2,
+            active: active + 2,
             summary: self.summary_lines(width.saturating_sub(2)).len() as u16 + 2,
         }
     }
@@ -1076,8 +1095,7 @@ impl App {
         let (text_area, cat_area) = split_for_cat(inner);
         frame.render_widget(Paragraph::new(self.active_lines()), text_area);
         if let Some(cat_area) = cat_area {
-            let millis = Utc::now().timestamp_millis().max(0) as u64;
-            frame.render_widget(Paragraph::new(mascot::lines(millis)), cat_area);
+            frame.render_widget(Paragraph::new(self.cat_lines()), cat_area);
         }
 
         if self.layout.today_collapsed {
@@ -1150,6 +1168,52 @@ impl App {
                 area.inner(Margin::new(0, 1)),
                 &mut state,
             );
+        }
+    }
+
+    // --- the cat ------------------------------------------------------------
+
+    /// What the cat does for the current session: idle with none, asleep on
+    /// a break, chatting in a meeting, gaming in a disruption, and writing
+    /// in a work session (drowsy once it runs past `DROWSY_AFTER_MINUTES`).
+    fn mood(&self) -> Mood {
+        let Some(session) = &self.active_session else {
+            return Mood::Idle;
+        };
+        match session.activity.as_str() {
+            BREAK => Mood::Sleeping,
+            MEETING => Mood::Meeting,
+            DISRUPTION => Mood::Gaming,
+            _ if Utc::now() - session.started_at
+                >= chrono::Duration::minutes(DROWSY_AFTER_MINUTES) =>
+            {
+                Mood::Drowsy
+            }
+            _ => Mood::Working,
+        }
+    }
+
+    /// Starts a one-off reaction, replacing any still playing.
+    fn react(&mut self, reaction: Reaction) {
+        self.reaction = Some((reaction, Instant::now()));
+    }
+
+    /// The reaction still playing, with how far into it we are.
+    fn current_reaction(&self) -> Option<(Reaction, u64)> {
+        let (reaction, started) = self.reaction?;
+        let elapsed = started.elapsed().as_millis() as u64;
+        (elapsed < mascot::REACTION_MS).then_some((reaction, elapsed))
+    }
+
+    /// The cat's current frame: a reaction while one plays, else its mood
+    /// (animated by the wall clock, so every app instance stays in step).
+    fn cat_lines(&self) -> Vec<Line<'static>> {
+        match self.current_reaction() {
+            Some((reaction, elapsed)) => mascot::reaction_lines(reaction, elapsed),
+            None => {
+                let millis = Utc::now().timestamp_millis().max(0) as u64;
+                mascot::mood_lines(self.mood(), millis)
+            }
         }
     }
 
@@ -1559,18 +1623,27 @@ fn draw_suggestions(frame: &mut Frame, area: ratatui::layout::Rect, field: &Auto
     }
 }
 
+/// Columns the cat takes beside the session text: its canvas plus a gap on
+/// each side.
+const CAT_COLUMNS: u16 = mascot::WIDTH + 2;
+
+/// Whether the cat fits beside at least this much session text in an active
+/// section `inner_width` columns wide.
+fn cat_fits(inner_width: u16) -> bool {
+    const MIN_TEXT_WIDTH: u16 = 24;
+    inner_width >= MIN_TEXT_WIDTH + CAT_COLUMNS
+}
+
 /// Splits the active section's interior into the session text and, when it
 /// fits, the cat on the right (top-aligned, one column in from the border).
 /// The cat is left out rather than squeezing the text below
 /// `MIN_TEXT_WIDTH` or being cut off vertically.
 fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>) {
-    const MIN_TEXT_WIDTH: u16 = 24;
-    let cat_columns = mascot::WIDTH + 2; // a gap on each side
-    if inner.width < MIN_TEXT_WIDTH + cat_columns || inner.height < mascot::HEIGHT {
+    if !cat_fits(inner.width) || inner.height < mascot::HEIGHT {
         return (inner, None);
     }
     let text = Rect {
-        width: inner.width - cat_columns,
+        width: inner.width - CAT_COLUMNS,
         ..inner
     };
     let cat = Rect::new(
@@ -2404,16 +2477,10 @@ mod tests {
         let t = TestApp::new();
         let buf = render(&t.app);
         assert!(line(&buf, 1).starts_with("╭ ACTIVE "));
-        assert_eq!(
-            line(&buf, 2),
-            format!(
-                "│No active session. Press s to start one.{}│",
-                " ".repeat(38)
-            )
-        );
+        assert!(line(&buf, 2).starts_with("│No active session. Press s to start one.  "));
         assert_eq!(buf[(1, 2)].fg, Color::Gray);
-        // Content-fitting: border, hint, border.
-        assert!(line(&buf, 3).starts_with("╰"));
+        // As tall as the idling cat beside the hint: border, 5 rows, border.
+        assert!(line(&buf, 7).starts_with("╰"));
     }
 
     #[test]
@@ -2496,13 +2563,13 @@ mod tests {
             .today_sessions
             .push(finished_session(start, end, None));
         let buf = render(&t.app);
-        // Below the 3-row active section; inner text starts at column 1.
-        assert!(line(&buf, 4).starts_with("╭ ▾ TODAY · 1 session "));
-        assert!(line_from(&buf, 5, 1).starts_with("10:00 – 11:30 (1h 30m) F- I:0 "));
-        assert!(buf[(1, 5)].modifier.contains(Modifier::BOLD)); // time range
-        let dur_col = col_of(&buf, 5, "1h 30m");
-        assert!(buf[(dur_col, 5)].modifier.contains(Modifier::BOLD)); // duration
-        assert!(line_from(&buf, 6, 1).starts_with("alpha · beta · Programming "));
+        // Below the 7-row active section (tall enough for the cat); inner text starts at column 1.
+        assert!(line(&buf, 8).starts_with("╭ ▾ TODAY · 1 session "));
+        assert!(line_from(&buf, 9, 1).starts_with("10:00 – 11:30 (1h 30m) F- I:0 "));
+        assert!(buf[(1, 9)].modifier.contains(Modifier::BOLD)); // time range
+        let dur_col = col_of(&buf, 9, "1h 30m");
+        assert!(buf[(dur_col, 9)].modifier.contains(Modifier::BOLD)); // duration
+        assert!(line_from(&buf, 10, 1).starts_with("alpha · beta · Programming "));
     }
 
     #[test]
@@ -2519,8 +2586,10 @@ mod tests {
                 .today_sessions
                 .push(finished_session(start, end, focus));
         }
+        // With the summary collapsed, all four items fit.
+        t.app.layout.summary_collapsed = true;
         let buf = render(&t.app);
-        // Items stack three rows apart (range, parts, spacing), from row 5.
+        // Items stack three rows apart (range, parts, spacing), from row 9.
         let expectations = [
             ("F1", Color::Red),
             ("F2", Color::Yellow),
@@ -2528,7 +2597,7 @@ mod tests {
             ("F-", Color::Gray),
         ];
         for (i, (badge, color)) in expectations.iter().enumerate() {
-            let y = 5 + 3 * i as u16;
+            let y = 9 + 3 * i as u16;
             let col = col_of(&buf, y, badge);
             assert_eq!(buf[(col, y)].fg, *color);
         }
@@ -2762,10 +2831,12 @@ mod tests {
 
     #[test]
     fn the_cat_hides_when_the_section_is_too_small() {
-        // No session: the active section is one row tall.
-        let t = TestApp::new();
+        // Shrunk below the cat's height.
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 0));
+        t.app.layout.active_height = Some(5);
         let buf = render(&t.app);
-        assert!((1..79).all(|x| buf[(x, 2)].fg != Color::Cyan));
+        assert!((1..79).all(|x| (2..5).all(|y| buf[(x, y)].fg != Color::Cyan)));
 
         // Too narrow to keep 24 columns of text beside it.
         let mut t = TestApp::new();
@@ -2776,6 +2847,77 @@ mod tests {
         terminal.draw(|frame| t.app.draw(frame)).unwrap();
         let buf = terminal.backend().buffer();
         assert!((1..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Cyan)));
+    }
+
+    #[test]
+    fn the_cats_mood_follows_the_session() {
+        let mut t = TestApp::new();
+        assert_eq!(t.app.mood(), Mood::Idle);
+        for (activity, mood) in [
+            ("Reading", Mood::Working),
+            (BREAK, Mood::Sleeping),
+            (MEETING, Mood::Meeting),
+            (DISRUPTION, Mood::Gaming),
+        ] {
+            let mut session = running_session(chrono::Duration::minutes(5), 0);
+            session.activity = activity.into();
+            t.app.active_session = Some(session);
+            assert_eq!(t.app.mood(), mood, "{activity}");
+        }
+        // A long work session gets drowsy; a long meeting doesn't.
+        let long = chrono::Duration::minutes(DROWSY_AFTER_MINUTES);
+        t.app.active_session = Some(running_session(long, 0));
+        assert_eq!(t.app.mood(), Mood::Drowsy);
+        let mut meeting = running_session(long, 0);
+        meeting.activity = MEETING.into();
+        t.app.active_session = Some(meeting);
+        assert_eq!(t.app.mood(), Mood::Meeting);
+    }
+
+    #[test]
+    fn actions_trigger_short_reactions() {
+        let reaction = |t: &TestApp| t.app.current_reaction().map(|(r, _)| r);
+        let mut t = TestApp::new();
+        t.app.start_session("Writing", None, None);
+        assert_eq!(reaction(&t), None);
+
+        t.key(KeyCode::Char('i'));
+        assert_eq!(reaction(&t), Some(Reaction::Flinch));
+
+        t.key(KeyCode::Char('n'));
+        t.typed("idea");
+        t.key(KeyCode::Enter);
+        assert_eq!(reaction(&t), Some(Reaction::Noted));
+
+        for code in [KeyCode::Char('e'), KeyCode::Enter, KeyCode::Char('3')] {
+            t.key(code);
+        }
+        assert_eq!(reaction(&t), Some(Reaction::Rated(3)));
+    }
+
+    #[test]
+    fn skipping_the_rating_or_an_empty_note_gets_no_reaction() {
+        let mut t = TestApp::new();
+        t.app.start_session("Writing", None, None);
+        for code in [KeyCode::Char('n'), KeyCode::Enter] {
+            t.key(code);
+        }
+        assert!(t.app.current_reaction().is_none());
+        for code in [KeyCode::Char('e'), KeyCode::Enter, KeyCode::Enter] {
+            t.key(code);
+        }
+        assert!(t.app.active_session.is_none());
+        assert!(t.app.current_reaction().is_none());
+    }
+
+    #[test]
+    fn reactions_end_after_the_reaction_time() {
+        let mut t = TestApp::new();
+        let long_ago = Instant::now()
+            .checked_sub(std::time::Duration::from_millis(mascot::REACTION_MS))
+            .unwrap();
+        t.app.reaction = Some((Reaction::Flinch, long_ago));
+        assert!(t.app.current_reaction().is_none());
     }
 
     // --- main screen sections ----------------------------------------------
@@ -2823,23 +2965,23 @@ mod tests {
         t.key(KeyCode::Tab);
         t.key(KeyCode::Char(' '));
         let buf = render(&t.app);
-        assert_eq!(line(&buf, 4), "▸ TODAY · 2 sessions · 1h 0m");
-        assert_eq!(buf[(0, 4)].fg, Color::Cyan); // still focused
+        assert_eq!(line(&buf, 8), "▸ TODAY · 2 sessions · 1h 0m");
+        assert_eq!(buf[(0, 8)].fg, Color::Cyan); // still focused
         // The summary takes the freed rows.
-        assert!(line(&buf, 5).starts_with("╭ ▾ SUMMARY "));
+        assert!(line(&buf, 9).starts_with("╭ ▾ SUMMARY "));
         assert!(line(&buf, RENDER_HEIGHT - 2).starts_with("╰"));
 
         t.key(KeyCode::Tab);
         t.key(KeyCode::Char(' '));
         let buf = render(&t.app);
         assert_eq!(
-            line(&buf, 5),
+            line(&buf, 9),
             "▸ SUMMARY · tracked 1h 0m · Programming 1h 0m"
         );
-        assert_eq!(line(&buf, 6), "");
+        assert_eq!(line(&buf, 10), "");
 
         t.key(KeyCode::Char(' ')); // and back
-        assert!(line(&render(&t.app), 5).starts_with("╭ ▾ SUMMARY "));
+        assert!(line(&render(&t.app), 9).starts_with("╭ ▾ SUMMARY "));
     }
 
     #[test]
@@ -2873,16 +3015,18 @@ mod tests {
         assert_eq!(t.app.scroll, 0);
 
         let mut t = with_sessions(TestApp::new(), 10);
-        // 10 items × 2 rows + 9 separators = 29 rows; the viewport is 11.
-        assert_eq!(t.app.today_viewport(), 11);
-        assert_eq!(t.app.max_scroll(), 18);
+        // 10 items × 2 rows + 9 separators = 29 rows; the viewport is 7.
+        assert_eq!(t.app.today_viewport(), 7);
+        assert_eq!(t.app.max_scroll(), 22);
         t.key(KeyCode::Down);
         t.key(KeyCode::Char('j'));
         assert_eq!(t.app.scroll, 2);
         t.key(KeyCode::PageDown);
-        assert_eq!(t.app.scroll, 13);
+        assert_eq!(t.app.scroll, 9);
         t.key(KeyCode::PageDown);
-        assert_eq!(t.app.scroll, 18);
+        t.key(KeyCode::PageDown);
+        t.key(KeyCode::PageDown);
+        assert_eq!(t.app.scroll, 22);
         t.key(KeyCode::Home);
         assert_eq!(t.app.scroll, 0);
         t.key(KeyCode::Up);
@@ -2900,10 +3044,10 @@ mod tests {
         let mut t = TestApp::new();
         t.key(KeyCode::Char('+'));
         t.key(KeyCode::Char('+'));
-        assert_eq!(t.app.layout.active_height, Some(5));
-        assert!(line(&render(&t.app), 5).starts_with("╰"));
+        assert_eq!(t.app.layout.active_height, Some(9));
+        assert!(line(&render(&t.app), 9).starts_with("╰"));
         t.key(KeyCode::Char('-'));
-        assert_eq!(t.app.layout.active_height, Some(4));
+        assert_eq!(t.app.layout.active_height, Some(8));
 
         t.key(KeyCode::Tab);
         t.key(KeyCode::Tab);
@@ -2948,7 +3092,7 @@ mod tests {
         assert_eq!(
             app.layout,
             LayoutPrefs {
-                active_height: Some(4),
+                active_height: Some(8),
                 today_collapsed: true,
                 ..Default::default()
             }
@@ -2976,13 +3120,14 @@ mod tests {
     #[test]
     fn dragging_the_active_border_resizes_it() {
         let mut t = TestApp::new();
-        // No session: the active section is rows 1–3, its border on row 3.
-        drag(&mut t, 3, 7);
-        assert_eq!(t.app.layout.active_height, Some(7));
-        assert!(line(&render(&t.app), 7).starts_with("╰"));
+        // No session: the active section is rows 1–7 (tall enough for the
+        // cat), its border on row 7.
+        drag(&mut t, 7, 11);
+        assert_eq!(t.app.layout.active_height, Some(11));
+        assert!(line(&render(&t.app), 11).starts_with("╰"));
         assert!(t.app.drag.is_none());
         // Clamped so today's sessions keep their minimum.
-        drag(&mut t, 7, 100);
+        drag(&mut t, 11, 100);
         let buf = render(&t.app);
         assert_eq!(
             row_with(&buf, "╭ ▾ SUMMARY ") - row_with(&buf, "╭ ▾ TODAY "),
@@ -3045,14 +3190,14 @@ mod tests {
 
     #[test]
     fn either_row_of_the_line_between_sections_drags_it() {
-        // No session: the active section's bottom border is row 3, today's
-        // top border row 4. Grabbing row 4 moves the same line, keeping the
+        // No session: the active section's bottom border is row 7, today's
+        // top border row 8. Grabbing row 8 moves the same line, keeping the
         // grab offset (no jump on the first move).
         let mut t = TestApp::new();
-        drag(&mut t, 4, 8);
-        assert_eq!(t.app.layout.active_height, Some(7));
+        drag(&mut t, 8, 12);
+        assert_eq!(t.app.layout.active_height, Some(11));
         assert!(!t.app.layout.today_collapsed);
-        assert_eq!(row_with(&render(&t.app), "╭ ▾ TODAY "), 8);
+        assert_eq!(row_with(&render(&t.app), "╭ ▾ TODAY "), 12);
 
         // Same for the summary's top border, even when grabbed on the title.
         let mut t = TestApp::new();

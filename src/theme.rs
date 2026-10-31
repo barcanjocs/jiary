@@ -15,6 +15,23 @@ pub const CAT_LIGHT: Color = Color::LightCyan;
 pub const CAT_PINK: Color = Color::LightRed;
 pub const CAT_EYE: Color = Color::Black;
 pub const CAT_SHINE: Color = Color::White;
+/// The friend it meets with: a pink cat.
+pub const CAT_FRIEND: Color = Color::Magenta;
+pub const CAT_FRIEND_LIGHT: Color = Color::LightMagenta;
+/// Props: notebook paper, ink and spine, pen, game controller and buttons.
+pub const CAT_PAPER: Color = Color::White;
+pub const CAT_INK: Color = Color::Gray;
+pub const CAT_PEN: Color = Color::Yellow;
+pub const CAT_CONTROLLER: Color = Color::DarkGray;
+pub const CAT_BUTTON_A: Color = Color::Red;
+pub const CAT_BUTTON_B: Color = Color::Green;
+/// Symbols drawn as text: `z` and `…`, the flinch's `!`, a note's `✓`,
+/// hearts and music notes.
+pub const CAT_TEXT: Color = MUTED;
+pub const CAT_ALERT: Color = Color::Yellow;
+pub const CAT_CHECK: Color = GOOD;
+pub const CAT_HEART: Color = CAT_PINK;
+pub const CAT_MUSIC: Color = ACCENT;
 
 /// Accent: panel titles, timer, active tab, selected items.
 pub const ACCENT: Color = Color::Cyan;

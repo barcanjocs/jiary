@@ -45,6 +45,8 @@ On first run, a database is created at:
 The main screen has three stacked sections:
 
 - **Active** (top) — the running session: timer, project, task, activity, interruptions and notes, with a small blue pixel-art cat on the right (shown when the section has room for it).
+
+The cat follows what you're doing: it idles when nothing is running, writes in a notebook during work (and gets drowsy after 25 minutes), sleeps on a break, chats with a friend in a meeting, and plays video games when disrupted. It also flinches when you count an interruption, ticks off a note when you add one, and reacts to your focus rating when you end a session.
 - **Today** (middle) — today's sessions, newest first. Scrollable.
 - **Summary** (bottom) — time per activity and per project, average focus, interruptions and disruptions, and the day's span with tracked time, breaks and gaps.
 
