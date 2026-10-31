@@ -17,11 +17,11 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
           # Built on Apple Silicon too: Apple's clang cross-compiles the
           # bundled SQLite for Intel without extra setup.
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15
           # glibc builds on the oldest supported Ubuntu, so they run on any
           # distro from about 2022 on.
           - target: x86_64-unknown-linux-gnu
