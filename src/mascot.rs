@@ -84,7 +84,7 @@ const IDLE_PIXELS: [&str; 10] = [
     "............CCLLLCC...C.",
     "............CCLLLCC..C..",
     "............CCLLLCCCC...",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ];
 
 /// Eyes closed: blinking, or content.
@@ -98,7 +98,7 @@ const SHUT_PIXELS: [&str; 10] = [
     "............CCLLLCC...C.",
     "............CCLLLCC..C..",
     "............CCLLLCCCC...",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ];
 
 const IDLE: Frame = frame(IDLE_PIXELS);
@@ -113,7 +113,7 @@ const IDLE_TAIL: Frame = frame([
     "............CCLLLCC.....",
     "............CCLLLCC...CC",
     "............CCLLLCCCCC..",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ]);
 
 // --- working: a paw on a pen over an open notebook -------------------------
@@ -128,7 +128,7 @@ const WRITE_A_PIXELS: [&str; 10] = [
     ".......OCCCCCCLLLCC.....",
     "NNNNNgNNNNN.CCLLLCC.....",
     "NgggNgNNggN.CCLLLCC.....",
-    "NNNNNgNNNNN.CC.C.CC.....",
+    "NNNNNgNNNNN.CC...CC.....",
 ];
 
 const WRITE_SHUT_PIXELS: [&str; 10] = [
@@ -141,7 +141,7 @@ const WRITE_SHUT_PIXELS: [&str; 10] = [
     ".......OCCCCCCLLLCC.....",
     "NNNNNgNNNNN.CCLLLCC.....",
     "NgggNgNNggN.CCLLLCC.....",
-    "NNNNNgNNNNN.CC.C.CC.....",
+    "NNNNNgNNNNN.CC...CC.....",
 ];
 
 const WRITE_A: Frame = frame(WRITE_A_PIXELS);
@@ -155,7 +155,7 @@ const WRITE_B: Frame = frame([
     "......OCCCCCCCLLLCC.....",
     "NNNNNgNNNNN.CCLLLCC.....",
     "NgggNgNgggN.CCLLLCC.....",
-    "NNNNNgNNNNN.CC.C.CC.....",
+    "NNNNNgNNNNN.CC...CC.....",
 ]);
 const WRITE_BLINK: Frame = frame(WRITE_SHUT_PIXELS);
 const DROWSY_Z: Frame = Frame {
@@ -203,7 +203,7 @@ const MEET_QUIET: Frame = frame([
     "..FFfffFF......CCLLLCC..",
     "..FFfffFF......CCLLLCC..",
     "..FFfffFF......CCLLLCC..",
-    "..FF.F.FF......CC.C.CC..",
+    "..FF...FF......CC...CC..",
 ]);
 
 const MEET_WE_TALK: Frame = Frame {
@@ -217,7 +217,7 @@ const MEET_WE_TALK: Frame = Frame {
         "..FFfffFF......CCLLLCC..",
         "..FFfffFF......CCLLLCC..",
         "..FFfffFF......CCLLLCC..",
-        "..FF.F.FF......CC.C.CC..",
+        "..FF...FF......CC...CC..",
     ],
     text: &[(0, 13, "…", theme::CAT_TEXT)],
 };
@@ -233,7 +233,7 @@ const MEET_THEY_TALK: Frame = Frame {
         "..FFfffFF......CCLLLCC..",
         "..FFfffFF......CCLLLCC..",
         "..FFfffFF......CCLLLCC..",
-        "..FF.F.FF......CC.C.CC..",
+        "..FF...FF......CC...CC..",
     ],
     text: &[(0, 10, "…", theme::CAT_TEXT)],
 };
@@ -250,7 +250,7 @@ const GAME_A: Frame = frame([
     "...........DDDDDDDDDD.C.",
     "..........DDrDDDDDGDDDC.",
     "...........DDDDDDDDDDC..",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ]);
 
 const GAME_B: Frame = frame([
@@ -263,7 +263,7 @@ const GAME_B: Frame = frame([
     "...........DDDDDDDDDD.C.",
     "..........DDDDDDDDGDDDC.",
     "...........DDDDDDDDDDC..",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ]);
 
 const GAME_C: Frame = frame([
@@ -276,7 +276,7 @@ const GAME_C: Frame = frame([
     "...........DDDDDDDDDD.C.",
     "..........DDrDDDDDDDDDC.",
     "...........DDDDDDDDDDC..",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ]);
 
 // --- reactions ---------------------------------------------------------------
@@ -292,7 +292,7 @@ const STARTLED_PIXELS: [&str; 10] = [
     "............CCLLLCC...C.",
     "............CCLLLCC...C.",
     "............CCLLLCCCCC..",
-    "............CC.C.CC.....",
+    "............CC...CC.....",
 ];
 
 const STARTLED: Frame = frame(STARTLED_PIXELS);
@@ -349,7 +349,7 @@ const SAD: Frame = Frame {
         "............CCLLLCC...C.",
         "............CCLLLCC...CC",
         "............CCLLLCCCCC..",
-        "............CC.C.CC.....",
+        "............CC...CC.....",
     ],
     text: &[(0, 22, "…", theme::CAT_TEXT)],
 };
@@ -583,6 +583,22 @@ mod tests {
                     let (top, bottom) = (frame.pixels[row * 2], frame.pixels[row * 2 + 1]);
                     assert_eq!(top.as_bytes()[col], b'.', "{name}: text over pixels");
                     assert_eq!(bottom.as_bytes()[col], b'.', "{name}: text over pixels");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_pixel_between_the_legs() {
+        // Legs are two 2-pixel columns with a gap; a pixel in the middle
+        // reads as something other than a tail.
+        for (name, animation) in all_animations() {
+            for (_, frame) in animation {
+                for row in frame.pixels {
+                    assert!(
+                        !row.contains("CC.C.CC") && !row.contains("FF.F.FF"),
+                        "{name}: {row:?}"
+                    );
                 }
             }
         }
