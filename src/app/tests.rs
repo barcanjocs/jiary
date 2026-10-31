@@ -2555,8 +2555,22 @@ fn the_year_grid_stacks_two_days_per_cell() {
             day(1, 5),
             summary_of(vec![finished_session(at(5, 9), at(5, 10), Some(1))]),
         ),
+        (
+            day(1, 31),
+            summary_of(vec![finished_session(at(31, 9), at(31, 10), Some(2))]),
+        ),
+        (
+            day(2, 1),
+            summary_of(vec![finished_session(
+                chrono::Local.with_ymd_and_hms(2026, 2, 1, 9, 0, 0).unwrap(),
+                chrono::Local
+                    .with_ymd_and_hms(2026, 2, 1, 10, 0, 0)
+                    .unwrap(),
+                Some(3),
+            )]),
+        ),
     ];
-    let grid = year_focus_grid(&days, day(1, 1), day(12, 31), day(1, 5));
+    let grid = year_focus_grid(&days, day(1, 1), day(12, 31), day(2, 1));
     assert_eq!(grid.len(), 5, "month names, then four weekday-pair rows");
     assert!(grid[0][0].content.starts_with("      Jan"));
     // Each row names both its days, top then bottom.
@@ -2580,8 +2594,15 @@ fn the_year_grid_stacks_two_days_per_cell() {
         colors(3, 0),
         ("▀", Some(theme::UNRATED), Some(theme::EMPTY_DAY))
     );
-    // Week 1: Mon 5 (rated 1) over Tue 6, still to come.
+    // Week 1: Mon 5 (rated 1) over Tue 6 (nothing recorded).
     assert_eq!(colors(1, 1), ("▀", Some(theme::FOCUS_RAMP[0]), None));
+    // January's last week, Mon 26 to Sat 31 (rated 2), is its fifth
+    // column; Sun Feb 1 (rated 3) starts February's block next to it.
+    assert_eq!(colors(3, 4), ("▄", Some(theme::focus_gradient(2.0)), None));
+    assert_eq!(colors(4, 4), (" ", None, None));
+    assert_eq!(colors(4, 5), ("▀", Some(theme::FOCUS_RAMP[8]), None));
+    // So each month's name sits over its own block.
+    assert!(grid[0][0].content.starts_with("      Jan  Feb"));
     // 53 weeks fit in 80 columns.
     assert!(item_width(&grid[1]) <= 78);
 }

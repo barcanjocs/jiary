@@ -45,11 +45,12 @@ days with nothing tracked show a faint texture.
 1. a row per month, with its activity bar (scaled to your busiest month),
    its tracked time and its focus;
 2. the year's totals;
-3. its focus grid, with the month names over it. To fit 53 weeks, each
-   character holds two days, one above the other, so each row is labelled
-   with both: `Mo Tu` is Monday on top and Tuesday below, then `We Th`,
-   `Fr Sa`, and `Su` on its own. A column is still one week, read top to
-   bottom.
+3. its focus grid, a block per month with its name above it. A column is
+   one week of that month, read top to bottom; a week that runs into the
+   next month is split, its days shown in each month's block. To fit the
+   year, each character holds two days, one above the other, so each row
+   is labelled with both: `Mo Tu` is Monday on top and Tuesday below, then
+   `We Th`, `Fr Sa`, and `Su` on its own.
 
 ![The year view: a row per month, the year's totals, and the focus grid for the whole year](../images/yearly.svg)
 

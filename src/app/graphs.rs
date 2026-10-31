@@ -221,11 +221,13 @@ pub(super) fn focus_grid(
     rows
 }
 
-/// A year's focus grid, compact enough for 53 weeks in 80 columns: a
-/// column per week, the month names over them, and the weekdays two to a
-/// row, labelled with both ("Mo Tu"), each day half a row tall (`▀`: the
-/// top day in front, the bottom one behind), so the squares stay square
-/// without gaps. Colors as in
+/// A year's focus grid, compact enough for 80 columns: a column per week
+/// of each month, the weeks split where a month ends (so each month is a
+/// block of its own and the week it shares with the next shows its days
+/// in both, blank where the other month's are), the month names over their
+/// blocks, and the weekdays two to a row, labelled with both ("Mo Tu"),
+/// each day half a row tall (`▀`: the top day in front, the bottom one
+/// behind), so the squares stay square without gaps. Colors as in
 /// `focus_grid`, with `theme::EMPTY_DAY` where nothing was tracked.
 pub(super) fn year_focus_grid(
     days: &[(chrono::NaiveDate, DaySummary)],
@@ -235,39 +237,46 @@ pub(super) fn year_focus_grid(
 ) -> Vec<Item> {
     use chrono::Datelike;
     const WEEKDAY: usize = 6; // "Mo Tu "
-    let monday = first - chrono::Duration::days(first.weekday().num_days_from_monday() as i64);
-    let weeks = ((last - monday).num_days() / 7 + 1) as usize;
-    let date = |week: usize, weekday: u32| {
-        monday + chrono::Duration::weeks(week as i64) + chrono::Duration::days(weekday as i64)
-    };
 
-    // Month names over the week each month starts in, where they fit.
-    let mut header = vec![' '; WEEKDAY + weeks];
+    // The columns: each month's weeks, Monday to Sunday, holding only that
+    // month's days (`None` for the other month's and outside the period).
+    let mut columns: Vec<[Option<chrono::NaiveDate>; 7]> = Vec::new();
+    let mut header = vec![' '; WEEKDAY];
     let mut free = WEEKDAY;
-    for month in first
+    for month_start in first
         .iter_days()
         .take_while(|d| *d <= last)
-        .filter(|d| d.day() == 1)
+        .filter(|d| d.day() == 1 || *d == first)
     {
-        let column = WEEKDAY + ((month - monday).num_days() / 7) as usize;
-        let name = month.format("%b").to_string();
-        if column >= free && column + name.len() <= header.len() {
-            header[column..column + name.len()]
-                .iter_mut()
-                .zip(name.chars())
-                .for_each(|(cell, c)| *cell = c);
+        let in_month = |day: chrono::NaiveDate| {
+            day.month() == month_start.month() && day.year() == month_start.year()
+        };
+        let column = WEEKDAY + columns.len();
+        let name = month_start.format("%b").to_string();
+        header.resize(column, ' ');
+        if column >= free {
+            header.extend(name.chars());
             free = column + name.len() + 1;
         }
-    }
-    let mut rows = vec![vec![Span::styled(
-        header.into_iter().collect::<String>(),
-        theme::DIMMED,
-    )]];
-
-    let color = |day: chrono::NaiveDate| -> Option<Color> {
-        if day < first || day > last || day > today {
-            return None;
+        let mut monday = month_start
+            - chrono::Duration::days(month_start.weekday().num_days_from_monday() as i64);
+        while in_month(monday) || in_month(monday + chrono::Duration::days(6)) {
+            columns.push(std::array::from_fn(|weekday| {
+                let day = monday + chrono::Duration::days(weekday as i64);
+                (in_month(day) && day >= first && day <= last).then_some(day)
+            }));
+            monday += chrono::Duration::weeks(1);
         }
+    }
+    header.resize(WEEKDAY + columns.len(), ' ');
+    let header = header
+        .into_iter()
+        .take(WEEKDAY + columns.len())
+        .collect::<String>();
+    let mut rows = vec![vec![Span::styled(header, theme::DIMMED)]];
+
+    let color = |day: Option<chrono::NaiveDate>| -> Option<Color> {
+        let day = day.filter(|day| *day <= today)?;
         let summary = days.iter().find(|(d, _)| *d == day).map(|(_, s)| s)?;
         Some(match summary.average_focus {
             Some(avg) => theme::focus_gradient(avg),
@@ -277,16 +286,20 @@ pub(super) fn year_focus_grid(
     };
     for top in [0, 2, 4, 6] {
         // Both days the row holds, top then bottom: "Mo Tu", …, "Su".
-        let short = |weekday| date(0, weekday).format("%a").to_string()[..2].to_string();
+        let short = |weekday: usize| {
+            chrono::Weekday::try_from(weekday as u8)
+                .map(|day| day.to_string()[..2].to_string())
+                .unwrap_or_default()
+        };
         let name = match top {
             6 => short(top),
             _ => format!("{} {}", short(top), short(top + 1)),
         };
         let mut row = vec![Span::styled(format!("{name:WEEKDAY$}"), theme::DIMMED)];
-        for week in 0..weeks {
-            let upper = color(date(week, top));
+        for column in &columns {
+            let upper = color(column[top]);
             let lower = if top < 6 {
-                color(date(week, top + 1))
+                color(column[top + 1])
             } else {
                 None
             };
