@@ -192,6 +192,7 @@ const SLEEP_C: Frame = Frame {
 };
 
 // --- meeting: a friend (left) and the cat (right) take turns talking --------
+// Each has its tail on its outer side, clear of the faces in the middle.
 
 const MEET_QUIET: Frame = frame([
     "..F.....F......C.....C..",
@@ -200,9 +201,9 @@ const MEET_QUIET: Frame = frame([
     "FFFFWFFFWFF..CCWCCCWCCCC",
     "FFFFKFPFKFF..CCKCPCKCCCC",
     ".FFFfffFFF....CCCLLLCCC.",
-    "..FFfffFF......CCLLLCC..",
-    "..FFfffFF......CCLLLCC..",
-    "..FFfffFF......CCLLLCC..",
+    "F.FFfffFF......CCLLLCC.C",
+    "F.FFfffFF......CCLLLCC.C",
+    ".FFFfffFF......CCLLLCCC.",
     "..FF...FF......CC...CC..",
 ]);
 
@@ -214,9 +215,9 @@ const MEET_WE_TALK: Frame = Frame {
         "FFFFWFFFWFF..CCWCCCWCCCC",
         "FFFFKFPFKFF..CCKCPCKCCCC",
         ".FFFfffFFF....CCCLKLCCC.",
-        "..FFfffFF......CCLLLCC..",
-        "..FFfffFF......CCLLLCC..",
-        "..FFfffFF......CCLLLCC..",
+        "F.FFfffFF......CCLLLCC.C",
+        "F.FFfffFF......CCLLLCC.C",
+        ".FFFfffFF......CCLLLCCC.",
         "..FF...FF......CC...CC..",
     ],
     text: &[(0, 13, "…", theme::CAT_TEXT)],
@@ -230,9 +231,9 @@ const MEET_THEY_TALK: Frame = Frame {
         "FFFFWFFFWFF..CCWCCCWCCCC",
         "FFFFKFPFKFF..CCKCPCKCCCC",
         ".FFFfKfFFF....CCCLLLCCC.",
-        "..FFfffFF......CCLLLCC..",
-        "..FFfffFF......CCLLLCC..",
-        "..FFfffFF......CCLLLCC..",
+        "F.FFfffFF......CCLLLCC.C",
+        "F.FFfffFF......CCLLLCC.C",
+        ".FFFfffFF......CCLLLCCC.",
         "..FF...FF......CC...CC..",
     ],
     text: &[(0, 10, "…", theme::CAT_TEXT)],
@@ -601,6 +602,17 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn meeting_cats_have_tails_on_their_outer_sides() {
+        for frame in [&MEET_QUIET, &MEET_WE_TALK, &MEET_THEY_TALK] {
+            // Friend's tail on the far left, ours on the far right.
+            assert_eq!(&frame.pixels[6][..2], "F.");
+            assert_eq!(&frame.pixels[6][22..], ".C");
+            assert_eq!(&frame.pixels[8][..2], ".F");
+            assert_eq!(&frame.pixels[8][22..], "C.");
         }
     }
 
