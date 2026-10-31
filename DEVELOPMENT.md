@@ -43,8 +43,8 @@ truth for state — this file plus `git log` is all that is needed to resume.
      paragraphs; tighten it to match the code (module map, screens,
      lifecycle, rendering).
   2. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
-     with its limits) and A (browse past days, likely `/day` with ←→ like
-     the period views).
+     with its limits), A (browse past days, likely `/day` with ←→ like
+     the period views) and K (soft Pomodoro, with `/settings`).
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
   maintainer, not an agent. Runner images age out: macOS builds moved to `macos-15` after
@@ -137,6 +137,38 @@ from its scope note alone, without re-deriving context.
         sleep/mood as rows of squares beside the focus grid in the month
         and year views. No correlation coefficients, trend lines or
         predictions.
+- [ ] **K. Soft Pomodoro** (small-medium). A target session length that
+      Jiary shows you've reached, without ever interrupting you: you keep
+      going while in flow, and when you glance at the screen it says "you
+      can take a break now, if you want". Discussed 2026-10-31; the limits
+      are the point, so keep them:
+      - Never interrupts: no bell, no notification, no blinking or growing
+        cue, nothing that stops or ends the session. The cue is only seen
+        if you look at the main screen.
+      - The cue: a thin bar under the timer filling up toward the target;
+        on reaching it the timer turns green and the cat does something
+        new (stretching, a coffee) with a caption like "break's earned, if
+        you want one". Past the target, it just stays that way. Work
+        sessions only: detours (breaks, disruptions, meetings) get no cue.
+      - `/settings`: a small modal (the first settings screen; later
+        settings go here too). Rows `Soft Pomodoro  on` and `Target  25m`;
+        ↑↓ pick a row, Space/Enter toggle, ←→ change the target in 5 min
+        steps, Esc closes. Changes apply at once. It opens a screen, so it
+        needs no command arguments (not blocked on H).
+      - `p` on the main screen turns it on or off (also `/pomodoro` in the
+        palette, and in `?` help). Toggling mid-session just shows or
+        hides the cue against the elapsed time.
+      - Storage: `settings.conf` next to `layout.conf`, read and written
+        like it (tolerating junk lines, see `layout.rs`). Nothing in the
+        db: decided 2026-10-31 not to store the target per session. Hit
+        counts mostly restate session length, and they pull toward a score
+        or streak, which Jiary avoids (see J). Can be added later as a
+        nullable `sessions.target` column if ever wanted.
+      - When on, the cat dozes at the target instead of
+        `DROWSY_AFTER_MINUTES` (25, already marked as a candidate for a
+        setting); when off, nothing changes from today. Update the user
+        manual (recording, main screen, keys) and the README's "Why I made
+        this", which mentions the 25 minutes.
 - [ ] **Nits** (tiny, do whenever):
   - `app/tests.rs` (~2,700 lines) is still one file; it could follow the
     code into one test file per screen, with the harness in `tests/mod.rs`.
