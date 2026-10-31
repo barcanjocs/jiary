@@ -21,34 +21,25 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State (2026-10-31): **v1.0.0 released**
-  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.0). Tree green,
-  171 tests, worktree clean, everything pushed. Since the October notes,
-  on main: one-key `e` with a 5 s rating bar and `u` undo; recent picks in
-  the start form; `[`/`]` move the start; away/idle detection (`idle.rs`);
-  accentuated main screen with activity and project colors (16-color
-  256-color project palette, distinct within a view); day summary graphs
-  (timeline with a focus line, activity and project share bars); `/`
-  command palette; `/weekly`, `/monthly`, `/yearly` (`period.rs`) with a
-  GitHub-style focus grid; length-weighted focus averages; `--version` /
-  `--help`; single-instance lock (`lock.rs`, backlog E); release workflow
-  (`.github/workflows/release.yml`) and `install.sh` (curl one-liner in the
-  README). Since then: `src/app.rs` split into `src/app/` (2026-10-31;
-  one file per screen plus shared pieces, code moved unchanged, see the
-  file map). Docs reorganized: a short README (what it is and isn't,
-  install, a typical day), the user manual in `docs/user/` and the
-  developer manual in `docs/dev/` (IMPLEMENTATION.md moved there).
-- Next, in order:
-  1. **Docs drift.** docs/dev/implementation.md has grown long
-     paragraphs; tighten it to match the code (module map, screens,
-     lifecycle, rendering).
-  2. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
-     with its limits), A (browse past days, likely `/day` with ←→ like
-     the period views) and K (soft Pomodoro, with `/settings`).
+- State (2026-10-31): **v1.0.1 released**
+  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.1). Tree green,
+  172 tests. In place: sessions with one-key `e`, a 5 s
+  rating bar and `u` undo; recent picks; `[`/`]` to move the start;
+  away/idle detection; detours (`d`/`b`/`m`, `r`); the main screen with
+  activity and project colors, the cat and the day's graphs; the `/`
+  palette; `/weekly`, `/monthly`, `/yearly` with focus grids; the
+  single-instance lock; the release workflow and `install.sh`. Since
+  1.0.0: `src/app.rs` split into `src/app/`, a short README, the user and
+  developer manuals in `docs/`, and pictures drawn by the UI code
+  (`app/screenshot.rs`), all in 1.0.1; after it,
+  `docs/dev/implementation.md` rewritten to match the code.
+- Next, in order: backlog H (rename labels, as a `/` command), J (sleep
+  and mood, with its limits), A (browse past days, likely `/day` with ←→
+  like the period views) and K (soft Pomodoro, with `/settings`).
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
-  maintainer, not an agent. Runner images age out: macOS builds moved to `macos-15` after
-  `macos-14` was retired (Nov 2026).
+  maintainer, not an agent. Runner images age out: macOS builds moved to
+  `macos-15` after `macos-14` was retired (Nov 2026).
 - Blockers / open questions: the Intel macOS and Linux builds are built
   and tested in CI but not yet run by hand on real machines.
 

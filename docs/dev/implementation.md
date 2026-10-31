@@ -1,132 +1,109 @@
 # Implementation details
 
-Developer reference for how jiary works internally. Read this before changing
-code. User-facing behavior (keys, data model, backup) lives in the user
-manual (`docs/user/`); current session state, the backlog, and working
-conventions live in `DEVELOPMENT.md` at the repo root. This document explains
-*how* and *why*; keep it in sync when architecture changes.
+How Jiary works inside, and why. Read it before changing code, and keep it
+in sync when the architecture changes. What Jiary does for the user lives
+in the [user manual](../user/README.md); where things stand, the backlog
+and the working conventions live in [`DEVELOPMENT.md`](../../DEVELOPMENT.md).
 
 ## Big picture
 
-Single binary, single thread, no network, no system dependencies (SQLite is
-bundled). One SQLite file is the entire persistence layer; everything else is
-transient UI state that is rebuilt from the db on startup.
+One binary, one thread for the UI, no network, no system dependencies
+(SQLite is bundled). One SQLite file holds everything that matters; the rest
+is UI state rebuilt from it on startup.
 
 ```
-main.rs        event loop: size → draw → place cursor → poll(100 ms) → key/mouse
-  └─ App       all UI state + a Db handle          (app/)
-       ├─ Db   rusqlite connection; all SQL lives here (db.rs)
-       ├─ Session  one db row with parsed timestamps (session.rs)
-       ├─ LayoutPrefs  main-screen section geometry + layout file (layout.rs)
-       ├─ summarize  day totals over in-memory sessions (summary.rs)
-       ├─ mascot  the cat's pixel-art frames + animation (mascot.rs)
-       ├─ captions  lines shown under the cat (captions.rs)
-       └─ theme  palette + shared style helpers    (theme.rs)
+main.rs        flags → terminal check → lock → db → event loop
+  ├─ lock      one jiary at a time                      (lock.rs)
+  ├─ idle      system idle time, polled on a thread     (idle.rs)
+  └─ App       all UI state + the Db handle             (app/)
+       ├─ Db         rusqlite connection; all SQL       (db.rs)
+       ├─ Session    one row, timestamps parsed         (session.rs)
+       ├─ summarize  totals over in-memory sessions     (summary.rs)
+       ├─ Period     week / month / year date ranges    (period.rs)
+       ├─ LayoutPrefs  main-screen geometry + file      (layout.rs)
+       ├─ mascot, captions  the cat and its sentences   (mascot.rs, captions.rs)
+       └─ theme      colors and shared styles           (theme.rs)
 ```
 
-The loop runs at ~10 fps: `event::poll` times out after 100 ms, so the timer
-in the active-session panel ticks even when no key is pressed. Key *presses*
-and mouse events are processed: key releases and repeats (reported by some
-terminals, e.g. on Windows) and all other crossterm events are ignored, and
-Ctrl combinations never reach a form as plain letters. Quitting is a return value,
-not a state: `App::handle_key` returns `true` for `q` on the main screen or
-Ctrl+C anywhere, which breaks the loop in `main.rs`.
+The loop runs at about 10 fps: each turn sets the size, draws, places the
+cursor, then waits up to 100 ms for an event, so the timer ticks with no
+input. Key presses and mouse events are handled; key releases and repeats
+(some terminals report them) and other events are ignored, and Ctrl
+combinations never reach a form as plain letters. Quitting is a return
+value: `App::handle_key` returns `true` for `q` on the main screen or Ctrl+C
+anywhere.
 
-Data flow is one-way per frame: **state → pixels**. `draw` never mutates and
-never touches the db (it runs ~10×/sec). Key handlers mutate state and hit the
-db; the next frame renders the result. There is no event bus, no async, and no
-shared state — `Db`'s `Connection` is owned by `App` alone.
+**Data flows one way per frame: state → pixels.** `draw` never mutates and
+never touches the db. Key handlers change state and write to the db; the
+next frame shows the result. No event bus, no async, no shared state:
+`App` alone owns the `Db`.
 
 ## Module map
 
-- **`main.rs`** — owns the terminal lifecycle: `ratatui::init()` (raw mode +
-  alternate screen + a panic hook that restores them, chained with one that
-  re-shows the cursor and releases the mouse), mouse capture,
-  `ratatui::restore()` on every other exit path, cursor show/hide, and the
-  loop. It knows nothing about UI; it calls `app.set_size`, `app.draw`,
-  `app.cursor_position`, `app.handle_key`, `app.handle_mouse`,
-  `app.observe_idle` and nothing else. A thread polls `idle::system_idle`
-  every `idle::POLL` and sends the result over a channel, which the loop
-  drains before each frame (the poll runs a command, so it stays off the
-  draw loop). It also passes `App::new` the layout file path (`layout.conf` in the
-  data dir).
-- **`layout.rs`** — `LayoutPrefs` (section heights and collapsed state) and
-  pure geometry: `resolve` splits the content area into the three main-screen
-  sections, `resize` / `set_*_height` move borders with clamping, plus the
-  lenient `key=value` layout file (`parse`, `load`, `save`). No rendering.
-- **`mascot.rs`** — the cat: sprites as palette-character grids (two pixel
-  rows per terminal row), `render` to half-block `Line`s, and the frame
-  schedule (`lines(millis)`). Pure; colors come from `theme::CAT_*`.
-- **`captions.rs`** — the sentences shown under the cat, one list per
-  `Mood` plus optional per-activity lists for work sessions, and
-  `caption(mood, activity, seed)` to pick one. Adding a caption means adding
-  a sentence to a list. Two fixed lines take over for a moment: `FLINCH`
-  ("oups!") while the cat flinches at `i`, after which `resample_caption`
-  picks a different sentence, and `RATING` during the rating window.
-- **`lock.rs`** — `acquire(path)`: the single-instance lock, an exclusive
-  `flock` on a file held for the process's lifetime; `LockError::Running`
-  (with the holder's pid) when another jiary has it.
-- **`idle.rs`** — `system_idle()`: time since the last keyboard or mouse
-  input system-wide, from `ioreg -c IOHIDSystem` on macOS or `xprintidle` on
-  Linux, `None` elsewhere or when the tool fails.
-- **`period.rs`** — `Period` (week, month, year): which days the one `offset`
-  periods from the current one covers, and its title. Pure date arithmetic.
-- **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
-  activity and project, focus (averaged weighted by session length),
-  interruptions, disruptions, breaks, span, gaps and the sessions as
-  timeline blocks. Takes any sessions, so a week's or a month's too.
-  Pure; computed from in-memory sessions every frame.
-- **`db.rs`** — `Db` wraps a `rusqlite::Connection`. The schema (including the
-  single-active-session trigger) is a `const SCHEMA` string applied with
-  `execute_batch` on every open, so opening an existing db also migrates it.
-  All SQL in the project lives in this file. Unit tests at the bottom.
-- **`session.rs`** — `Session`: a plain data struct mirroring one db row, with
-  timestamps already parsed to `DateTime<Utc>`. Nothing else.
-- **`theme.rs`** — the 16-color palette (`ACCENT`, `MUTED`, `GOOD`, `OK`,
-  `BAD`), a color per kind of activity (`activity_color`: work, meeting,
-  break, disruption), the project palette (`PROJECT_PALETTE`: 16
-  hand-picked 256-color hues, the first 8 the most distinct, all apart
-  from the activity, focus and accent colors; `NO_PROJECT` gray) and shared styles (`TITLE`,
-  `DIMMED`, `VALUE`, `TIME`, `NONE`, `ERROR`, `kv()`, `activity()`,
-  `focus_badge()`, `picker_symbol()`). All widgets take their styles from
-  here so the look is tweaked in one place. Everything but projects uses
-  the 16 named colors (no truecolor), so it looks decent on any terminal;
-  projects, an open set, need more hues than that leaves, and any modern
-  terminal has the 256-color palette.
-  The rule on the main screen: labels and words dimmed or plain, values
-  bold, times in bold accent, activities and projects in their colors,
-  missing values dimmed italic.
-
-  Project colors go by the order projects were first used
-  (`db.projects_by_first_use`, loaded into `App::project_order` with the
-  suggestions), so a project keeps its color from day to day: its rank
-  picks a preferred color from the palette. Each view then makes them
-  distinct (`theme::project_colors`): when two projects it shows would
-  share one, the one used first keeps it and the other takes the next free
-  color. First use, not time, decides, so colors don't swap as the day's
-  times change. On the main screen the view is today's projects
-  (`App::project_color`); the multi-day views will do the same over their
-  period, with a wider pool.
-- **`app/`** — everything else, one `impl App` block per file:
-  - `mod.rs` — `App` state, the `Screen` enum, the session lifecycle
-    (`start_session`, `close_active_session`, `rate`, `undo`, notes), and
-    the `handle_key` / `draw` dispatch on `Screen`.
-  - Screens: `main_screen.rs` (`handle_main`, the three sections' lines),
-    `forms.rs` (start and note forms, `Autocomplete`, `fuzzy_filter`),
-    `palette.rs` (`COMMANDS`, `/`), `period_view.rs` (week/month/year),
-    `away.rs` (`observe_idle` and the absence question), `help.rs`.
-  - Shared: `sections.rs` (main-screen geometry, scrolling, mouse),
+- **`main.rs`**: `--help` / `--version`, refuses to run without a terminal,
+  takes the lock, opens the db, then owns the terminal: `ratatui::init()`
+  (raw mode, alternate screen, a panic hook that restores them, chained with
+  one that shows the cursor and releases the mouse), mouse capture, and
+  `ratatui::restore()` on every exit path. It calls only `App::new`,
+  `set_size`, `draw`, `cursor_position`, `handle_key`, `handle_mouse` and
+  `observe_idle`. A thread polls `idle::system_idle` every `idle::POLL` and
+  sends the result over a channel the loop drains before each frame (the poll
+  runs a command, so it stays off the draw loop).
+- **`lock.rs`**: `acquire(path)`, an exclusive `flock` (std
+  `File::try_lock`) on `jiary.lock` in the data dir, held for the process's
+  lifetime and released by the OS however it ends. The holder writes its pid
+  in it, so a second jiary can say who has it (`LockError::Running`) and
+  exit 1.
+- **`idle.rs`**: `system_idle()`, the time since the last keyboard or mouse
+  input system-wide: `ioreg -c IOHIDSystem` on macOS, `xprintidle` on Linux,
+  `None` elsewhere or when the tool fails.
+- **`db.rs`**: `Db` over a `rusqlite::Connection`. All SQL lives here. See
+  [Data layer](#data-layer).
+- **`session.rs`**: `Session`, one row with timestamps parsed to
+  `DateTime<Utc>`; the detour activities (`DISRUPTION`, `BREAK`, `MEETING`,
+  `DETOURS`, `is_detour`) and `asks_focus` (not breaks or disruptions).
+- **`summary.rs`**: `summarize(sessions, active, now) -> DaySummary`: time
+  per activity and project, focus averaged weighted by length,
+  interruptions, disruptions, breaks, span, gaps, and the sessions as
+  timeline `Block`s. Takes any sessions, so the longer views use it too.
+  Pure.
+- **`period.rs`**: `Period` (week from Monday, calendar month, calendar
+  year): `days(offset, today)` gives the first and last day `offset` periods
+  from the current one, `title` names it. Pure.
+- **`layout.rs`**: `LayoutPrefs`, the main screen's section heights and
+  collapsed state: `resolve` splits the content area into the three
+  sections, `resize` / `set_*_height` move borders with clamping, and
+  `parse` / `load` / `save` handle `layout.conf`. Pure geometry, no
+  rendering.
+- **`mascot.rs`**: the cat. Sprites are grids of palette characters, two
+  pixel rows per terminal row; `mood_lines` / `reaction_lines` pick the
+  frame for the time and render it to half-block lines. Colors come from
+  `theme::CAT_*`.
+- **`captions.rs`**: the sentences under the cat, one list per `Mood` plus
+  per-activity lists for work, and `caption(mood, activity, seed)`. Adding a
+  caption means adding a sentence to a list.
+- **`theme.rs`**: every color and shared style; widgets take their look
+  from here. See [Colors](#colors).
+- **`app/`**: everything else, one `impl App` block per file:
+  - `mod.rs`: `App`, `Screen`, the session lifecycle, and the `handle_key` /
+    `draw` dispatch on `Screen`.
+  - One file per screen: `main_screen.rs`, `forms.rs` (start and note
+    forms, `Autocomplete`, `fuzzy_filter`), `palette.rs`, `period_view.rs`,
+    `away.rs`, `help.rs`.
+  - Shared pieces: `sections.rs` (main-screen geometry, scrolling, mouse),
     `chrome.rs` (header, status line, cursor), `cat.rs` (mood, reactions,
-    captions), `modal.rs` (modal geometry, `WrappedInput`, picker list),
-    `items.rs` (the summary's styled items and their wrapping),
-    `graphs.rs` (timeline, focus line, share bars, focus grids), `text.rs`.
-  - `tests.rs` — the test harness and every UI test.
+    caption), `modal.rs` (modal geometry, `WrappedInput`, picker list),
+    `items.rs` (the summary's styled items and how they wrap), `graphs.rs`
+    (timeline, focus line, share bars, focus grids), `text.rs` (wrapping,
+    plurals, times).
+  - `tests.rs` (the UI's tests) and `screenshot.rs` (the docs' pictures);
+    see [Testing](#testing).
 
-## Data layer (`db.rs`)
+## Data layer
 
 ### Schema
 
-One table, `sessions`:
+One table:
 
 ```sql
 CREATE TABLE sessions (
@@ -136,703 +113,593 @@ CREATE TABLE sessions (
     project TEXT,               -- free text, NULL when unset
     task TEXT,                  -- free text, NULL when unset
     activity TEXT NOT NULL,
-    notes TEXT,                 -- newline-terminated entries appended over time
-    focus INTEGER,              -- 1..3, set on completion
-    interruptions INTEGER       -- micro-interruption counter
+    notes TEXT,                 -- newline-terminated entries, appended
+    focus INTEGER,              -- 1..3, NULL when unrated
+    interruptions INTEGER       -- small-interruption count
 );
 ```
 
-There are no other tables by design: projects and tasks are free-text labels,
-not managed objects. "Lists" of projects/tasks are `SELECT DISTINCT` queries
-over history (`distinct_projects`, `distinct_tasks`, `tasks_for_project`).
+No other tables, by design: projects, tasks and activities are free-text
+labels, not managed objects, and their "lists" are queries over history
+(`distinct_projects`, `tasks_for_project`, `recent_activities`,
+`projects_by_first_use`, `recent_combos`). The schema, with the trigger
+below, is one `SCHEMA` string run on every open (`CREATE ... IF NOT
+EXISTS`), so opening an old db also brings it up to date.
 
-### Single active session — trigger, not constraint
+### One active session: a trigger, not a constraint
 
-At most one row may have `ended_at IS NULL`. This is enforced by a `BEFORE
-INSERT` trigger that raises `ABORT`, **not** by a UNIQUE index, because
-SQLite's UNIQUE constraints ignore NULL values (a UNIQUE index on `ended_at`
-would allow unlimited active rows). Consequences:
-
-- A second `create_session` while one is active fails with
-  "another session is already active". The UI never relies on this — it closes
-  the active session first and aborts if that fails (see lifecycle below) —
-  but the trigger is the backstop against external edits.
-- `get_active_session` additionally does `ORDER BY started_at DESC LIMIT 1`,
-  so legacy/externally-created duplicate active rows degrade gracefully to the
-  most recent one instead of being ambiguous.
+At most one row may have `ended_at IS NULL`. A `BEFORE INSERT` trigger
+enforces it (`RAISE(ABORT, 'another session is already active')`); a UNIQUE
+index can't, since SQLite's UNIQUE ignores NULLs. The UI never relies on
+it, since it closes the active session first and stops if that fails (see
+[Session lifecycle](#session-lifecycle)); the trigger is the backstop
+against external edits. `get_active_session` also orders by
+`started_at DESC, id DESC`, so duplicate active rows from older data or
+external edits resolve to the most recent one.
 
 ### Timestamps
 
-Stored as RFC 3339 UTC with an explicit `+00:00` offset. Rows written by
-older versions end in `Z` instead; SQLite's date functions parse both, so
-`date(started_at, 'localtime')` places either on the right local day (pinned
-by `legacy_z_suffixed_timestamps_still_count_as_today`).
-Timestamps have one-second resolution, so every `ORDER BY started_at` also
-orders by `id` to break same-second ties (most recent insert wins).
-"Today" is always the *local-time* start date:
-`date(started_at, 'localtime') = ?`. Display converts to local time in the UI
-(`fmt_time`), never in SQL.
+Stored as RFC 3339 UTC with an explicit `+00:00`. Older rows end in `Z`;
+SQLite's date functions read both (pinned by
+`legacy_z_suffixed_timestamps_still_count_as_today`), so there's no
+migration. Resolution is one second, so every `ORDER BY started_at` also
+orders by `id` (the most recent insert wins a tie). "Today" is the local
+start date, `date(started_at, 'localtime') = ?`; a range of days
+(`sessions_between`) works the same way. The UI converts to local time
+for display (`fmt_time`), never SQL.
 
-### Row mapping indirection
+### Rows to sessions in two steps
 
-rusqlite row-mapper closures can only report `rusqlite::Error`, but turning a
-row into a `Session` requires parsing timestamps, which can fail in a way that
-should surface as `DbError::BadTimestamp`. So queries select
-`SESSION_COLUMNS`, map rows with `read_session_row` into an internal
-`SessionRow` (timestamps still `String`), and `row_to_session` does the
-parsing outside the mapper. Any new query returning sessions must follow this
-two-step pattern.
+rusqlite's row mappers can only fail with `rusqlite::Error`, but parsing a
+timestamp should fail as `DbError::BadTimestamp`. So queries select
+`SESSION_COLUMNS`, `read_session_row` maps a row into a `SessionRow` with
+the timestamps still strings, and `row_to_session` parses them outside the
+mapper. New queries that return sessions follow the same pattern.
 
-`create_session` returns the `Session` it inserted (built from the same
-timestamp string it stored), so the in-memory mirror never has its own clock
-reading.
+`create_session` returns the `Session` it inserted, built from the same
+timestamp string it stored, so memory never has its own clock reading.
 
 ### Data directory
 
-`dirs::data_dir()/jiary/jiary.db` (`~/.local/share/jiary` on Linux,
-`~/Library/Application Support/jiary` on macOS), created with
-`create_dir_all` on open. `Db::open_at` is the test seam: tests open a db at a
-temp path and never touch the real data dir.
+`dirs::data_dir()/jiary/` (`~/Library/Application Support/jiary` on macOS,
+`~/.local/share/jiary` on Linux) holds `jiary.db`, `layout.conf` and
+`jiary.lock`. `Db::open_at(path)` is the test seam: tests open a db in a
+temp dir and never touch the real one.
 
-## App state (`app/mod.rs`)
+## App state
 
-```rust
-pub struct App {
-    db: Db,
-    active_session: Option<Session>,   // mirrored from db
-    today_sessions: Vec<Session>,      // mirrored from db (today, incl. active)
-    projects: Vec<String>,             // distinct history, refreshed after session changes
-    tasks: Vec<String>,                // same
-    screen: Screen,                    // which screen + its form state
-    previous_notes: Vec<String>,       // cached "recent notes" for the active project/task
-    error: Option<String>,             // last db failure, rendered in exactly one place
-    // main screen
-    layout: LayoutPrefs,               // section sizes + collapsed state (persisted)
-    layout_path: Option<PathBuf>,      // where `layout` is saved; None in tests
-    focus: Section,                    // section that Space and +/- act on
-    today_scroll: usize,               // first visible row of today's sessions
-    notes_scroll: usize,               // first visible row of the active session's notes
-    size: (u16, u16),                  // terminal size as of the last frame
-    drag: Option<Section>,             // section whose border the mouse is dragging
-}
-```
+`App` (`app/mod.rs`) holds, in groups:
 
-`size` exists so key and mouse handlers can lay the main screen out exactly
-as the last frame did (`main_areas`): main.rs calls `set_size` before every
-draw. Both scroll positions are clamped against the content in the handlers
-(`scroll(section, delta)`, `max_scroll(section)`, `viewport(section)`) and
-again at draw time, since the content can shrink between frames. The scroll
-keys act on `scroll_target()`: the notes when the active section has focus,
-today's sessions otherwise (the summary doesn't scroll). `notes_scroll`
-resets on every session change, and jumps to the bottom when a note is added
-with `n` so the new note is in view.
+| Fields | What they are |
+|---|---|
+| `db` | the only `Db` |
+| `active_session`, `today_sessions` | the db, mirrored: the running session and today's (including it) |
+| `activities`, `projects`, `project_order`, `tasks`, `previous_notes` | suggestions, project color order, and the active project/task's earlier notes, cached |
+| `screen` | which screen is up, with its form state |
+| `error` | the last db failure, shown in one place |
+| `layout`, `layout_path`, `focus`, `today_scroll`, `notes_scroll`, `size`, `drag`, `title_press` | the main screen's geometry, focus, scrolling and mouse state |
+| `reaction`, `caption_seed` | the cat's current reaction and the seed that picks its caption |
+| `rating`, `undo` | the open rating window and the last change, for `u` |
+| `away_since`, `last_observed` | absence detection |
 
-**The UI mirrors the db in memory.** `draw` runs ~10×/sec and must never query
-the db, so everything it needs is a field on `App`. The mirror is refreshed by
-`refresh_after_session_change` (reloads `today_sessions` + `previous_notes`),
-called after every operation that changes the active session. In-place edits
-(interruption count, appended notes) update both the db and the in-memory
-`Session` in the same handler.
+**Memory mirrors the db.** `draw` runs about ten times a second and must
+never query the db, so everything it reads is a field. Operations that
+change sessions call `refresh_after_session_change` (reloads today's
+sessions and the previous notes, resets the notes' scroll, picks a new
+caption seed); `refresh_suggestions` reloads the suggestion lists after a
+start. In-place edits (an interruption, a note) update the db and the
+in-memory `Session` in the same handler. `previous_notes` leaves out the
+active session itself, so it only changes when the session does.
 
-`previous_notes` is a cache with a deliberately narrow invalidation rule: the
-query excludes the active session itself, so the list is static *during* a
-session and only needs refreshing when the session changes.
+**Errors are data.** Every db failure goes through `set_error`, every
+success calls `clear_error`, and the status line shows `error` when set.
+So the line always reflects the most recent db operation, and errors render
+in one place.
 
-`error` is plain data (`Option<String>`), not a callback or event: every db
-failure goes through `App::set_error`, every success calls `clear_error`, and
-the status line renders it (or the key hints when `None`). This gives one
-render site for errors and makes "the line reflects the most recent db
-operation" fall out of the design.
+**`size`** is the terminal size of the last frame (`main.rs` calls
+`set_size` before each draw), so key and mouse handlers lay the main screen
+out exactly as it was drawn.
 
-### Startup
+**Startup.** `App::new` attempts every load (active session, today,
+suggestions, layout) and records failures with `set_error` rather than
+stopping, so a partly readable db still shows what it can. Only an
+unopenable db exits, in `main.rs`, before `App::new`.
 
-`main.rs` handles `--help` / `--version` first, then refuses to run
-without a terminal, then takes the single-instance lock (`lock.rs`: an
-exclusive `flock` on `jiary.lock` in the data dir, via std's
-`File::try_lock`, held for the process's lifetime and released by the OS
-however it ends; the holder's pid is written in it, so a second jiary can
-name it before exiting 1). All of this before the db is opened.
-
-`App::new` attempts **every** load — active session, today's sessions,
-projects, tasks — recording failures via `set_error` instead of aborting, so a
-partially readable db still shows partial data. The only condition that exits
-the process is an unopenable database (handled in `main.rs` before `App::new`).
-
-## Screen state machine
+## Screens
 
 ```rust
 enum Screen {
     Main,
-    StartSession(Box<StartSessionForm>),  // boxed: by far the largest variant
+    Help,
+    StartSession(Box<StartSessionForm>), // boxed: by far the largest
     AddNote(AddNoteForm),
-    Palette(PaletteForm), // the command palette
-    Away(DateTime<Utc>),  // back from an absence: since when
+    Palette(PaletteForm),
+    Period(PeriodView),
+    Away(DateTime<Utc>),                 // back from an absence: since when
 }
 ```
 
-**Form state lives inside the `Screen` variant.** Entering a screen constructs
-a fresh form; leaving (Esc, Enter, …) sets `screen = Screen::Main` and the
-form is dropped. There is no separate "form mode" flag and no persistent
-widget state — the activity index is a plain `usize`, autocomplete selections
-are `Option<usize>` inside each `Autocomplete`, and `ListState` is
-rebuilt from scratch on every draw via `render_stateful_widget`. All UI state
-is therefore plain data that tests can construct directly.
+**A screen's state lives in its variant.** Opening a screen builds it
+fresh; leaving sets `Screen::Main` and drops it. No mode flags and no
+persistent widget state (`ListState` is rebuilt every draw), so all UI
+state is plain data tests can build directly.
 
-### Key dispatch and the borrow dance
+### Borrowing patterns
 
-`handle_key` matches `&self.screen` with **unit patterns** (`Screen::Main =>`,
-`Screen::StartSession(_) =>`) so nothing is bound and the shared borrow drops
-before the arm body calls `&mut self` methods:
+Three patterns keep the borrow checker happy; the compiler catches most
+slips, but knowing them makes new handlers easier:
 
-```rust
-match &self.screen {
-    Screen::Main => return self.handle_main(key),
-    Screen::StartSession(_) => self.handle_start_session(key),
-    ...
-}
-```
+1. `handle_key` matches `&self.screen` with patterns that bind nothing
+   (`Screen::StartSession(_) =>`), so the borrow ends before the arm calls
+   a `&mut self` method.
+2. Handlers read a form's step by copy (`Step` is `Copy`) before
+   dispatching to the per-step handler, which then re-borrows the form
+   mutably with `let-else`.
+3. Values a `&mut self` call needs are copied out of the form first, since
+   call arguments keep their borrow alive across the call:
+   ```rust
+   let (activity, project, task) = combo.clone();
+   self.begin(&activity, project, task); // `form` is no longer borrowed
+   ```
 
-Per-screen handlers that need the current step read it **by copy** (`Step` and
-`EndStep` are `Copy`) so the borrow drops before dispatching to the per-step
-handler:
+### Main
 
-```rust
-let step = match &self.screen {
-    Screen::StartSession(form) => form.step,
-    _ => return,
-};
-match step { Step::Activity => self.start_activity_key(key), ... }
-```
-
-Per-step handlers then re-match with `let-else` to get `&mut` access to the
-form. And whenever a handler must call an `&mut self` method *while holding
-form data*, it **copies the values out first** — call arguments keep their
-borrow alive across the call:
-
-```rust
-let Some(activity) = form.activity.value() else { return };
-let project = form.project.value();
-let task = form.task.value();
-...
-self.start_session(&activity, project, task);  // borrow of `form` is dead here
-```
-
-These three patterns are load-bearing; the compiler rejects most violations,
-but knowing them makes new handlers much easier to write.
+`handle_main` handles the session keys (see
+[Session lifecycle](#session-lifecycle)), the section keys (`Tab`,
+`Space`, `+`/`-`/`=`, scrolling; see [Main screen](#main-screen)), `?`
+(help), `/` (palette) and `q`.
 
 ### Start form
 
-Steps: `Activity → Project → Task` (the tabs row shows progress).
+Three steps, `Activity → Project → Task`, each an `Autocomplete` (see
+[Fuzzy autocomplete](#fuzzy-autocomplete)) whose candidates are copied from
+`App` when the form opens; the step handlers only intercept Enter and pass
+other keys on.
 
-- **Recent picks.** The form opens with `recent`, the last `RECENT_PICKS`
-  (5) distinct activity/project/task combinations that aren't detours
-  (`db.recent_combos`). While the activity input is empty the list area
-  shows them numbered (`draw_recent`) instead of the activity suggestions,
-  and `1`–`5` submits that combination at once. Once anything is typed
-  (Tab accepting a suggestion included), the usual suggestions are back and
-  digits are text.
-- Submitting, from a pick or the Task step, goes through `begin`.
+- **Recent picks.** The form opens with the last `RECENT_PICKS` (5)
+  distinct combinations that aren't detours (`db.recent_combos`). While the
+  activity input is empty they replace the suggestions (`draw_recent`), and
+  `1`–`5` starts one at once; once anything is typed, digits are text.
+- **Activities** are free text. `App::activities` comes from
+  `recent_activities` (most recent first, so one Tab repeats the last), or
+  `DEFAULT_ACTIVITIES` on a fresh db. The defaults only seed: once there is
+  history they aren't merged in, so unused ones drop out. An activity is
+  required, so Enter on that step only advances with a value.
+- Enter on the Project step rebuilds the task field's candidates: every
+  task for a blank project, else `tasks_for_project`.
+- Submitting (a pick, or Enter on Task) goes through `begin`: close the
+  active session, stopping if that fails (creating anyway would hit the
+  trigger's generic error instead of the real one), `start_session`,
+  refresh, back to Main. `value()` turns blank input into `None`, so the db
+  stores NULL, not `""`.
 
-- **Activity / Project / Task** — each an `Autocomplete` (see *Fuzzy
-  autocomplete*); the step handlers only intercept Enter and forward every
-  other key to it. The activity and project fields' candidates are copied from
-  `App::activities` / `App::projects` when the form opens; one shared
-  `draw_suggestions` renders every step's list.
-- Activities are free text. `App::activities` comes from `recent_activities`
-  (distinct, most recently used first, so one Tab repeats the last one), or
-  `DEFAULT_ACTIVITIES` when the db has none yet. The defaults are only a seed:
-  once there is history they are not merged in, so unused ones drop out.
-- Activity is required (`activity` is `NOT NULL`): Enter on the Activity step
-  advances only when `value()` is `Some`.
-- On Enter at the Project step, the task field is rebuilt with its
-  candidates: all known tasks if the project is blank, else
-  `tasks_for_project(project)` (a failure goes to the error line).
-- On Enter at the Task step: copy out activity/project/task (`value()` maps
-  blank input to `None`, so the db stores NULL not `""`), close any active
-  session first (aborting on failure — creating anyway would hit the
-  trigger's generic error instead of the real one), `start_session`, refresh,
-  `refresh_suggestions`, return to Main.
+### Note form
 
-### Ending, rating and undo
-
-Ending a session has no form. `e` closes the session straight away
-(`close_active_session`), and every other way of ending one (starting a new
-session, a detour, `r`) goes through the same function, so they all behave
-alike:
-
-- **Rating window.** When the closed session asks for focus
-  (`session::asks_focus`: not breaks or disruptions), `rating` holds its id
-  and end time. For `RATING_WINDOW` (5 s) after that, `1`/`2`/`3` rate it
-  (`rate` → `db.set_focus`) and play the cat's rating reaction. The window
-  is kept short on purpose, since a rating given right away is the honest
-  one. While it is open, `resolve_layout` keeps a row under the active
-  section (the sections below move down; the filler gives up the row) and
-  `draw_main` puts `rating_bar` there: a full-width line in `ACCENT` with
-  `ON_ACCENT` text whose filled part drains from the right with the time
-  left. The cat's caption becomes `captions::RATING`. The status line keeps
-  its usual hints. Starting
-  from nothing (`b` right after `e`) leaves the
-  window open; closing another session replaces it (and closes it for a
-  break or disruption).
-- **Undo.** `close_active_session` begins an `Undo` record of the change
-  (the id it ended, if any) and `start_session` adds the id it started to
-  `created` (the away question's `b` / `d` also add the detour they insert). `u`
-  (`undo`) deletes the created sessions (`db.delete_session`), reopens the
-  ended one (`db.reopen_session`: `ended_at` and `focus` back to NULL), and
-  reloads the active session from the db. Only the last change can be undone.
-  Undo also stands in for the old end-form notes step: `e`, `u`, `n`, `e`
-  adds a last note.
-
-### Moving the start
-
-`[` / `]` (`move_start`) move the active session's start by `START_STEP`
-(5 min), capped at now. The session just before it (`db.previous_session`)
-limits it: when that one ended within 2 s of this start (a switch), the
-boundary moves, so its end moves too (`db.set_ended_at`), leaving it at
-least a minute; otherwise the start stops at its end. A start stopped there
-touches it, so the next press moves both. Only today's list is reloaded
-(`reload_today`), keeping the caption and scroll. The timer row shows
-`since HH:MM` beside the elapsed time, so the move is visible.
-
-### Away
-
-`observe_idle(idle, now)`, fed by `main`'s poll, keeps `away_since`: set
-once the system idle time reaches `AWAY_AFTER` (15 min), as `now - idle`,
-or, when the gap since the previous poll (`last_observed`) is that long
-(the computer slept), as the time of that poll. Idle time under the
-threshold (input again), or none at all after a sleep, means back:
-`came_back` opens `Screen::Away(since)` when the main screen is up and a
-non-detour session started before `since` is running. A key arriving first
-also calls `came_back`, and that key only brings the question up.
-
-- `k` / Esc: keep the time as it was.
-- `e`: `close_active_session_at(since)` (`db.complete_session_at`, then the
-  usual `close_active_session` bookkeeping: undo record, rating window).
-- `b` / `d`: end at `since`, insert a finished `BREAK` / `DISRUPTION` from
-  `since` to now (`db.insert_finished_session`), and start the same
-  activity/project/task.
-
-Detours never ask: being away from the computer is what they're for.
+One wrapped input. Enter appends the note (when not blank) and returns to
+Main; Esc discards it.
 
 ### Command palette
 
-`/` opens `Screen::Palette` with a `PaletteForm` whose input starts as the
-`/` itself (so Backspace on the bare `/` closes it). `COMMANDS` lists every
-command: a name, a description and the main-screen key it runs, shown
-beside it. Running one (`handle_palette`, Enter) returns to Main and calls
-`handle_main` with that key, so a command and its key can't drift apart
-and a command can quit (the return value passes through `handle_key`).
-`palette_matches` filters by fuzzy score on the name (all, in list order,
-for an empty query; ties keep the list's order). The modal reuses the
-start form's layout: a dimmed count of the matches in the tabs row, the
-input, then the matches as `name  description  key`, indented two columns
-so names sit under the typed name, with the pick highlighted and kept in
-view by `ListState`. A command's `Action` is either a main-screen key
-(`Action::Key`) or a view with no key of its own (`Action::View`:
-`/weekly`, `/monthly`), listed first.
+`/` opens `Screen::Palette`; its input starts as the `/` itself, so
+Backspace on a bare `/` closes it. `COMMANDS` lists every command with a
+name, a description and its `Action`:
+
+- `Action::Key`: a main-screen key, shown beside the name. Running it
+  returns to Main and calls `handle_main` with that key, so a command can't
+  drift from its key, and one can quit.
+- `Action::View`: a view with no key of its own (`/weekly`, `/monthly`,
+  `/yearly`), listed first.
+
+`palette_matches` filters by fuzzy score on the name (everything, in order,
+for an empty query; ties keep the order). The modal reuses the start form's
+layout: a dimmed match count where the tabs go, the input, then the matches
+as `name  description  key`.
 
 ### Weeks, months and years
 
-`Screen::Period(PeriodView)`: the period (`period.rs`: `Period::Week` runs
-Monday to Sunday, `Period::Month` the calendar month, `Period::Year`
-January to December; `days(offset,
-today)` gives the first and last day `offset` periods from the current
-one, `title` names it), its offset, its days, and its sessions as loaded
-by `open_period` (`db.sessions_between`: started, in local time, on one
-of its days), since draw never queries the db. `handle_period`: ←→ / h l
-reopen the period before or after (never past the current one), w / m / y
-this week, month or year, the scroll keys move `scroll` (clamped to
-`period_max_scroll`), Esc / q back to Main.
+`Screen::Period(PeriodView)` holds the period, its offset, its first and
+last day, its sessions as `open_period` loaded them
+(`db.sessions_between`), and its scroll. `handle_period`: ←→ / `h` `l`
+reopen the period before or after (never past the current one), `w` `m`
+`y` switch to this week, month or year, the scroll keys scroll, Esc / `q`
+go back.
 
-`period_lines` draws it. Sessions are grouped by day once (a year has 365
-summaries to make). A week or month has a row per day (a month adds a blank row after
-each Sunday) with the day's label (accent for today, dimmed when nothing
-was tracked), its timeline (`timeline_row` over that day's `summarize`)
-on an hour axis shared by all the days (the earliest start's hour to the
-latest end's, as times of day; 9–17 when empty) and, in
-`DAY_TOTAL_WIDTH`, its tracked time and focus average; the axis's hours
-under them; then the totals over the whole period, built from the same
-pieces as today's summary (`time_split_items` plus the days tracked and
-the average per day, `activity_bar` / `activity_items`, `project_bar` /
-`project_items`, `focus_items`), bars as wide as the timelines; under
-the focus text, `focus_grid`: a row per weekday and a column per week
-(headed by its Monday's date), a `██` per day in `theme::focus_gradient`
-of its average focus (`FOCUS_RAMP`: 9 256-color steps, red through
-yellow to green over 1–3), `UNRATED` gray when tracked without a rating,
-`░░` when nothing was tracked, blank outside the period or after today.
-It is centered on the view's width as a block (every row the same width,
-so `centered` gives them the same padding), with the ramp's legend
-(`focus_legend`) centered a blank row below.
+`period_lines` builds the view, grouping sessions by day once (a year has
+365 summaries to make). Every view has the same order, so switching between
+them doesn't move things around:
 
-A year has a row per month instead of per day: the month's
-`activity_bar` with its length scaled to the busiest month, and its
-`day_total` (tracked time, focus average). Then the totals, and under
-them, in the same place as the other views' grid, `year_focus_grid`: the
-same colors fitted to 53 weeks in 80 columns, a column per week with the
-month names over it (where they fit), the weekdays two to a character row
-(`▀` with the upper day as foreground and the lower as background, so
-each day is a square half a row tall, without gaps; `theme::EMPTY_DAY`
-where nothing was tracked, since half blocks can't carry a texture),
-centered with its legend. Every view keeps the same order (rows, totals,
-grid) so paging between them with `w`/`m`/`y` doesn't move things around.
-Focus averages everywhere are colored on the
-same ramp (`focus_color`), so a number matches its day's square. The
-running session counts through its in-memory copy, as today. Projects get
-colors distinct within the period (`theme::project_colors` over its
-projects). `draw_period` frames it in an accent box titled with the
-period and scrolls it, with a scrollbar on the border.
+1. **Rows.** A week or month has a row per day (a month adds a blank row
+   after each Sunday): the label (accent for today, dimmed with nothing
+   tracked), the day's `timeline_row` on an hour axis all the days share
+   (earliest start to latest end; 9–17 when empty), and `day_total`
+   (tracked time, focus average) in `DAY_TOTAL_WIDTH` columns; then the
+   axis's hours. A year has a row per month instead: its `activity_bar`
+   scaled to the busiest month, and its `day_total`.
+2. **Totals** over the period, from the same pieces as today's summary
+   (`time_split_items` plus the days tracked and the average per day, the
+   activity and project bars and items, `focus_items`).
+3. **The focus grid** and its legend (`focus_legend`), centered.
+   `focus_grid` (week, month) has a row per weekday and a column per week,
+   a `██` per day; `year_focus_grid` fits 53 weeks in 80 columns with the
+   month names over it and two days per character row (`▀`: the upper day
+   as foreground, the lower as background). See [Colors](#colors).
 
-### Add-note form
+The running session counts through its in-memory copy. `draw_period`
+frames the view in an accent box titled with the period, with a scrollbar
+on the border.
 
-Single (wrapping) input; Enter appends (if non-empty) and returns to Main, Esc
-discards the input. Saved notes persist even if the app exits mid-session.
+### Away
+
+`observe_idle(idle, now)`, fed by `main`'s idle poll, sets `away_since`
+once the idle time reaches `AWAY_AFTER` (15 min), to `now - idle`; or, when
+the gap since the previous poll (`last_observed`) is that long (the
+computer slept), to that poll's time. Idle time under the threshold (or
+none after a sleep) means you're back: `came_back` opens
+`Screen::Away(since)` when the main screen is up and a non-detour session
+that started before `since` is running. A key that arrives before the poll
+notices also calls `came_back`, and only brings the question up.
+
+- `k` / Esc: keep the time.
+- `e`: `close_active_session_at(since)`, with the usual undo record and
+  rating window.
+- `b` / `d`: end at `since`, insert a finished break or disruption from
+  `since` to now (`db.insert_finished_session`), and start the same
+  activity, project and task again.
+
+Detours never ask: being away from the computer is what they're for.
+
+### Help
+
+`draw_help` lists every key in two columns of groups (sessions; sections
+and mouse), each under an accent heading with a rule. Any key closes it.
 
 ## Session lifecycle
 
-All lifecycle helpers live on `App` and follow one shape: **take the session
-out of memory, hit the db, restore it on failure** so a db error never leaves
-the UI believing a session ended.
+The helpers on `App` share one shape: **take the session out of memory,
+write to the db, put it back on failure**, so a db error never leaves the
+UI thinking a session ended.
 
-- `start_session(activity, project, task)` — `db.create_session`, whose
-  returned `Session` becomes the active one.
-- `close_active_session() -> bool` — completes with no rating, starting the
-  undo record and the rating window (see *Ending, rating and undo*). Returns `true`
-  when there was nothing to close or the close succeeded; on failure it
-  restores `active_session`, records the error, and returns `false` so callers
-  can abort (the start form uses this to avoid creating a second active
-  session).
-- `append_active_note(note)` — appends in the db (`notes || ? || char(10)`)
-  and mirrors the newline-terminated text in memory.
+- `start_session(activity, project, task)`: `db.create_session`; the
+  returned `Session` becomes the active one, and its id joins the undo
+  record.
+- `close_active_session() -> bool`: completes the session unrated, starts
+  the undo record and the rating window. Returns `true` when there was
+  nothing to close or the close worked; on failure it restores the
+  session, records the error and returns `false`, so callers stop.
+- `append_active_note(note)`: appends in the db (`notes || ? ||
+  char(10)`) and mirrors the text in memory.
 
-Main-screen flows built from these:
+Every way a session ends (`e`, a new start, a detour, `r`, the away
+question) goes through `close_active_session`, so they all behave alike.
 
-- **`d` (disrupt) / `b` (break) / `m` (meeting)** — `detour(kind,
-  needs_session)`: close the active session (if any) and start a
-  `DISRUPTION` / `BREAK` / `MEETING` session with no project/task. Repeating
-  the same key is a no-op rather than splitting the detour in two; the other
-  keys switch kinds. `d` needs a running session to interrupt; `b` and `m`
-  also start from nothing (a break right after ending a session with `e`, a
-  standup before any work). All three are
-  *detours* (`session::DETOURS`, `is_detour`).
-- **`r` (resume)** — proceeds only when there is no active session or the
-  active one is a detour. Looks up `latest_work_session` (most recent
-  completed row that is not a detour) **first**, so the detour keeps running
-  when there is nothing to resume; then closes it and starts a fresh session
-  with that activity/project/task. The round trip `d`/`b`/`m` … `r` is two
-  keystrokes. Known limitation: the activity alone decides what is a detour,
-  so a meeting started with `s` is skipped by `r` too; recording which
-  session each detour interrupted would fix that (needs a schema change).
-- **`e` (end)** — `close_active_session`, then refresh.
-- **`i`** — `db.increment_interruptions` (guarded by `ended_at IS NULL` in
-  SQL) plus the in-memory counter bump.
+**Detours.** `d` / `b` / `m` call `detour(kind, needs_session)`: close the
+active session and start a `DISRUPTION` / `BREAK` / `MEETING` with no
+project or task. The same key during that detour does nothing; another
+switches kind. `d` needs a running session; `b` and `m` also start from
+nothing. **`r`** works when nothing runs or a detour does: it looks up
+`latest_work_session` (the most recent completed non-detour) *first*, so a
+detour keeps running when there's nothing to resume, then closes it and
+starts that activity, project and task again. Known limit: the activity
+alone decides what's a detour, so a meeting started with `s` is skipped by
+`r` too; fixing it would mean recording what each detour interrupted (a
+schema change).
+
+**`i`**: `db.increment_interruptions` (guarded by `ended_at IS NULL`) and
+the in-memory count.
+
+**Rating window.** When the closed session `asks_focus`, `rating` holds
+its id and the time. For `RATING_WINDOW` (5 s), `1`/`2`/`3` rate it (`rate`
+→ `db.set_focus`) and play the cat's rating reaction. Short on purpose:
+the rating given right away is the honest one. While it's open,
+`resolve_layout` takes a row under the active section for `rating_bar` (an
+`ACCENT` line draining from the right) and the caption becomes
+`captions::RATING`. Starting from nothing (`b` right after `e`) leaves the
+window open; closing another session replaces it.
+
+**Undo.** `close_active_session` starts an `Undo` with the id it ended;
+`start_session` (and the away question's inserted detour) add to its
+`created`. `u` deletes the created sessions, reopens the ended one
+(`db.reopen_session`: `ended_at` and `focus` back to NULL), and reloads.
+Only the last change can be undone. `e`, `u`, `n`, `e` adds a last note to
+a session just ended.
+
+**Moving the start.** `[` / `]` (`move_start`) move the active session's
+start by `START_STEP` (5 min), never past now. The previous session
+(`db.previous_session`) limits it: if it ended within 2 s of this start (a
+switch), its end moves too (`db.set_ended_at`), keeping at least a minute;
+otherwise the start stops at its end, and since they then touch, the next
+press moves both. Only today's list reloads (`reload_today`), so the
+caption and scroll stay.
 
 ## Rendering
 
-### Global chrome
+### Chrome
 
-`draw` splits the frame into three fixed rows: header (1), content (rest),
-status line (1). The rows are unconditional — no conditional layout — so the
-UI never jumps when an error appears or disappears.
+`chrome_layout` splits every frame into a header row, the content and a
+status row; `draw` and `cursor_position` both use it. The rows never
+change, so nothing jumps when an error comes and goes.
 
-- **Header** — `JIARY` (bold accent) · local date · total time today (`TIME`) ·
-  "today". The total is computed from in-memory sessions only: completed
-  durations plus the active session's elapsed time.
-- **Status line** — the red `✗ <error>` when `error` is set, otherwise the
-  key hints for the current screen. This is the *only* place errors and hints
-  are rendered.
+- **Header**: `JIARY`, the local date, and today's total (from memory:
+  completed sessions plus the running one's elapsed time).
+- **Status line**: the red `✗ <error>` when there is one, otherwise the
+  current screen's key hints, the only place either is drawn. Hints show in
+  order while they fit; once one doesn't, the rest of the optional ones go
+  too. `HELP_HINT` always shows, with room kept for it; hints after it in
+  the list only appear on wide terminals. On the main screen the hints
+  follow the focused section.
 
 ### Main screen
 
-Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
+Three stacked sections, split by `LayoutPrefs::resolve`:
 
-- **Active** (` ACTIVE `) — two columns. Left: the session info, pinned
-  (`active_lines`: bold accent timer, dimmed labels via `theme::kv` with
-  the project bold, the task plain, the activity in its color, "(none)"
-  dimmed italic, interruptions bold red when > 0; a dimmed hint when there
-  is no session), and directly below it the notes (`note_lines`: under bold
-  dimmed headings, cached previous notes dimmed, then the session's own
-  with accent bullets and plain text, as bullets word-wrapped to the text column by
-  `bullet_lines` with continuation rows indented under the text; scrolling
-  and the section height count wrapped rows), scrolled by `notes_scroll` in
-  the rest of
-  the height, with a scrollbar on the right border beside them when they
-  don't fit. Right: the cat, a gap row and its caption rows
-  (`CAT_BLOCK_HEIGHT`), pinned, top-aligned, one column in from the border
-  (`split_for_cat`). Each caption row is centred under the cat's own
-  columns for the mood (`Mood::columns`), not the canvas, since the scenes
-  sit off-centre (`caption_lines`). The section is as tall as the taller column (info +
-  notes, or the cat block whenever the cat fits the width, even with no
-  session), so notes follow the info with no gap. Never collapses. The cat
-  is left out when the section is shorter than the sprite or the text
-  would get under 24 columns.
-- **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
-  (completed and the running one), newest first, separated by blank rows:
-  a bold time range ("now" in accent while running), the duration in bold
-  accent, a focus badge (`theme::focus_badge`: ` F1 `–` F3 ` black on red /
-  yellow / green, ` F- ` dimmed; none for breaks and disruptions, which are
-  never rated), an interruption count (`I:N`, bold red when > 0), a
-  `project · task · activity` line (project bold, activity in its color,
-  dimmed separators), and dimmed note bullets. Drawn as one
-  `Paragraph` scrolled by `today_scroll`, with a scrollbar on the right
-  border when the items don't fit (`draw_scrollbar`, shared with the
-  notes).
-- **Summary** (` ▾ SUMMARY `) — `summary_lines`: `Day` / `Activity` /
-  `Project` / `Focus` rows from `summarize`. When `summary_graphs_fit`
-  (with the graphs' `GRAPH_ROWS`, today's sessions still keep
-  `TODAY_ROOM_FOR_GRAPHS` rows, and the values get `MIN_GRAPH_WIDTH`
-  columns), graph rows lead two of them: under `Day` the timeline, from
-  the top of the hour the day began (`start_of_hour`, so the first hour's
-  label sits at the left edge) to now (`timeline_row`: each half cell colored by `DaySummary::activity_at` its
-  middle, over `DaySummary::blocks`; a `Block` carries its session's
-  activity and focus) with, on top under no label, the focus line
-  (`focus_row`: a `▀` per cell, the top half of the row so it lifts off
-  the bar, in the rating of what ran there, dimmed `UNRATED` for a
-  rateable session without one, blank over breaks, disruptions and gaps)
-  and its hours (`hour_labels`, local time, dropped where they would collide; the span then leaves the `Day`
-  text, which would repeat it); under `Activity` the share bar
-  (`share_row`: halves split by cumulative time, longest first), and under
-  `Project` the same for projects, in their colors. Both go
-  through `half_cells`, which packs two colors per cell with `▌` (left as
-  foreground, right as background), like the cat's `▀` does vertically.
-  With the graphs, a blank row also separates the four groups (counted in
-  `GRAPH_ROWS`, so the fit check includes it).
-  Otherwise the summary is text only, so a short terminal neither
-  squeezes today's list nor clips the summary. Items are styled spans (activity
-  names in their colors, times bold, the focus average in its outcome
-  color, nothing to report dimmed), joined by a dimmed ` · ` and packed by
-  `wrap_items` (an item only splits when wider than a whole row, losing its
-  styling), continuing under the value via `hanging_lines`. The `Day` row
-  splits the tracked time into work (`DaySummary::work_time`: all but
-  breaks and disruptions), breaks and disruptions, each in the color the
-  graphs give it, leaving out parts that didn't happen; the `Focus` row
-  keeps only the disruption count.
+- **Active.** Left, pinned: the session (`active_lines`: the timer and
+  `since HH:MM`, then project, task, activity, interruptions as `theme::kv`
+  rows; a dimmed hint with no session). Below it the notes (`note_lines`):
+  the cached previous notes, then this session's, as bullets wrapped by
+  `bullet_lines`, scrolled by `notes_scroll` with a scrollbar when they
+  don't fit. Right, pinned: the cat, a gap and its caption
+  (`split_for_cat`, `CAT_BLOCK_HEIGHT`), each caption row centered under the
+  cat's own columns for the mood (`Mood::columns`), since the scenes sit
+  off center. The cat is left out when the section is shorter than the
+  sprite or the text would get narrower than 24 columns. The section is as
+  tall as its taller column and never collapses.
+- **Today.** One item per session, newest first, blank rows between: the
+  time range ("now" while running), the duration, a focus badge (none for
+  breaks and disruptions), the interruption count, a `project · task ·
+  activity` line, and the notes. One `Paragraph` scrolled by `today_scroll`.
+- **Summary.** `Day` / `Activity` / `Project` / `Focus` groups from
+  `summarize`, as styled items (`items.rs`) joined by a dimmed ` · `,
+  packed by `wrap_items` and continued under the value by `hanging_lines`.
+  The `Day` row splits tracked time into work (`work_time`: all but breaks
+  and disruptions), breaks and disruptions, leaving out parts that didn't
+  happen.
 
-Sizing: Active and Summary default to their content height
-(`content_heights`), Today fills the rest; a fixed height replaces the
-content height once the user resizes. When Today is collapsed the summary
-fills instead; when both are collapsed the spare rows stay empty. When space
-runs out, the summary and then the active section shrink to their 3-row
-minimum, and on tiny terminals the summary is clipped before Today.
+  When `summary_graphs_fit` (the graphs' `GRAPH_ROWS`, while today's list
+  keeps `TODAY_ROOM_FOR_GRAPHS` rows and values get `MIN_GRAPH_WIDTH`
+  columns), graphs join in, with a blank row between groups:
+  - under `Day`, the timeline from the hour the day began
+    (`start_of_hour`) to now (`timeline_row`: each half cell in the color of
+    the block at its middle), the focus line above it (`focus_row`: a `▀`
+    per cell in the rating's color, dimmed when unrated, blank over breaks,
+    disruptions and gaps), and the hours under it (`hour_labels`, dropped
+    where they'd collide);
+  - under `Activity` and `Project`, share bars (`share_row`: half cells by
+    cumulative time, longest first).
 
-Focus is shown by the border color (accent vs dimmed). A collapsed section
-is one unbordered `▸` line with a short summary (`draw_collapsed`).
+  `half_cells` packs two colors per cell with `▌` (left as foreground,
+  right as background), as the cat's `▀` does vertically. Without room, the
+  summary is text only, so a short terminal neither squeezes today's list
+  nor clips the summary.
 
-Status-line hints depend on the focused section and are fitted to the
-terminal width: hints are shown in order while they fit, and once one
-doesn't, the remaining optional ones are dropped too (most useful first).
-`HELP_HINT` (`[?] help`) is always shown, wherever it sits in the list, with
-room reserved for it; hints listed after it (`[Tab]`, `[q]`) only appear on
-wide terminals. The `?` help screen (`Screen::Help`, `draw_help`) lists every
-key in two columns (sessions; sections and mouse), each group under an
-accent heading with a rule, sized to its content; any key closes it.
+**Sizing.** Active and Summary default to their content height
+(`content_heights`) and Today takes the rest; a resize swaps the content
+height for a fixed one. With Today collapsed, the summary fills instead.
+When space runs out, the summary and then the active section shrink to
+their 3-row minimum; on tiny terminals the summary is clipped before
+Today.
+
+**Focus and collapsing.** The focused section has the accent border; a
+collapsed one is a single unbordered `▸` line with a short summary
+(`draw_collapsed`).
+
+**Scrolling.** The scroll keys act on `scroll_target()`: the notes when the
+active section has focus, today's list otherwise. Positions are clamped in
+the handlers (`scroll`, `max_scroll`, `viewport`) and again at draw time,
+since content can shrink between frames. Adding a note scrolls to the
+bottom so it's in view. `draw_scrollbar` is shared by the notes, today's
+list and the longer views.
 
 ### Mouse
 
-`handle_mouse` acts only on the main screen, using the same `main_areas`
-geometry as the last frame:
+`handle_mouse` acts on the main screen only, with the last frame's
+geometry (`main_areas`):
 
-- The line between two sections is two rows (the upper section's bottom
-  border, the lower one's top border); a left-press on either starts a drag
-  (`border_at`), remembering which row was grabbed so the border follows the
-  pointer without jumping. The line under the active section sets its
-  height; the one under today's sessions sets the summary's (only while both
-  are expanded). Drag events apply the same clamping as `+`/`-`; release
-  saves the layout.
-- A left-press focuses the section under the pointer. On the title text of
+- The line between two sections is two rows (one section's bottom border,
+  the next one's top). A press on either starts a drag (`border_at`),
+  remembering which row was grabbed so the border doesn't jump. The line
+  under Active sets its height; the one under Today sets the summary's
+  (while both are expanded). Drags clamp like `+`/`-`; release saves the
+  layout.
+- A press focuses the section under the pointer. On the title text of
   Today or Summary (`title_hit`, using the same `section_title` the
-  renderer draws) it is recorded in `title_press`, and toggles collapse on
-  release only if no drag event came in between, so a drag that starts on a
-  title (which sits on a border row) never collapses anything.
-- The wheel scrolls the section under the pointer by 3 rows: the notes over
-  the active section, today's sessions elsewhere.
+  renderer draws) it's recorded in `title_press`, and toggles collapse on
+  release only if no drag came in between.
+- The wheel scrolls the section under the pointer by 3 rows.
 
-Mouse capture means terminals no longer select text on a plain drag;
-Shift-drag still selects in most of them.
+Mouse capture stops plain drags from selecting text; Shift-drag still
+selects in most terminals.
 
 ### Layout file
 
-`layout.conf` in the data dir, `key=value` lines (`active_height`,
-`summary_height` as a number or `auto`, `today_collapsed`,
-`summary_collapsed`). Parsing is lenient (unknown keys, junk and values below
-the minimum height fall back to defaults) so a stale or hand-edited file
-never blocks startup. It is saved on every collapse, resize, reset and drag
-release, via a temp file plus rename; a read or write failure goes to the
-error line and the app carries on with the in-memory layout.
+`layout.conf`: `key=value` lines (`active_height`, `summary_height` as a
+number or `auto`, `today_collapsed`, `summary_collapsed`). Parsing is
+lenient (unknown keys, junk and too-small values fall back to defaults), so
+a stale or hand-edited file never blocks startup. It's saved on every
+collapse, resize, reset and drag release, through a temp file and a rename;
+failures go to the error line and the in-memory layout carries on.
 
-### Modals
+### Modals and inputs
 
-The start/end/add-note screens are centered modals of fixed width that grow
-in height only with a wrapped input:
+The start form, the note form, the palette and the away question are
+centered modals, `MODAL_WIDTH` (40) wide:
 
-- Start: 40×12 (`MODAL_WIDTH` × `START_MODAL_HEIGHT`) — room for the activity
-  list. End/note: 40×6 (`SMALL_MODAL_HEIGHT`). Each grows by one row per
-  input row beyond the first, so the suggestion list (start) and the two
-  spare rows (end/note) keep their room.
-- `chrome_layout` splits the frame into header / content / status rows; both
-  `draw` and `cursor_position` use it, so modals are centered in the same
-  content area.
-- `centered_rect` centers a fixed size in the content area and **shrinks to
-  fit** on tiny terminals instead of overflowing.
-- `modal_layout` returns (modal rect, inner area) where the inner area is the
-  block's interior with one extra column of padding left and right.
-- `start_modal_layout(content, input_rows)` (tabs / input / list) and
-  `small_modal_layout(content, body_rows)` (tabs-or-context / body) extend
-  that. They are **shared by the renderers and `cursor_position`** so the two
-  can never disagree about where the input is.
+- `centered_rect` centers a size in the content area and shrinks it to fit
+  tiny terminals. `modal_layout` gives the modal and its inner area (the
+  border plus a column of padding each side).
+- `start_modal_layout(content, input_rows)` (tabs, input, list;
+  `START_MODAL_HEIGHT` 12, also the palette's) and
+  `small_modal_layout(content, body_rows)` (a context row, then the body;
+  `SMALL_MODAL_HEIGHT` 6) grow by a row for each input row past the first.
+  The renderers and `cursor_position` share them, so they can't disagree
+  about where the input is.
+- Each modal is a rounded `Block` with an accent title. The start form adds
+  a `Tabs` row marking the step.
 
-### Wrapped inputs
+Every text input is a `WrappedInput`, built by `App::wrapped_input` from
+`text_input()` (the screen's value and placeholder) and
+`modal_inner_width`:
 
-All five text inputs (Activity, Project, Task, Notes, Note) are drawn as a
-`WrappedInput`, built by `App::wrapped_input` from `text_input()` (the
-current screen's value and placeholder) and the modal's inner width
-(`modal_inner_width`):
+- No label (the tabs or context row name the field): a bold accent `› `
+  prompt (`theme::PROMPT`), later rows indented 2 to line up.
+- Empty, it shows a dimmed italic placeholder (`theme::PLACEHOLDER`) with
+  the cursor on its first character.
+- `wrap_text` breaks after the last space that fits (mid-word only for
+  words longer than a row) and keeps every character. Widths count
+  characters, not bytes. A full last row gets an empty one after it, so the
+  cursor has somewhere to go.
+- The cursor is always after the last character. If the text needs more
+  rows than the modal can grow to, only the last rows show.
 
-- Inputs have **no label**: the tabs row (or the note modal's context line)
-  already names the field, and a label repeated beside the value read like
-  part of it. Row one starts with a bold accent `› ` (`theme::PROMPT`); later
-  rows are indented 2 columns so the value reads as one column.
-- While the value is empty, a dimmed italic placeholder (`theme::PLACEHOLDER`,
-  e.g. "type or pick an activity") follows the prompt; the cursor sits on its
-  first char.
-- `wrap_text` breaks after the last space that fits (mid-word only for words
-  longer than a row) and keeps every char, so the rows concatenate back to
-  the value. Widths count chars, not bytes. A full last row gets an empty
-  row after it so the cursor has somewhere to go.
-- The cursor is always after the last char, i.e. on the last row. If the
-  text needs more rows than the modal can grow to on this terminal, only the
-  last rows are kept, so the cursor stays visible.
-
-Modal structure: a `Block::bordered()` (rounded) with a titled accent span, a
-`Tabs` row marking the current step, then the step body (a wrapped input plus
-suggestion `List`). Picker lists use `theme::picker_symbol()`
-(bold accent `>`) and `PICKER_HIGHLIGHT`, with `HighlightSpacing::Always` so
-items don't shift right when one gets selected. `draw_suggestions` indents
-the list one column, putting suggestion text under the typed text and the
-`>` under the prompt's space.
+Picker lists (suggestions, recent picks, commands) use
+`theme::picker_symbol()` (a bold accent `>`), `PICKER_HIGHLIGHT` and
+`HighlightSpacing::Always`, so items don't shift when one is selected, and
+are indented a column so their text sits under the typed text.
 
 ### Terminal cursor
 
-The cursor is hidden by default (`main.rs` hides it at startup). After each
-draw, `main.rs` asks `app.cursor_position(size)` — a pure function of terminal
-size + form state — and shows the cursor only when it returns `Some`, placing
-it right after the typed text. Two ratatui/crossterm quirks drive this design:
+Hidden by default. After each draw, `main.rs` asks
+`app.cursor_position(size)`, a pure function of the size and the form
+state, and shows the cursor only when it returns `Some`.
+`WrappedInput::cursor_in` turns the input's cursor into a screen position,
+clamped to the input area. Two quirks shape this:
 
-1. `Terminal::draw` discards closure return values, so the position is
-   computed *after* drawing via a separate method, not inside the draw
-   closure.
-2. `set_cursor_position` moves the cursor but does **not** show it — hence the
-   explicit `show_cursor()`/`hide_cursor()` in the loop (regression-tested by
+1. `Terminal::draw` discards the closure's return value, so the position
+   is computed after drawing, by a separate method.
+2. `set_cursor_position` moves the cursor but doesn't show it, hence the
+   explicit show and hide in the loop (pinned by
    `cursor_position_tracks_input_lines`).
 
-`WrappedInput::cursor_in` turns the wrapped input's relative cursor into a
-screen position, clamped to the input area on terminals narrower than the
-modal.
+### Colors
 
-### ratatui gotchas (learned the hard way; render tests pin these)
+`theme.rs` holds every color and shared style:
 
-- `Tabs`' default divider is a box-drawing `│` **with space padding** on both
-  sides (` Activity │ Project │ Task`).
-- `List` content always sits **one column right of the highlight symbol**
-  (`>alpine`, no space).
-- Modal borders render in the **default color**; only titles carry the accent.
-  The main screen's active panel is the unique widget with an accent border.
-- Panels render inner text **at the border with no padding** — `Block::bordered`
-  adds no interior padding; `modal_layout` adds its own one-column pad.
+- **Named colors** for the UI: `ACCENT` (cyan), `MUTED`, `GOOD` / `OK` /
+  `BAD` (green, yellow, red), `UNRATED`; the activity colors
+  (`activity_color`: work, meeting, break, disruption); the cat's
+  `CAT_*`. With the 16 named colors the UI follows the user's terminal
+  theme.
+- **256-color hues** where 16 aren't enough: `PROJECT_PALETTE` (16 hues,
+  the first 8 the most distinct, all apart from the activity, focus and
+  accent colors; `NO_PROJECT` gray), `FOCUS_RAMP` (9 steps from red through
+  yellow to green over 1–3, via `focus_gradient`) and `EMPTY_DAY`. No
+  truecolor anywhere.
+- **Styles**: `TITLE`, `DIMMED`, `VALUE`, `TIME`, `NONE`, `ERROR`,
+  `PROMPT`, `PLACEHOLDER`, `CAPTION`, and helpers `kv`, `activity`,
+  `focus_badge` (` F1 `–` F3 ` on red, yellow or green, ` F- ` dimmed),
+  `picker_symbol`.
+
+The rule: labels and words dimmed or plain, values bold, times bold
+accent, activities and projects in their colors, missing values dimmed
+italic. Focus averages are colored on the same ramp as the grids
+(`focus_color`), so a number matches its day's square.
+
+**Project colors** follow the order projects were first used
+(`db.projects_by_first_use`, in `App::project_order`), so a project keeps
+its color from day to day: its rank picks a preferred palette color. Each
+view then makes its projects distinct (`theme::project_colors`): when two
+would share a color, the one used first keeps it and the other takes the
+next free one. First use, not time, decides, so colors don't swap as the
+day goes on. The main screen does this over today's projects
+(`project_color`), the longer views over the period's.
+
+### ratatui gotchas
+
+Learned the hard way; render tests pin them.
+
+- `Tabs`' default divider is `│` with a space on each side
+  (` Activity │ Project │ Task`).
+- `List` content sits one column right of the highlight symbol (`>alpine`).
+- Borders render in the default color unless given a style: only the
+  focused main-screen section and the longer views' frame set the accent.
+- `Block::bordered` adds no inner padding; `modal_layout` adds its own.
 
 ## Fuzzy autocomplete
 
-`fuzzy_filter(query, candidates) -> Vec<String>`:
+`fuzzy_filter(query, candidates)`: an empty query gives every candidate in
+order (so suggestions show as soon as a field opens); otherwise
+`SkimMatcherV2` subsequence matches, best score first, at most 5.
 
-- Empty query → all candidates in original order (so suggestions appear as
-  soon as the field is active).
-- Otherwise: subsequence match via `SkimMatcherV2`, sorted by score descending,
-  capped at **5** results.
+`Autocomplete` holds `input` (the value), `query` (what was typed, which
+suggestions filter on), `selection: Option<usize>` and its `candidates`.
+Its invariant: **the input line shows exactly what Enter submits.**
 
-`Autocomplete` (activity, project and task steps) holds `input` (the value), `query`
-(what was typed; suggestions filter on it), `selection: Option<usize>` and its
-`candidates`. Its invariant: **the input line shows exactly what Enter
-submits.**
-
-- Tab/↓ with nothing selected select the best match (a single Tab never skips
-  past it — pinned by `tab_accepts_best_match_first`); after that Tab cycles
-  with wrap-around and ↓ stops at the end.
-- ↑ moves back; past the top it clears the selection and restores the typed
-  text.
-- Selecting copies the suggestion into `input`; nothing is highlighted until
-  something is selected.
-- Typing/Backspace edit `input`, set `query = input` and clear the
-  selection, so typing after accepting a suggestion extends it.
-- Free typing is always allowed; `value()` trims and maps blank to `None`.
-
-(Performance nit: `fuzzy_filter` constructs a `SkimMatcherV2` per call, i.e.
-per frame; see DEVELOPMENT.md nits.)
+- Tab / ↓ with nothing selected pick the best match (one Tab never skips
+  it; pinned by `tab_accepts_best_match_first`); then Tab cycles with
+  wrap-around and ↓ stops at the end.
+- ↑ moves back; past the top it clears the selection and restores the
+  typed text.
+- Selecting copies the suggestion into `input`. Typing or Backspace edits
+  `input`, sets `query` to it and clears the selection, so typing after
+  accepting a suggestion extends it.
+- Free text is always allowed; `value()` trims and turns blank into
+  `None`.
 
 ## Testing
 
-All tests are plain unit tests at the bottom of their module (the UI's in
-`app/tests.rs`); there is no
-integration-test directory and no shared fixture — each test opens its own
-throwaway db.
+Unit tests at the bottom of each module, and the UI's in `app/tests.rs`.
+No integration-test directory and no shared fixture: each test opens its
+own throwaway db.
 
-**Temp dirs.** Parallel tests share one process, so each test module uses a
-unique prefix (`jiary-test-` in db.rs, `jiary-app-test-` in app/tests.rs) plus the
-pid and an atomic counter, with `Drop` cleanup. A shared directory would let
-one test delete another's live database. In `TestApp`, the `app` field is
-declared before `dir` so the `Db` connection drops before the directory is
+**Temp dirs.** Tests run in parallel in one process, so each module's temp
+dirs have their own prefix (`jiary-test-` in `db.rs`, `jiary-app-test-` in
+`app/tests.rs`) plus the pid and an atomic counter, removed on `Drop`.
+Shared dirs would let one test delete another's live db. In `TestApp`,
+`app` is declared before `dir` so the connection drops before the dir is
 removed.
 
-**Levels of test:**
+**What's tested where:**
 
-- *db.rs* — SQL behavior: trigger enforcement, duplicate-active tolerance,
-  timestamp format (`+00:00` suffix, legacy `Z` rows), bad-timestamp error
-  path, today query and its local-midnight boundary, same-second ordering.
-- *layout.rs / summary.rs* — pure: section heights for every
-  collapsed/resized combination and small or tiny areas, resize clamping,
-  layout file round-trip and junk tolerance; summary totals, ordering, the
-  running session's in-memory copy, focus/disruption figures.
-- *app/ state machine* — key handling against a `TestApp` (real db):
-  key-event filtering, autocomplete semantics, end/note form commit and
-  cancel, detour (d/b/m) and resume edge cases, section focus/collapse/resize/scroll,
-  mouse drag/click/wheel (`mouse`, `drag` helpers), layout persistence
-  across two `App`s, status-line content and width fitting. Keys go through
-  `press(code)` / `TestApp::key` / `TestApp::typed`. Setup helpers
-  (`on_project_step`, `on_activity_step`, `on_screen`, `empty_form`) put the
-  app directly on a screen/step; pushing sessions straight into
-  `today_sessions` (or `with_sessions(t, n)`) is the right level for tests of
-  things `draw` reads from memory. `TestApp` sets the 80×24 render size so
-  handlers see the same geometry as `render`.
-- *app/ rendering* — a `TestBackend` at a fixed 80×24, drawn once via
-  `render(&app) -> Buffer`, asserted with char-based row extractors:
-  `line(buf, y)` (row text, trailing padding trimmed), `line_from(buf, y, x)`
-  (row from char column `x`), `col_of(buf, y, needle)` (char column of first
-  occurrence). Char-based because rows contain multi-byte glyphs (`│ – · ✗`).
-  Fixtures `running_session(elapsed, interruptions)` and
-  `finished_session(start, end, focus)` make time-dependent output
-  deterministic.
+- *`db.rs`*: SQL behavior: the trigger, duplicate active rows, timestamp
+  formats (`+00:00`, legacy `Z`), bad timestamps, today's local-midnight
+  boundary, same-second ordering.
+- *`layout.rs`, `summary.rs`, `mascot.rs`, `captions.rs`, `period.rs`*:
+  pure logic: section heights for every collapsed and resized combination
+  and tiny areas, the layout file's round trip and junk tolerance, summary
+  totals and focus figures, frame schedules, date ranges.
+- *`app/tests.rs`, behavior*: keys against a `TestApp` (a real db): key
+  filtering, autocomplete, the forms, detours and resume, rating and undo,
+  moving the start, the away question, the palette, the longer views'
+  paging, section focus, collapse, resize and scroll, the mouse (`mouse`,
+  `drag`, `click`), layout persistence across two `App`s. Keys go through
+  `press(code)`, `TestApp::key` and `TestApp::typed`; helpers like
+  `on_activity_step`, `on_project_step` and `on_screen` put the app straight
+  on a screen. Pushing sessions into `today_sessions` (or
+  `with_sessions(t, n)`) is the right level for what `draw` reads from
+  memory.
+- *`app/tests.rs`, rendering*: a `TestBackend` at a fixed 80×24
+  (`RENDER_WIDTH` × `RENDER_HEIGHT`, also `TestApp`'s size, so handlers see
+  the same geometry), drawn by `render(&app)`, read with char-based
+  helpers (`line`, `line_from`, `col_of`, `row_with`), since rows hold
+  multi-byte glyphs. `running_session` and `finished_session` make
+  time-dependent output deterministic. `every_screen_survives_tiny_terminals`
+  draws every screen at tiny sizes.
 
-When adding a screen or widget: add a render test that pins its exact layout
-and colors (the gotchas list above exists because those tests caught real
-bugs), and keep the fixed 80×24 size — it is wide enough for every status
-line and tall enough that chrome rows never overlap content.
+When adding a screen or widget, add a render test pinning its layout and
+colors, and keep 80×24: wide enough for every status line, tall enough that
+the chrome never overlaps content.
 
-## Design decisions, in brief
+**The docs' pictures.** `app/screenshot.rs` holds ignored tests that fill
+a throwaway db (a made-up day, or about 400 days of seeded history written
+in one transaction), draw a screen into a `TestBackend` and write the
+buffer to `docs/images/*.svg`: block and box-drawing characters become
+shapes, text runs are stretched to exact column widths, and the 16 named
+colors use a fixed dark palette. `cargo test screenshot -- --ignored`
+regenerates them.
 
-- **The db is the source of truth; memory is a cache.** Every mutation writes
-  through to the db first and mirrors on success; startup rebuilds everything
-  from the db. This is what makes "copy the .db file" a complete backup and
-  crash recovery trivial (worst case: one session left active).
-- **Fail visible, not fatal.** Only an unopenable db exits. Every other
-  failure lands in the red status line and the app keeps working with partial
-  data.
-- **No managed objects.** Projects/tasks/activities are strings; history is
-  the only "database" of them. This keeps the schema at one table and the
-  backup story at one file.
-- **16 colors, no truecolor** — decent on any terminal; all styling flows
-  through `theme.rs`.
-- **No system dependencies** — bundled SQLite, no X11/Wayland interaction
-  (which also rules out in-process global hotkeys; see backlog F).
+## Design decisions
 
-## Known nits
-
-Tracked in DEVELOPMENT.md's backlog: the per-frame `SkimMatcherV2`
-allocation in `fuzzy_filter`.
+- **The db is the source of truth, memory a cache.** Every change writes to
+  the db first and mirrors on success; startup rebuilds from the db. So
+  copying the `.db` file is a complete backup, and a crash loses at most
+  the fact that a session was still running.
+- **Fail visibly, not fatally.** Only an unopenable db exits; every other
+  failure lands on the red status line and the app carries on with what it
+  has.
+- **No managed objects.** Projects, tasks and activities are strings, and
+  history is their only list, which keeps the schema to one table.
+- **Named colors first.** The UI follows the terminal's theme; 256-color
+  hues only where 16 aren't enough, no truecolor.
+- **No system dependencies.** Bundled SQLite. Idle time comes from a
+  command when there is one (`ioreg` on macOS, `xprintidle` on Linux if
+  installed) and is simply unavailable otherwise. No X11 or Wayland
+  integration, which also rules out in-process global hotkeys (backlog F).
