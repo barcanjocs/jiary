@@ -21,19 +21,27 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State (2026-10-31): **v1.0.1 released**
-  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.1). Tree green,
-  180 tests. In place: sessions with one-key `e`, a 5 s
-  rating bar and `u` undo; recent picks; `[`/`]` to move the start;
-  away/idle detection; detours (`d`/`b`/`m`, `r`); the main screen with
-  activity and project colors, the cat and the day's graphs; the `/`
-  palette; `/weekly`, `/monthly`, `/yearly` with focus grids; the
-  single-instance lock; the release workflow and `install.sh`. Since
-  1.0.0: `src/app.rs` split into `src/app/`, a short README, the user and
-  developer manuals in `docs/`, and pictures drawn by the UI code
-  (`app/screenshot.rs`), all in 1.0.1; after it,
-  `docs/dev/implementation.md` rewritten to match the code, and `/rename`
-  (backlog H).
+- State (2026-10-31): **v1.0.2 tagged**
+  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.2); its release
+  run was still building when the session ended, so check that it
+  published and that `install.sh` gets 1.0.2 (`jiary --version`). Tree
+  green, 180 tests, everything pushed. In place: sessions with one-key
+  `e`, a 5 s rating bar and `u` undo; recent picks; `[`/`]` to move the
+  start; away/idle detection; detours (`d`/`b`/`m`, `r`); the main screen
+  with activity and project colors, the cat and the day's graphs; the `/`
+  palette; `/weekly`, `/monthly`, `/yearly` with focus grids; `/rename`;
+  the single-instance lock; the release workflow and `install.sh`.
+  - 1.0.1: `src/app.rs` split into `src/app/`, a short README, the user
+    and developer manuals in `docs/`, pictures drawn by the UI code
+    (`app/screenshot.rs`), a fix for months' focus cut off in `/yearly`.
+  - 1.0.2: `/rename` (backlog H); `docs/dev/implementation.md` rewritten;
+    the year's focus grid as a block per month (weeks split at month ends,
+    a blank column after a month ending on a Sunday, names centered,
+    rows labelled `Mo Tu` … `Su`); the docs' SVGs place every word at its
+    column (GitHub collapsed the spaces) and show a complete year.
+- Pictures: `cargo test screenshot -- --ignored` regenerates
+  `docs/images/`; `main.svg` changes on every run (it shows the time), so
+  only commit it when the main screen changed.
 - Next, in order: backlog J (sleep and mood, with its limits), A (browse
   past days, likely `/day` with ←→ like the period views) and K (soft
   Pomodoro, with `/settings`).
