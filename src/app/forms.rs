@@ -66,7 +66,7 @@ impl Autocomplete {
     /// the previous one and, past the top, returns to the typed text. Typing
     /// clears the selection and continues from what the input shows, so
     /// accepting a suggestion and then typing extends it.
-    fn handle_key(&mut self, key: KeyCode) {
+    pub(super) fn handle_key(&mut self, key: KeyCode) {
         let suggestions = self.suggestions();
         let selection = match (key, self.selection) {
             (KeyCode::Tab, Some(i)) => Some((i + 1) % suggestions.len()),
@@ -92,6 +92,12 @@ impl Autocomplete {
         };
     }
 
+    /// Whether `value` is one of the candidates (the rename form's From
+    /// step only takes names in use).
+    pub(super) fn offers(&self, value: &str) -> bool {
+        self.candidates.iter().any(|c| c == value)
+    }
+
     /// The submitted value; blank input becomes `None` so the db stores
     /// NULL, not "".
     pub(super) fn value(&self) -> Option<String> {
@@ -111,7 +117,11 @@ pub(super) enum Step {
 /// any) highlighted. The input itself is drawn as a `WrappedInput`; the list
 /// is indented one column so suggestion text lines up under the typed text
 /// (after the `›` prompt) and the `>` marker under the prompt's space.
-fn draw_suggestions(frame: &mut Frame, area: ratatui::layout::Rect, field: &Autocomplete) {
+pub(super) fn draw_suggestions(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    field: &Autocomplete,
+) {
     let area = Rect {
         x: area.x + 1,
         width: area.width.saturating_sub(1),

@@ -14,6 +14,7 @@ use super::modal::{
     SMALL_MODAL_HEIGHT, START_MODAL_HEIGHT, WrappedInput, modal_inner_width, small_modal_layout,
     start_modal_layout,
 };
+use super::rename::RenameStep;
 use super::text::fmt_hms;
 use super::{App, Screen};
 
@@ -41,7 +42,7 @@ impl App {
         let [_, content, _] = chrome_layout(ratatui::layout::Rect::new(0, 0, size.0, size.1));
         let input = self.wrapped_input(content)?;
         let input_area = match &self.screen {
-            Screen::StartSession(_) | Screen::Palette(_) => {
+            Screen::StartSession(_) | Screen::Palette(_) | Screen::Rename(_) => {
                 start_modal_layout(content, input.height()).2
             }
             _ => small_modal_layout(content, input.height()).2,
@@ -61,6 +62,9 @@ impl App {
             },
             Screen::AddNote(form) => Some((&form.input, "type a note")),
             Screen::Palette(form) => Some((&form.input, "")),
+            Screen::Rename(form) => form
+                .field()
+                .map(|(field, placeholder)| (field.input.as_str(), placeholder)),
             _ => None,
         }
     }
@@ -71,7 +75,7 @@ impl App {
     pub(super) fn wrapped_input(&self, content: ratatui::layout::Rect) -> Option<WrappedInput> {
         let (value, placeholder) = self.text_input()?;
         let base_height = match self.screen {
-            Screen::StartSession(_) | Screen::Palette(_) => START_MODAL_HEIGHT,
+            Screen::StartSession(_) | Screen::Palette(_) | Screen::Rename(_) => START_MODAL_HEIGHT,
             _ => SMALL_MODAL_HEIGHT,
         };
         let max_rows = content.height.saturating_sub(base_height - 1).max(1);
@@ -172,6 +176,11 @@ impl App {
                 ("Esc", "close"),
             ],
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
+            Screen::Rename(form) => match form.step {
+                RenameStep::What => &[("↑↓", "select"), ("Enter", "next"), ("Esc", "cancel")],
+                RenameStep::Confirm => &[("Enter", "apply"), ("Esc", "cancel")],
+                _ => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
+            },
             Screen::Away(_) => &[
                 ("k", "keep"),
                 ("b", "break"),

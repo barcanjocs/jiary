@@ -20,6 +20,7 @@ use forms::{AddNoteForm, StartSessionForm};
 use help::draw_help;
 use palette::{PaletteForm, draw_palette};
 use period_view::PeriodView;
+use rename::RenameForm;
 
 mod away;
 mod cat;
@@ -32,6 +33,7 @@ mod main_screen;
 mod modal;
 mod palette;
 mod period_view;
+mod rename;
 #[cfg(test)]
 mod screenshot;
 mod sections;
@@ -136,8 +138,10 @@ enum Screen {
     AddNote(AddNoteForm),
     /// The command palette (`/`).
     Palette(PaletteForm),
-    /// A week or a month, day by day (`/weekly`, `/monthly`).
+    /// A week, month or year (`/weekly`, `/monthly`, `/yearly`).
     Period(PeriodView),
+    /// Renaming or merging a label (`/rename`); boxed like the start form.
+    Rename(Box<RenameForm>),
     /// Back after `AWAY_AFTER` or more without touching the computer,
     /// during a work session: what was that time?
     Away(chrono::DateTime<Utc>),
@@ -416,6 +420,7 @@ impl App {
             Screen::AddNote(_) => self.handle_add_note(key),
             Screen::Palette(_) => return self.handle_palette(key),
             Screen::Period(_) => self.handle_period(key),
+            Screen::Rename(_) => self.handle_rename(key),
             Screen::Away(since) => {
                 let since = *since;
                 self.handle_away(key, since);
@@ -449,6 +454,7 @@ impl App {
             Screen::AddNote(_) => self.draw_add_note(frame, content, input),
             Screen::Palette(form) => draw_palette(frame, content, form, input),
             Screen::Period(view) => self.draw_period(frame, view),
+            Screen::Rename(form) => self.draw_rename(frame, content, form, input),
             Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 

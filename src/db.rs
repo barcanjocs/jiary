@@ -9,6 +9,33 @@ use crate::session::{BREAK, DISRUPTION, MEETING, Session};
 /// [`Db::latest_work_session`] for resuming work.
 pub type SessionCombo = (String, Option<String>, Option<String>);
 
+/// A free-text label a session carries, for renaming one everywhere.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Label {
+    Activity,
+    Project,
+    Task,
+}
+
+impl Label {
+    fn column(self) -> &'static str {
+        match self {
+            Label::Activity => "activity",
+            Label::Project => "project",
+            Label::Task => "task",
+        }
+    }
+
+    /// The extra condition that keeps a task within its project (bound as
+    /// `?2`); none for the others.
+    fn scope(self) -> &'static str {
+        match self {
+            Label::Task => " AND IFNULL(project, '') = IFNULL(?2, '')",
+            _ => "",
+        }
+    }
+}
+
 pub struct Db {
     conn: Connection,
 }
@@ -398,6 +425,70 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
     }
 
+    /// The tasks used with `project`, or with no project for `None`
+    /// (NULL and "" alike), alphabetically.
+    pub fn tasks_in(&self, project: Option<&str>) -> Result<Vec<String>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT task FROM sessions
+                 WHERE IFNULL(project, '') = IFNULL(?1, '') AND task IS NOT NULL AND task != ''
+                 ORDER BY task",
+            )
+            .map_err(DbError::Sqlite)?;
+        let rows = stmt
+            .query_map(params![project], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
+    /// How many sessions use `value` as their `label`. Tasks count within
+    /// `project` (`None`: no project); the others ignore it.
+    pub fn count_label(
+        &self,
+        label: Label,
+        value: &str,
+        project: Option<&str>,
+    ) -> Result<usize, DbError> {
+        let sql = format!(
+            "SELECT COUNT(*) FROM sessions WHERE {} = ?1{}",
+            label.column(),
+            label.scope()
+        );
+        let count = match label {
+            Label::Task => self
+                .conn
+                .query_row(&sql, params![value, project], |row| row.get::<_, i64>(0)),
+            _ => self
+                .conn
+                .query_row(&sql, params![value], |row| row.get::<_, i64>(0)),
+        };
+        count.map(|n| n as usize).map_err(DbError::Sqlite)
+    }
+
+    /// Renames every use of `from` as a `label` to `to`, merging the two
+    /// when `to` is already in use, and returns how many sessions changed.
+    /// Tasks are renamed within `project` (`None`: no project), since task
+    /// names repeat across projects.
+    pub fn rename_label(
+        &self,
+        label: Label,
+        from: &str,
+        to: &str,
+        project: Option<&str>,
+    ) -> Result<usize, DbError> {
+        let column = label.column();
+        let sql = format!(
+            "UPDATE sessions SET {column} = ?1 WHERE {column} = ?2{}",
+            label.scope().replace("?2", "?3")
+        );
+        match label {
+            Label::Task => self.conn.execute(&sql, params![to, from, project]),
+            _ => self.conn.execute(&sql, params![to, from]),
+        }
+        .map_err(DbError::Sqlite)
+    }
+
     /// The last `limit` distinct activity/project/task combinations that
     /// aren't detours, most recently started first: the start form's
     /// one-key picks.
@@ -541,6 +632,90 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// A finished session with these labels, straight into the table.
+    fn insert(t: &TmpDb, activity: &str, project: Option<&str>, task: Option<&str>) {
+        t.db.conn
+            .execute(
+                "INSERT INTO sessions (started_at, ended_at, project, task, activity)
+                 VALUES ('2026-10-01T09:00:00+00:00', '2026-10-01T10:00:00+00:00', ?1, ?2, ?3)",
+                params![project, task, activity],
+            )
+            .unwrap();
+    }
+
+    /// Every session's (activity, project, task), in insert order.
+    fn labels(t: &TmpDb) -> Vec<(String, Option<String>, Option<String>)> {
+        let mut stmt =
+            t.db.conn
+                .prepare("SELECT activity, project, task FROM sessions ORDER BY id")
+                .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn renaming_a_label_changes_every_use_and_merges_into_an_existing_one() {
+        let t = TmpDb::new();
+        insert(&t, "Progamming", Some("jiary"), None);
+        insert(&t, "Programming", Some("jiry"), None);
+        insert(&t, "Progamming", Some("api"), None);
+        assert_eq!(
+            t.db.count_label(Label::Activity, "Progamming", None)
+                .unwrap(),
+            2
+        );
+
+        let changed =
+            t.db.rename_label(Label::Activity, "Progamming", "Programming", None)
+                .unwrap();
+        assert_eq!(changed, 2);
+        let changed =
+            t.db.rename_label(Label::Project, "jiry", "jiary", None)
+                .unwrap();
+        assert_eq!(changed, 1);
+
+        let all = labels(&t);
+        assert!(all.iter().all(|(a, _, _)| a == "Programming"), "{all:?}");
+        assert_eq!(t.db.count_label(Label::Project, "jiary", None).unwrap(), 2);
+        assert_eq!(t.db.recent_activities().unwrap(), ["Programming"]);
+        assert_eq!(t.db.distinct_projects().unwrap(), ["api", "jiary"]);
+    }
+
+    #[test]
+    fn tasks_are_renamed_and_counted_within_their_project() {
+        let t = TmpDb::new();
+        insert(&t, "Writing", Some("api"), Some("docs"));
+        insert(&t, "Writing", Some("website"), Some("docs"));
+        insert(&t, "Writing", None, Some("docs"));
+        insert(&t, "Writing", Some(""), Some("docs"));
+
+        assert_eq!(
+            t.db.count_label(Label::Task, "docs", Some("api")).unwrap(),
+            1
+        );
+        // No project, NULL or blank, is one group.
+        assert_eq!(t.db.count_label(Label::Task, "docs", None).unwrap(), 2);
+        assert_eq!(t.db.tasks_in(None).unwrap(), ["docs"]);
+
+        let changed =
+            t.db.rename_label(Label::Task, "docs", "api docs", Some("api"))
+                .unwrap();
+        assert_eq!(changed, 1);
+        let tasks = labels(&t)
+            .into_iter()
+            .map(|(_, _, task)| task)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tasks,
+            [Some("api docs"), Some("docs"), Some("docs"), Some("docs")]
+                .map(|t| t.map(String::from))
+        );
+        assert_eq!(t.db.tasks_in(Some("api")).unwrap(), ["api docs"]);
+        assert_eq!(t.db.tasks_in(Some("website")).unwrap(), ["docs"]);
     }
 
     #[test]

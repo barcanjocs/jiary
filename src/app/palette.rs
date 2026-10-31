@@ -42,6 +42,8 @@ pub(super) struct Command {
 enum Action {
     Key(KeyCode),
     View(Period),
+    /// The rename form, which has no key either.
+    Rename,
 }
 
 const fn command(
@@ -59,10 +61,15 @@ const fn command(
 }
 
 const fn view(name: &'static str, description: &'static str, period: Period) -> Command {
+    screen(name, description, Action::View(period))
+}
+
+/// A command that opens a screen with no key of its own.
+const fn screen(name: &'static str, description: &'static str, action: Action) -> Command {
     Command {
         name,
         description,
-        action: Action::View(period),
+        action,
         key_label: "",
     }
 }
@@ -72,6 +79,7 @@ pub(super) const COMMANDS: &[Command] = &[
     view("weekly", "this week, by day", Period::Week),
     view("monthly", "this month, by day", Period::Month),
     view("yearly", "this year's focus", Period::Year),
+    screen("rename", "rename or merge a label", Action::Rename),
     command("start", "start a session", 's', "s"),
     command("end", "end the session", 'e', "e"),
     command("note", "add a note", 'n', "n"),
@@ -200,6 +208,7 @@ impl App {
                     match command.action {
                         Action::Key(key) => return self.handle_main(key),
                         Action::View(period) => self.open_period(period, 0),
+                        Action::Rename => self.open_rename(),
                     }
                 }
             }
