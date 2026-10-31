@@ -69,8 +69,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 - **`period.rs`** — `Period` (week, month): which days the one `offset`
   periods from the current one covers, and its title. Pure date arithmetic.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
-  activity and project, focus, interruptions, disruptions, breaks, span and
-  gaps.
+  activity and project, focus (averaged weighted by session length),
+  interruptions, disruptions, breaks, span, gaps and the sessions as
+  timeline blocks. Takes any sessions, so a week's or a month's too.
   Pure; computed from in-memory sessions every frame.
 - **`db.rs`** — `Db` wraps a `rusqlite::Connection`. The schema (including the
   single-active-session trigger) is a `const SCHEMA` string applied with

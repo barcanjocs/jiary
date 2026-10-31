@@ -12,7 +12,8 @@ pub struct DaySummary {
     pub per_activity: Vec<(String, Duration)>,
     /// Time per project (`None`: sessions without one), longest first.
     pub per_project: Vec<(Option<String>, Duration)>,
-    /// Mean focus rating over the sessions that have one.
+    /// Mean focus rating over the sessions that have one, weighted by
+    /// their length: a 3-hour session counts more than a 20-minute one.
     pub average_focus: Option<f64>,
     pub rated: usize,
     pub interruptions: i32,
@@ -100,7 +101,10 @@ pub fn summarize<'a>(
     sort_longest_first(&mut per_activity);
     sort_longest_first(&mut per_project);
 
-    let ratings = sessions.iter().filter_map(|s| s.focus).collect::<Vec<_>>();
+    let ratings = sessions
+        .iter()
+        .filter_map(|s| s.focus.map(|focus| (focus, duration(s))))
+        .collect::<Vec<_>>();
     let disruptions = sessions
         .iter()
         .filter(|s| s.activity == DISRUPTION)
@@ -114,8 +118,7 @@ pub fn summarize<'a>(
     DaySummary {
         per_activity,
         per_project,
-        average_focus: (!ratings.is_empty())
-            .then(|| ratings.iter().sum::<i32>() as f64 / ratings.len() as f64),
+        average_focus: average_focus(&ratings),
         rated: ratings.len(),
         interruptions: sessions.iter().filter_map(|s| s.interruptions).sum(),
         disruptions: disruptions.len(),
@@ -141,6 +144,25 @@ pub fn summarize<'a>(
             blocks
         },
     }
+}
+
+/// The length-weighted mean of (rating, length) pairs; plain mean when the
+/// rated sessions took no time at all.
+fn average_focus(ratings: &[(i32, Duration)]) -> Option<f64> {
+    if ratings.is_empty() {
+        return None;
+    }
+    let seconds = |d: &Duration| d.num_seconds().max(0) as f64;
+    let total = ratings.iter().map(|(_, d)| seconds(d)).sum::<f64>();
+    Some(if total > 0.0 {
+        ratings
+            .iter()
+            .map(|(f, d)| *f as f64 * seconds(d))
+            .sum::<f64>()
+            / total
+    } else {
+        ratings.iter().map(|(f, _)| *f as f64).sum::<f64>() / ratings.len() as f64
+    })
 }
 
 fn add<K: PartialEq>(totals: &mut Vec<(K, Duration)>, key: K, duration: Duration) {
@@ -296,7 +318,8 @@ mod tests {
         let e = session(at(11, 5), Some(at(11, 50)), BREAK, None);
 
         let s = summarize(&[a, b, c, d, e], None, at(12, 0));
-        assert_eq!(s.average_focus, Some(2.5));
+        // Weighted by length: 60 min of 3, 40 min of 2.
+        assert_eq!(s.average_focus, Some(2.6));
         assert_eq!(s.rated, 2);
         assert_eq!(s.interruptions, 3);
         assert_eq!(s.disruptions, 2);
