@@ -302,8 +302,13 @@ alike:
   and end time. For `RATING_WINDOW` (5 s) after that, `1`/`2`/`3` rate it
   (`rate` → `db.set_focus`) and play the cat's rating reaction. The window
   is kept short on purpose, since a rating given right away is the honest
-  one. The status line leads with `[1/2/3] rate bad/ok/good Ns  [u] undo`
-  while it is open. Starting from nothing (`b` right after `e`) leaves the
+  one. While it is open, `resolve_layout` keeps a row under the active
+  section (the sections below move down; the filler gives up the row) and
+  `draw_main` puts `rating_bar` there: a full-width line in `ACCENT` with
+  `ON_ACCENT` text whose filled part drains from the right with the time
+  left. The cat's caption becomes `captions::RATING`. The status line keeps
+  its usual hints. Starting
+  from nothing (`b` right after `e`) leaves the
   window open; closing another session replaces it (and closes it for a
   break or disruption).
 - **Undo.** `close_active_session` begins an `Undo` record of the change
@@ -370,8 +375,7 @@ UI never jumps when an error appears or disappears.
   "today". The total is computed from in-memory sessions only: completed
   durations plus the active session's elapsed time.
 - **Status line** — the red `✗ <error>` when `error` is set, otherwise the
-  key hints for the current screen (led by the rating countdown and undo
-  while the rating window is open). This is the *only* place errors and hints
+  key hints for the current screen. This is the *only* place errors and hints
   are rendered.
 
 ### Main screen

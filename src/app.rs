@@ -361,10 +361,16 @@ impl App {
         }
     }
 
+    /// How long `1`–`3` can still rate the session that just ended, while
+    /// they can.
+    fn rating_left(&self) -> Option<std::time::Duration> {
+        let (_, ended) = self.rating?;
+        Some(RATING_WINDOW.saturating_sub(ended.elapsed())).filter(|left| !left.is_zero())
+    }
+
     /// Whether `1`–`3` still rate the session that just ended.
     fn rating_open(&self) -> bool {
-        self.rating
-            .is_some_and(|(_, ended)| ended.elapsed() < RATING_WINDOW)
+        self.rating_left().is_some()
     }
 
     /// Rates the session that just ended, while the rating window is open.
@@ -865,18 +871,6 @@ impl App {
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
         };
-        // Right after a session ends, rating it and undoing come first,
-        // with the seconds left to rate.
-        let countdown;
-        let mut hints = hints.to_vec();
-        if matches!(self.screen, Screen::Main)
-            && let Some((_, ended)) = self.rating.filter(|_| self.rating_open())
-        {
-            let left = RATING_WINDOW.saturating_sub(ended.elapsed()).as_secs_f32();
-            countdown = format!("rate bad/ok/good {}s", left.ceil() as u32);
-            hints.splice(0..0, [("1/2/3", countdown.as_str()), ("u", "undo")]);
-        }
-        let hints = &hints[..];
         // Hints are shown in order while they fit, keeping room for
         // `HELP_HINT` (always shown, wherever it sits in the list). Once a
         // hint doesn't fit, the remaining optional ones are dropped too, so
@@ -1063,9 +1057,22 @@ impl App {
         self.resolve_layout(content)
     }
 
+    /// The main screen's sections. While a session can be rated, a row
+    /// below the active section is kept for the rating bar: the sections
+    /// below move down and the one filling the rest gives up the row.
     fn resolve_layout(&self, content: Rect) -> Areas {
-        self.layout
-            .resolve(content, self.content_heights(content.width))
+        let heights = self.content_heights(content.width);
+        if !self.rating_open() {
+            return self.layout.resolve(content, heights);
+        }
+        let shorter = Rect {
+            height: content.height.saturating_sub(1),
+            ..content
+        };
+        let mut areas = self.layout.resolve(shorter, heights);
+        areas.today.y += 1;
+        areas.summary.y += 1;
+        areas
     }
 
     /// Content-fitting heights of the active section and the summary,
@@ -1165,6 +1172,12 @@ impl App {
     /// and bottom ones collapse to a single line; all are resizable.
     fn draw_main(&self, frame: &mut Frame, area: Rect) {
         let areas = self.resolve_layout(area);
+        if let Some(left) = self.rating_left()
+            && areas.active.bottom() < area.bottom()
+        {
+            let row = Rect::new(area.x, areas.active.bottom(), area.width, 1);
+            frame.render_widget(rating_bar(left, row.width), row);
+        }
 
         let block = self.section_block(Section::Active);
         let inner = block.inner(areas.active);
@@ -1289,6 +1302,9 @@ impl App {
     /// The caption under the cat for the current mood and session
     /// activity, if its list has any.
     fn caption(&self) -> Option<&'static str> {
+        if self.rating_open() {
+            return Some(captions::RATING);
+        }
         let activity = self.active_session.as_ref().map(|s| s.activity.as_str());
         captions::caption(self.mood(), activity, self.caption_seed)
     }
@@ -1652,6 +1668,35 @@ const START_MODAL_HEIGHT: u16 = 12;
 const SMALL_MODAL_HEIGHT: u16 = 6;
 /// The status-line hint for the help screen; the main screen always shows it.
 const HELP_HINT: (&str, &str) = ("?", "help");
+
+/// The row under the active section while a session can be rated: a bar
+/// in the accent color, hard to miss, asking for the rating. Its filled
+/// part drains from the right as the `left` of `RATING_WINDOW` runs out.
+fn rating_bar(left: std::time::Duration, width: u16) -> Line<'static> {
+    let width = width as usize;
+    let seconds = left.as_secs_f32().ceil() as u32;
+    let prompt = " How was your focus?  [1] bad  [2] ok  [3] good   [u] undo";
+    let countdown = format!("{seconds}s ");
+    let gap = width.saturating_sub(prompt.chars().count() + countdown.chars().count());
+    let text: Vec<char> = format!("{prompt}{}{countdown}", " ".repeat(gap))
+        .chars()
+        .take(width)
+        .collect();
+    let filled = ((width as f32 * left.as_secs_f32() / RATING_WINDOW.as_secs_f32()).ceil()
+        as usize)
+        .min(text.len());
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    Line::from(vec![
+        Span::styled(
+            text[..filled].iter().collect::<String>(),
+            bold.fg(theme::ON_ACCENT).bg(theme::ACCENT),
+        ),
+        Span::styled(
+            text[filled..].iter().collect::<String>(),
+            bold.fg(theme::ACCENT),
+        ),
+    ])
+}
 
 /// A picker `List` with the accent highlight symbol and style.
 /// The symbol column is always reserved, so items don't shift right when
@@ -2021,7 +2066,7 @@ fn draw_help(frame: &mut Frame, content: Rect) {
             ("m", "start a meeting"),
             ("r", "resume after d, b or m"),
             ("1 / 2 / 3", "rate focus, just after"),
-            ("u", "undo the last start/end"),
+            ("u", "undo last start or end"),
             ("q / Ctrl+C", "quit"),
         ],
     )];
@@ -2586,22 +2631,40 @@ mod tests {
     }
 
     #[test]
-    fn status_line_leads_with_rating_and_undo_while_the_window_is_open() {
+    fn the_rating_prompt_is_a_draining_bar_and_the_cat_asks_too() {
         let mut t = TestApp::new();
         t.app.start_session("Reading", None, None);
         t.key(KeyCode::Char('e'));
+        let (id, _) = t.app.rating.unwrap();
         let buf = render(&t.app);
+        // Its own row, between the active section and today's.
+        let y = row_with(&buf, "How was your focus?");
+        assert!(line(&buf, y - 1).starts_with("╰"));
+        assert!(line(&buf, y + 1).starts_with("╭ ▾ TODAY"));
+        let bar = line(&buf, y);
         assert!(
-            line(&buf, RENDER_HEIGHT - 1)
-                .starts_with("[1/2/3] rate bad/ok/good 5s  [u] undo  [s] start"),
-            "{}",
-            line(&buf, RENDER_HEIGHT - 1)
+            bar.starts_with(" How was your focus?  [1] bad  [2] ok  [3] good   [u] undo"),
+            "{bar}"
         );
-
-        // Once it closes, the usual hints are back.
-        t.app.rating = Some((1, Instant::now() - RATING_WINDOW));
-        let buf = render(&t.app);
+        assert!(bar.ends_with("5s"), "{bar}");
+        // Full width in the accent color...
+        assert_eq!(buf[(0, y)].bg, Color::Cyan);
+        assert_eq!(buf[(RENDER_WIDTH - 1, y)].bg, Color::Cyan);
+        assert!(caption_rows(&buf).join(" ").contains("how was your focus?"));
+        // ...with the usual hints still at the bottom.
         assert!(line(&buf, RENDER_HEIGHT - 1).starts_with("[s] start"));
+
+        // It drains from the right as time runs out.
+        t.app.rating = Some((id, Instant::now() - RATING_WINDOW / 2));
+        let buf = render(&t.app);
+        assert_eq!(buf[(0, y)].bg, Color::Cyan);
+        assert_ne!(buf[(RENDER_WIDTH - 1, y)].bg, Color::Cyan);
+        assert!(line(&buf, y).ends_with("3s"));
+
+        // Once it closes, the row goes back to today's sessions.
+        t.app.rating = Some((id, Instant::now() - RATING_WINDOW));
+        let buf = render(&t.app);
+        assert!(line(&buf, y).starts_with("╭ ▾ TODAY"));
     }
 
     #[test]
@@ -3518,6 +3581,8 @@ mod tests {
         for (width, height) in [(0, 0), (1, 1), (5, 3), (12, 6), (30, 10)] {
             for screen in screens() {
                 let mut t = with_sessions(TestApp::new(), 5).on_screen(screen);
+                // With the rating bar's row too.
+                t.app.rating = Some((0, Instant::now()));
                 t.app.set_size((width, height));
                 let backend = TestBackend::new(width, height);
                 let mut terminal = Terminal::new(backend).unwrap();

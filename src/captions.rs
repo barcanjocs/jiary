@@ -32,6 +32,10 @@ const MEETING: &[&str] = &["teams, am I right?"];
 /// A disruption.
 const GAMING: &[&str] = &["probably footabling with Jimmy"];
 
+/// While the session that just ended can be rated (a few seconds), the cat
+/// asks for it instead.
+pub const RATING: &str = "how was your focus?";
+
 /// The sentences for `mood`; for a work session, `activity`'s own list
 /// when it has one.
 fn sentences(mood: Mood, activity: Option<&str>) -> &'static [&'static str] {

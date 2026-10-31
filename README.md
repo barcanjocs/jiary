@@ -108,7 +108,7 @@ Meetings you start with `s` (activity "Meeting") are detours too, so `r` never r
 
 ### Focus rating
 
-`e` ends a session right away, with no prompts. For the next 5 seconds the status line counts down, and you can rate your focus with a single key:
+`e` ends a session right away, with no prompts. For the next 5 seconds a bar in the accent color appears under the active section, draining as time runs out (the cat asks too), and you can rate your focus with a single key:
 
 - `1` — bad (fragmented, many context switches)
 - `2` — ok

@@ -40,6 +40,8 @@ pub const CAT_MUSIC: Color = ACCENT;
 
 /// Accent: panel titles, timer, active tab, selected items.
 pub const ACCENT: Color = Color::Cyan;
+/// Text on an accent background (the rating bar).
+pub const ON_ACCENT: Color = Color::Black;
 /// Secondary text: labels, key hints, notes, past data.
 pub const MUTED: Color = Color::Gray;
 /// Good outcome (focus 3).
