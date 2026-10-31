@@ -48,8 +48,9 @@ truth for state — this file plus `git log` is all that is needed to resume.
      the shared summary pieces and graph helpers (`half_cells`,
      `timeline_row`, `share_row`, `focus_grid`, ...). Mostly moving code;
      the render tests make it safe. Keep `./check` green per step.
-  4. Then backlog H (rename labels, as a `/` command) and A (browse past
-     days, likely `/day` with ←→ like the period views).
+  4. Then backlog H (rename labels, as a `/` command), J (sleep and mood,
+     with its limits) and A (browse past days, likely `/day` with ←→ like
+     the period views).
 - Releasing: bump `version` in Cargo.toml, commit, then tag and push the
   tag (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`); the workflow
   builds and publishes. Tag pushes are done by the maintainer, not an
@@ -120,6 +121,28 @@ from its scope note alone, without re-deriving context.
       hotkey registration — Wayland forbids it and it breaks the
       no-system-deps property. Touches: E's lockfile format, one X11
       activation helper, README.
+- [ ] **J. Day context: sleep and mood** (medium; best after the `app.rs`
+      split, since it touches the db, the start flow and the period views).
+      Two once-a-day ratings to set the day's work against. Discussed
+      2026-10-31; the limits are the point, so keep them:
+      - Exactly two, fixed: sleep and mood, on focus's 1–3 scale. No custom
+        fields or "add a metric": that road ends in a habit tracker, out of
+        scope. Say so in the README's scope statement.
+      - Asked once, cheaply: the day's first `s` opens a small prompt before
+        the start form (`sleep 1/2/3 · mood 1/2/3`, two keys); Esc skips and
+        it doesn't ask again that day. `/day` sets or changes them later.
+        No reminders, no nagging.
+      - Storage: a new table `days(date TEXT PRIMARY KEY, sleep INTEGER,
+        mood INTEGER)`, added with `CREATE TABLE IF NOT EXISTS`, so old dbs
+        just gain it. The first schema change after 1.0: note it in the
+        release.
+      - Showing the relation honestly (personal data is small and noisy):
+        grouped averages in the period totals, e.g. `focus 2.6 after good
+        sleep (12 days) · 1.9 after poor sleep (5 days)`, with the day
+        counts, and "not enough data yet" under ~5 days per group; and
+        sleep/mood as rows of squares beside the focus grid in the month
+        and year views. No correlation coefficients, trend lines or
+        predictions.
 - [ ] **Nits** (tiny, do whenever):
   - `fuzzy_filter` constructs a `SkimMatcherV2` per call (per frame); make it
     static.
