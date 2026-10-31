@@ -55,6 +55,26 @@ The main screen shows the running session, today's sessions and a summary of
 the day. Press `/` for the command palette, where `/weekly`, `/monthly` and
 `/yearly` look back further. Press `?` for every key, and `q` to quit.
 
+## Long-term trends
+
+`/weekly`, `/monthly` and `/yearly` show where your time and focus went over
+longer stretches: a timeline per day, totals per activity and project, and a
+focus grid colored from red (1) to green (3). See
+[Looking back](docs/user/looking-back.md).
+
+<table>
+  <tr>
+    <th>Week</th>
+    <th>Month</th>
+    <th>Year</th>
+  </tr>
+  <tr>
+    <td valign="top"><a href="docs/images/weekly.svg"><img src="docs/images/weekly.svg" width="280" alt="The week view: a timeline row per day, the week's totals and its focus grid"></a></td>
+    <td valign="top"><a href="docs/images/monthly.svg"><img src="docs/images/monthly.svg" width="280" alt="The month view: a row per day grouped by week, the month's totals and its focus grid"></a></td>
+    <td valign="top"><a href="docs/images/yearly.svg"><img src="docs/images/yearly.svg" width="280" alt="The year view: the year's focus grid, a row per month and the year's totals"></a></td>
+  </tr>
+</table>
+
 ## More
 
 - **[User manual](docs/user/README.md)**: every workflow in detail, all the
