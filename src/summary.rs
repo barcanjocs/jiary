@@ -22,6 +22,9 @@ pub struct DaySummary {
     /// First start and last end (now, while a session runs).
     pub span: Option<(DateTime<Utc>, DateTime<Utc>)>,
     pub tracked: Duration,
+    /// Each session as (start, end, activity), earliest first: the day's
+    /// timeline.
+    pub blocks: Vec<(DateTime<Utc>, DateTime<Utc>, String)>,
 }
 
 impl DaySummary {
@@ -31,6 +34,22 @@ impl DaySummary {
             Some((start, end)) => (end - start - self.tracked).max(Duration::zero()),
             None => Duration::zero(),
         }
+    }
+
+    /// Time at work: everything tracked but breaks and disruptions
+    /// (meetings count as work).
+    pub fn work_time(&self) -> Duration {
+        self.tracked - self.break_time - self.disruption_time
+    }
+
+    /// The activity going on at `at`, if any (the latest started, should
+    /// sessions overlap).
+    pub fn activity_at(&self, at: DateTime<Utc>) -> Option<&str> {
+        self.blocks
+            .iter()
+            .rev()
+            .find(|(start, end, _)| *start <= at && at < *end)
+            .map(|(_, _, activity)| activity.as_str())
     }
 }
 
@@ -86,6 +105,14 @@ pub fn summarize(today: &[Session], active: Option<&Session>, now: DateTime<Utc>
             .sum(),
         span,
         tracked: sessions.iter().map(|s| duration(s)).sum(),
+        blocks: {
+            let mut blocks = sessions
+                .iter()
+                .map(|s| (s.started_at, s.ended_at.unwrap_or(now), s.activity.clone()))
+                .collect::<Vec<_>>();
+            blocks.sort_by_key(|(start, _, _)| *start);
+            blocks
+        },
     }
 }
 
@@ -127,6 +154,40 @@ mod tests {
             focus: None,
             interruptions: None,
         }
+    }
+
+    #[test]
+    fn blocks_follow_the_day_and_tell_the_activity_at_a_time() {
+        let active = session(at(11, 0), None, "Reading", None);
+        let today = [
+            session(at(10, 0), Some(at(10, 30)), BREAK, None),
+            session(at(9, 0), Some(at(10, 0)), "Programming", None),
+        ];
+        let s = summarize(&today, Some(&active), at(12, 0));
+        let activities = s
+            .blocks
+            .iter()
+            .map(|(_, _, a)| a.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(activities, ["Programming", BREAK, "Reading"]);
+        assert_eq!(s.blocks[2].1, at(12, 0), "running: up to now");
+        assert_eq!(s.activity_at(at(9, 59)), Some("Programming"));
+        assert_eq!(s.activity_at(at(10, 0)), Some(BREAK));
+        assert_eq!(s.activity_at(at(10, 45)), None, "a gap");
+        assert_eq!(s.activity_at(at(11, 30)), Some("Reading"));
+    }
+
+    #[test]
+    fn work_is_what_breaks_and_disruptions_leave() {
+        let today = [
+            session(at(9, 0), Some(at(10, 0)), "Programming", None),
+            session(at(10, 0), Some(at(10, 30)), "Meeting", None),
+            session(at(10, 30), Some(at(10, 45)), BREAK, None),
+            session(at(10, 45), Some(at(10, 55)), DISRUPTION, None),
+        ];
+        let s = summarize(&today, None, at(12, 0));
+        assert_eq!(s.tracked, Duration::minutes(115));
+        assert_eq!(s.work_time(), Duration::minutes(90), "meetings count");
     }
 
     #[test]

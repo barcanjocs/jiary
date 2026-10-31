@@ -4,7 +4,7 @@ use std::time::Instant;
 use chrono::Utc;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, HighlightSpacing, List, ListItem, ListState, Paragraph, Scrollbar,
@@ -1295,10 +1295,18 @@ impl App {
     /// Content-fitting heights of the active section and the summary,
     /// borders included.
     fn content_heights(&self, width: u16) -> ContentHeights {
+        ContentHeights {
+            active: self.active_content_height(width),
+            summary: self.summary_lines(width.saturating_sub(2)).len() as u16 + 2,
+        }
+    }
+
+    /// The active section's content-fitting height, borders included: the
+    /// text column (info, then notes) or the cat column, whichever is
+    /// taller. The cat column keeps its caption rows even without a caption,
+    /// so the layout doesn't jump when one appears.
+    fn active_content_height(&self, width: u16) -> u16 {
         let inner_width = width.saturating_sub(2);
-        // The text column (info, then notes) or the cat column, whichever is
-        // taller. The cat column keeps its caption rows even without a
-        // caption, so the layout doesn't jump when one appears.
         let notes = self.note_lines(text_width(inner_width)).len();
         let text = (self.active_lines().len() + notes) as u16;
         let cat = if cat_fits(inner_width) {
@@ -1306,11 +1314,27 @@ impl App {
         } else {
             0
         };
-        let active = text.max(cat);
-        ContentHeights {
-            active: active + 2,
-            summary: self.summary_lines(width.saturating_sub(2)).len() as u16 + 2,
+        text.max(cat) + 2
+    }
+
+    /// Whether the summary (its interior `width` columns wide) shows its
+    /// graphs: only when, with them, today's sessions keep
+    /// `TODAY_ROOM_FOR_GRAPHS` rows, so on a short terminal the graphs give
+    /// way rather than squeezing today's list or clipping the summary.
+    fn summary_graphs_fit(&self, width: u16) -> bool {
+        if (width.saturating_sub(SUMMARY_LABEL_WIDTH) as usize) < MIN_GRAPH_WIDTH {
+            return false;
         }
+        let [_, content, _] = chrome_layout(Rect::new(0, 0, self.size.0, self.size.1));
+        let active = (self.layout.active_height)
+            .unwrap_or_else(|| self.active_content_height(content.width));
+        let summary = self.summary_text_lines(width).len() as u16 + 2 + GRAPH_ROWS;
+        let today = if self.layout.today_collapsed {
+            crate::layout::COLLAPSED_HEIGHT
+        } else {
+            TODAY_ROOM_FOR_GRAPHS
+        };
+        content.height >= active + summary + today
     }
 
     /// The section the scroll keys act on: the focused one if it scrolls,
@@ -1605,8 +1629,18 @@ impl App {
     }
 
     /// Body of the summary, wrapped to `width`: time per activity and per
-    /// project, focus and interruptions, and the day's span.
+    /// project, focus and interruptions, and the day's span, with graphs of
+    /// the day when they fit (`summary_graphs_fit`).
     fn summary_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.summary_body(width, self.summary_graphs_fit(width))
+    }
+
+    /// The summary's body without graphs.
+    fn summary_text_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.summary_body(width, false)
+    }
+
+    fn summary_body(&self, width: u16, graphs: bool) -> Vec<Line<'static>> {
         let summary = self.day_summary();
         let Some((start, end)) = summary.span else {
             return vec![Line::from(Span::styled(
@@ -1664,39 +1698,77 @@ impl App {
             },
             match summary.disruptions {
                 0 => dimmed("no disruptions"),
-                n => vec![
-                    Span::styled(
-                        plural(n, "disruption"),
-                        theme::VALUE.fg(theme::DISRUPTION_COLOR),
-                    ),
-                    Span::raw(" ("),
-                    time(summary.disruption_time),
-                    Span::raw(")"),
-                ],
+                // Their time is on the `Day` row.
+                n => vec![Span::styled(
+                    plural(n, "disruption"),
+                    theme::VALUE.fg(theme::DISRUPTION_COLOR),
+                )],
             },
         ];
-        let day = vec![
+        let mut day = vec![
             vec![Span::styled(
                 format!("{} – {}", fmt_time(&start), fmt_time(&end)),
                 theme::VALUE,
             )],
+            // Tracked, then what it was made of, each part's time in the
+            // color the graphs give it; parts that didn't happen are left
+            // out, keeping the row short.
             vec![Span::raw("tracked "), time(summary.tracked)],
-            if summary.break_time.is_zero() {
-                dimmed("no breaks")
-            } else {
-                vec![Span::raw("breaks "), time(summary.break_time)]
-            },
-            vec![Span::raw("gaps "), time(summary.untracked())],
+            vec![
+                Span::raw("work "),
+                colored_time(summary.work_time(), theme::WORK),
+            ],
         ];
+        for (word, duration, color) in [
+            ("breaks ", summary.break_time, theme::BREAK_COLOR),
+            (
+                "disrupted ",
+                summary.disruption_time,
+                theme::DISRUPTION_COLOR,
+            ),
+        ] {
+            if !duration.is_zero() {
+                day.push(vec![Span::raw(word), colored_time(duration, color)]);
+            }
+        }
+        day.push(vec![Span::raw("gaps "), time(summary.untracked())]);
+
+        // Two pictures lead their rows when there is room for them: the day
+        // as a timeline in activity colors, and each activity's share of
+        // the tracked time as one stacked bar.
+        let graph_width = width.saturating_sub(SUMMARY_LABEL_WIDTH) as usize;
+        let mut day_rows = Vec::new();
+        let mut activity_rows = Vec::new();
+        if graphs {
+            // From the hour the day began, so the hours line up from the
+            // left edge; the minutes before the first start show blank.
+            let from = start_of_hour(start);
+            day_rows.push(timeline_row(&summary, from, end, graph_width));
+            day_rows.push(hour_labels(from, end, graph_width));
+            let activity_shares = summary
+                .per_activity
+                .iter()
+                .map(|(activity, d)| (theme::activity_color(activity), *d))
+                .collect::<Vec<_>>();
+            activity_rows.push(share_row(&activity_shares, graph_width));
+            // The hours under the timeline already show the span.
+            day.remove(0);
+        }
 
         let mut lines = Vec::new();
-        for (label, items) in [
-            ("Activity", activities),
-            ("Project ", projects),
-            ("Focus   ", focus),
-            ("Day     ", day),
+        for (label, graph_rows, items) in [
+            ("Day     ", day_rows, day),
+            ("Activity", activity_rows, activities),
+            ("Project ", Vec::new(), projects),
+            ("Focus   ", Vec::new(), focus),
         ] {
-            lines.extend(hanging_lines(label, wrap_items(items, width, label)));
+            // With the graphs there is room to breathe: a blank row
+            // between groups.
+            if graphs && !lines.is_empty() {
+                lines.push(Line::default());
+            }
+            let rows = [graph_rows, wrap_items(items, width, label)].concat();
+            lines.extend(hanging_lines(label, rows));
         }
         lines
     }
@@ -2390,6 +2462,127 @@ fn wrap_items(items: Vec<Item>, width: u16, label: &str) -> Vec<Item> {
     }
     rows.push(row);
     rows
+}
+
+/// Columns the summary's labels take ("Activity" and its gap), before the
+/// values and graphs.
+const SUMMARY_LABEL_WIDTH: u16 = 10;
+/// Narrower than this, the summary's graphs are left out.
+const MIN_GRAPH_WIDTH: usize = 10;
+/// Rows the graphs add to the summary: the timeline, its hours, the share
+/// bar, and a blank row between each of the four groups.
+const GRAPH_ROWS: u16 = 3 + 3;
+/// Rows today's sessions keep for the summary to show its graphs: about two
+/// sessions.
+const TODAY_ROOM_FOR_GRAPHS: u16 = 8;
+
+/// A row of `halves.len() / 2` cells, two colors per cell: `▌` takes the
+/// left half's color as foreground and the right one's as background, like
+/// the cat's `▀` does for top and bottom. `None` leaves a half blank.
+fn half_cells(halves: &[Option<Color>]) -> Item {
+    halves
+        .chunks(2)
+        .map(|pair| {
+            let (left, right) = (pair[0], pair.get(1).copied().flatten());
+            match (left, right) {
+                (None, None) => Span::raw(" "),
+                (Some(l), None) => Span::styled("▌", Style::new().fg(l)),
+                (None, Some(r)) => Span::styled("▐", Style::new().fg(r)),
+                (Some(l), Some(r)) if l == r => Span::styled("█", Style::new().fg(l)),
+                (Some(l), Some(r)) => Span::styled("▌", Style::new().fg(l).bg(r)),
+            }
+        })
+        .collect()
+}
+
+/// The day from `start` to `end` across `width` cells, each half cell in
+/// the color of what was going on at its middle, gaps blank.
+fn timeline_row(
+    summary: &DaySummary,
+    start: chrono::DateTime<Utc>,
+    end: chrono::DateTime<Utc>,
+    width: usize,
+) -> Item {
+    let halves = width * 2;
+    let span = (end - start).num_milliseconds().max(1) as f64;
+    let colors = (0..halves)
+        .map(|i| {
+            let offset = span * (i as f64 + 0.5) / halves as f64;
+            let at = start + chrono::Duration::milliseconds(offset as i64);
+            summary.activity_at(at).map(theme::activity_color)
+        })
+        .collect::<Vec<_>>();
+    half_cells(&colors)
+}
+
+/// The hours (local time) under the timeline, each at the cell where it
+/// starts, dropped where they would run into the one before.
+fn hour_labels(start: chrono::DateTime<Utc>, end: chrono::DateTime<Utc>, width: usize) -> Item {
+    use chrono::TimeZone;
+    let span = (end - start).num_milliseconds().max(1) as f64;
+    let mut hour = start_of_hour(start).with_timezone(&chrono::Local);
+    if hour.with_timezone(&Utc) < start {
+        hour += chrono::Duration::hours(1);
+    }
+    let mut row = vec![' '; width];
+    let mut free_from = 0;
+    while hour.with_timezone(&Utc) <= end {
+        let offset = (hour.with_timezone(&Utc) - start).num_milliseconds() as f64;
+        let x = (offset / span * width as f64) as usize;
+        let label = hour.format("%H").to_string();
+        if x >= free_from && x + label.len() <= width {
+            for (i, c) in label.chars().enumerate() {
+                row[x + i] = c;
+            }
+            free_from = x + label.len() + 1;
+        }
+        hour = chrono::Local
+            .from_local_datetime(&(hour.naive_local() + chrono::Duration::hours(1)))
+            .earliest()
+            .unwrap_or(hour + chrono::Duration::hours(1));
+    }
+    vec![Span::styled(
+        row.into_iter().collect::<String>(),
+        theme::DIMMED,
+    )]
+}
+
+/// The start of the (local) hour `at` falls in.
+fn start_of_hour(at: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
+    use chrono::Timelike;
+    let local = at.with_timezone(&chrono::Local);
+    local
+        .with_minute(0)
+        .and_then(|t| t.with_second(0))
+        .and_then(|t| t.with_nanosecond(0))
+        .map_or(at, |t| t.with_timezone(&Utc))
+}
+
+/// Shares of the tracked time (each activity's, as its color and time) as
+/// one bar `width` cells wide, in the order given.
+/// Shares are rounded to half cells, so a sliver of a few minutes may not
+/// show.
+fn share_row(shares: &[(Color, chrono::Duration)], width: usize) -> Item {
+    let halves = width * 2;
+    let total = shares
+        .iter()
+        .map(|(_, d)| d.num_milliseconds())
+        .sum::<i64>()
+        .max(1) as f64;
+    let mut colors = Vec::with_capacity(halves);
+    let mut cumulative = 0;
+    for &(color, d) in shares {
+        cumulative += d.num_milliseconds();
+        let until = (cumulative as f64 / total * halves as f64).round() as usize;
+        colors.resize(until.max(colors.len()), Some(color));
+    }
+    colors.resize(halves, None);
+    half_cells(&colors)
+}
+
+/// A duration in bold `color`.
+fn colored_time(duration: chrono::Duration, color: Color) -> Span<'static> {
+    Span::styled(fmt_hms(duration), theme::VALUE.fg(color))
 }
 
 /// A value, or a dimmed italic "(none)" when it is missing.
@@ -3745,17 +3938,171 @@ mod tests {
 
     #[test]
     fn summary_shows_totals_for_the_day() {
+        // 80×24: no room for the graphs, so text only.
         let t = with_sessions(TestApp::new(), 2);
         let buf = render(&t.app);
-        let y = row_with(&buf, "Activity  ");
-        assert!(line_from(&buf, y, 1).starts_with("Activity  Programming 1h 0m "));
-        assert!(line_from(&buf, y + 1, 1).starts_with("Project   alpha 1h 0m "));
+        let y = row_with(&buf, "Day       ");
+        // 30m + 10m gap + 30m.
+        assert!(line_from(&buf, y, 1).contains("· tracked 1h 0m · work 1h 0m · gaps 10m"));
+        assert!(line_from(&buf, y + 1, 1).starts_with("Activity  Programming 1h 0m "));
+        assert!(line_from(&buf, y + 2, 1).starts_with("Project   alpha 1h 0m "));
         assert!(
-            line_from(&buf, y + 2, 1)
+            line_from(&buf, y + 3, 1)
                 .starts_with("Focus     avg 3.0 (2 rated) · 0 interruptions · no disruptions ")
         );
-        // 30m + 10m gap + 30m.
-        assert!(line_from(&buf, y + 3, 1).contains("· tracked 1h 0m · no breaks · gaps 10m"));
+    }
+
+    #[test]
+    fn the_day_splits_tracked_time_into_work_breaks_and_disruptions() {
+        let mut t = TestApp::new();
+        let at = |h, m| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, 31, h, m, 0)
+                .unwrap()
+        };
+        for (from, to, activity) in [
+            ((9, 0), (10, 0), "Programming"),
+            ((10, 0), (10, 15), BREAK),
+            ((10, 15), (10, 25), DISRUPTION),
+        ] {
+            let mut s = finished_session(at(from.0, from.1), at(to.0, to.1), None);
+            s.activity = activity.into();
+            t.app.today_sessions.insert(0, s);
+        }
+        let buf = render(&t.app);
+        let y = row_with(&buf, "Day       ");
+        // Wrapped onto a second row at 80 columns.
+        assert!(line_from(&buf, y, 1).contains("tracked 1h 25m · work 1h 0m · breaks 15m"));
+        assert!(line_from(&buf, y + 1, 1).contains("disrupted 10m · gaps 0m"));
+        for (row, value, color) in [
+            (y, "1h 0m", Color::LightBlue),
+            (y, "15m", Color::LightGreen),
+            (y + 1, "10m", Color::LightRed),
+        ] {
+            assert_eq!(buf[(col_of(&buf, row, value), row)].fg, color, "{value}");
+        }
+        // The disruption's time isn't repeated next to its count.
+        let focus = row_with(&buf, "Focus     ");
+        assert!(line(&buf, focus).contains("· 1 disruption"));
+        assert!(!line(&buf, focus).contains("(10m)"));
+    }
+
+    #[test]
+    fn a_tall_terminal_adds_graphs_of_the_day_to_the_summary() {
+        let mut t = with_sessions(TestApp::new(), 2);
+        t.app.set_size((80, 40));
+        let mut terminal = Terminal::new(TestBackend::new(80, 40)).unwrap();
+        terminal.draw(|frame| t.app.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let y = row_with(buf, "Day       ");
+        // Values start at column 11 and take 68 columns.
+        let (first, last) = (11, 11 + 67);
+
+        // The timeline (from the top of the hour): 30m of programming, a
+        // 10m gap, 30m more, up to now at the right edge.
+        assert_eq!(buf[(last, y)].symbol(), "█");
+        assert_eq!(buf[(last, y)].fg, Color::LightBlue);
+        let timeline: String = line_from(buf, y, first).chars().take(68).collect();
+        assert!(timeline.trim_start().contains(' '), "the gap: {timeline:?}");
+        // Hours under it, the first at the left edge, then the day in
+        // words, without the span again.
+        let hours: String = line_from(buf, y + 1, first).chars().take(68).collect();
+        assert!(
+            hours.chars().take(2).all(|c| c.is_ascii_digit()),
+            "{hours:?}"
+        );
+        assert!(
+            hours.chars().all(|c| c.is_ascii_digit() || c == ' '),
+            "{hours:?}"
+        );
+        assert!(line_from(buf, y + 2, first).starts_with("tracked 1h 0m · work 1h 0m · gaps 10m"));
+        assert_eq!(
+            line_from(buf, y + 3, 1).trim_end_matches(['│', ' ']),
+            "",
+            "spacing"
+        );
+
+        // The share bar: all programming.
+        assert!(line_from(buf, y + 4, 1).starts_with("Activity  "));
+        assert!((first..=last).all(|x| buf[(x, y + 4)].fg == Color::LightBlue));
+        assert!(line_from(buf, y + 5, first).starts_with("Programming 1h 0m"));
+        assert_eq!(line_from(buf, y + 6, 1).trim_end_matches(['│', ' ']), "");
+        assert!(line_from(buf, y + 7, 1).starts_with("Project   alpha 1h 0m"));
+        assert_eq!(line_from(buf, y + 8, 1).trim_end_matches(['│', ' ']), "");
+        assert!(line_from(buf, y + 9, 1).starts_with("Focus     "));
+    }
+
+    #[test]
+    fn the_timeline_starts_on_the_hour_with_its_label() {
+        let local = |h, m| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, 31, h, m, 0)
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        // The day began at 09:17; the graph starts at 09:00.
+        let from = start_of_hour(local(9, 17));
+        assert_eq!(from, local(9, 0));
+        let hours = hour_labels(from, local(11, 30), 30);
+        // 2h 30m over 30 cells: an hour every 12.
+        assert_eq!(
+            hours[0].content,
+            format!(
+                "09{}10{}11{}",
+                " ".repeat(10),
+                " ".repeat(10),
+                " ".repeat(4)
+            )
+        );
+
+        // The minutes before the first start are blank.
+        let mut t = TestApp::new();
+        t.app.today_sessions.push(finished_session(
+            local(9, 30).into(),
+            local(11, 30).into(),
+            None,
+        ));
+        let summary = t.app.day_summary();
+        let row = timeline_row(&summary, from, local(11, 30), 10);
+        let symbols = row.iter().map(|s| s.content.as_ref()).collect::<String>();
+        assert_eq!(symbols, "  ████████", "09:00–09:30 of 2h 30m: 2 cells");
+    }
+
+    #[test]
+    fn half_cells_pack_two_colors_per_cell() {
+        let (b, g) = (Some(Color::LightBlue), Some(Color::LightGreen));
+        let cells = half_cells(&[b, b, b, g, None, g, b, None, None, None]);
+        let shown = cells
+            .iter()
+            .map(|s| (s.content.as_ref(), s.style.fg, s.style.bg))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            [
+                ("█", b, None),
+                ("▌", b, g),
+                ("▐", g, None),
+                ("▌", b, None),
+                (" ", None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_share_bar_splits_by_time() {
+        let minutes = |m| chrono::Duration::minutes(m);
+        let row = share_row(
+            &[
+                (theme::activity_color("Programming"), minutes(30)),
+                (theme::activity_color(BREAK), minutes(10)),
+            ],
+            4,
+        );
+        // 8 halves: 6 programming, 2 break.
+        let symbols = row.iter().map(|s| s.content.as_ref()).collect::<String>();
+        assert_eq!(symbols, "████");
+        assert_eq!(row[2].style.fg, Some(Color::LightBlue));
+        assert_eq!(row[3].style.fg, Some(Color::LightGreen));
     }
 
     #[test]

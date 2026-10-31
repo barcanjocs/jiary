@@ -468,12 +468,31 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
   `Paragraph` scrolled by `today_scroll`, with a scrollbar on the right
   border when the items don't fit (`draw_scrollbar`, shared with the
   notes).
-- **Summary** (` ▾ SUMMARY `) — `summary_lines`: `Activity` / `Project` /
-  `Focus` / `Day` rows from `summarize`. Items are styled spans (activity
+- **Summary** (` ▾ SUMMARY `) — `summary_lines`: `Day` / `Activity` /
+  `Project` / `Focus` rows from `summarize`. When `summary_graphs_fit`
+  (with the graphs' `GRAPH_ROWS`, today's sessions still keep
+  `TODAY_ROOM_FOR_GRAPHS` rows, and the values get `MIN_GRAPH_WIDTH`
+  columns), graph rows lead two of them: under `Day` the timeline, from
+  the top of the hour the day began (`start_of_hour`, so the first hour's
+  label sits at the left edge) to now (`timeline_row`: each half cell colored by `DaySummary::activity_at` its
+  middle, over `DaySummary::blocks`) and its hours (`hour_labels`, local
+  time, dropped where they would collide; the span then leaves the `Day`
+  text, which would repeat it); under `Activity` the share bar
+  (`share_row`: halves split by cumulative time, longest first). Both go
+  through `half_cells`, which packs two colors per cell with `▌` (left as
+  foreground, right as background), like the cat's `▀` does vertically.
+  With the graphs, a blank row also separates the four groups (counted in
+  `GRAPH_ROWS`, so the fit check includes it).
+  Otherwise the summary is text only, so a short terminal neither
+  squeezes today's list nor clips the summary. Items are styled spans (activity
   names in their colors, times bold, the focus average in its outcome
   color, nothing to report dimmed), joined by a dimmed ` · ` and packed by
   `wrap_items` (an item only splits when wider than a whole row, losing its
-  styling), continuing under the value via `hanging_lines`.
+  styling), continuing under the value via `hanging_lines`. The `Day` row
+  splits the tracked time into work (`DaySummary::work_time`: all but
+  breaks and disruptions), breaks and disruptions, each in the color the
+  graphs give it, leaving out parts that didn't happen; the `Focus` row
+  keeps only the disruption count.
 
 Sizing: Active and Summary default to their content height
 (`content_heights`), Today fills the rest; a fixed height replaces the
