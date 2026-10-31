@@ -393,9 +393,13 @@ Focus is shown by the border color (accent vs dimmed). A collapsed section
 is one unbordered `▸` line with a short summary (`draw_collapsed`).
 
 Status-line hints depend on the focused section and are fitted to the
-terminal width: hints are added in priority order while they fit, and
-`[?] help` is always last. The `?` help screen (`Screen::Help`,
-`draw_help`) lists every key; any key closes it.
+terminal width: hints are shown in order while they fit, and once one
+doesn't, the remaining optional ones are dropped too (most useful first).
+`HELP_HINT` (`[?] help`) is always shown, wherever it sits in the list, with
+room reserved for it; hints listed after it (`[Tab]`, `[q]`) only appear on
+wide terminals. The `?` help screen (`Screen::Help`, `draw_help`) lists every
+key in two columns (sessions; sections and mouse), each group under an
+accent heading with a rule, sized to its content; any key closes it.
 
 ### Mouse
 

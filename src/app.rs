@@ -784,8 +784,8 @@ impl App {
             return Line::from(Span::styled(format!("✗ {err}"), theme::ERROR));
         }
         let hints: &[(&str, &str)] = match &self.screen {
-            // Most useful first for the focused section; `[?] help` is always
-            // shown and lists everything.
+            // Most useful first for the focused section. `[?] help` lists
+            // everything, so it is always shown (see `HELP_HINT`).
             Screen::Main => match self.focus {
                 Section::Active => &[
                     ("s", "start"),
@@ -795,6 +795,7 @@ impl App {
                     ("d", "disrupt"),
                     ("b", "break"),
                     ("r", "resume"),
+                    HELP_HINT,
                     ("Tab", "sections"),
                     ("q", "quit"),
                 ],
@@ -802,17 +803,19 @@ impl App {
                     ("↑↓", "scroll"),
                     ("Space", "collapse"),
                     ("+/-", "resize"),
-                    ("Tab", "next"),
                     ("s", "start"),
                     ("e", "end"),
+                    HELP_HINT,
+                    ("Tab", "next"),
                     ("q", "quit"),
                 ],
                 Section::Summary => &[
                     ("Space", "collapse"),
                     ("+/-", "resize"),
-                    ("Tab", "next"),
                     ("s", "start"),
                     ("e", "end"),
+                    HELP_HINT,
+                    ("Tab", "next"),
                     ("q", "quit"),
                 ],
             },
@@ -830,24 +833,32 @@ impl App {
             },
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
         };
-        let help = matches!(self.screen, Screen::Main).then_some(("?", "help"));
-
+        // Hints are shown in order while they fit, keeping room for
+        // `HELP_HINT` (always shown, wherever it sits in the list). Once a
+        // hint doesn't fit, the remaining optional ones are dropped too, so
+        // the most useful ones win.
         let hint_width =
             |(key, desc): &(&str, &str)| key.chars().count() + desc.chars().count() + 3;
-        // Saturating: terminals can be narrower than `[?] help` itself.
-        let budget =
-            (width as usize).saturating_sub(help.as_ref().map_or(0, |h| hint_width(h) + 2));
+        let help_left = |from: usize| -> usize {
+            hints[from..]
+                .iter()
+                .filter(|&&h| h == HELP_HINT)
+                .map(|h| hint_width(h) + 2)
+                .sum()
+        };
         let mut used = 0;
+        let mut full = false;
         let mut shown = Vec::new();
-        for hint in hints {
+        for (i, hint) in hints.iter().enumerate() {
             let needed = hint_width(hint) + if shown.is_empty() { 0 } else { 2 };
-            if used + needed > budget {
-                break;
+            let required = *hint == HELP_HINT;
+            if !required && (full || used + needed + help_left(i + 1) > width as usize) {
+                full = true;
+                continue;
             }
             used += needed;
             shown.push(*hint);
         }
-        shown.extend(help);
 
         let mut spans = Vec::new();
         for (key, desc) in shown {
@@ -1506,7 +1517,8 @@ impl App {
 const MODAL_WIDTH: u16 = 40;
 const START_MODAL_HEIGHT: u16 = 12;
 const SMALL_MODAL_HEIGHT: u16 = 6;
-const HELP_WIDTH: u16 = 50;
+/// The status-line hint for the help screen; the main screen always shows it.
+const HELP_HINT: (&str, &str) = ("?", "help");
 
 /// A picker `List` with the accent highlight symbol and style.
 /// The symbol column is always reserved, so items don't shift right when
@@ -1754,32 +1766,35 @@ fn wrap_items(items: &[String], width: u16, label: &str) -> Vec<String> {
     rows
 }
 
-/// The help screen: every key, grouped. A centered modal sized to its
-/// content (shrunk on small terminals).
+/// The help screen: every key, in groups with an accent heading and a rule
+/// under it. Two columns (sessions; sections and mouse) keep it short
+/// enough for a 24-row terminal with room for spacing. A centered modal
+/// sized to its content, shrunk on small terminals.
 fn draw_help(frame: &mut Frame, content: Rect) {
-    const SECTIONS: &[(&str, &[(&str, &str)])] = &[
-        (
-            "Sessions",
-            &[
-                ("s", "start a session"),
-                ("e", "end the active session"),
-                ("n", "add a note"),
-                ("i", "count an interruption"),
-                ("d", "start a disruption"),
-                ("b", "start a break"),
-                ("r", "resume after either"),
-                ("q / Ctrl+C", "quit"),
-            ],
-        ),
+    type Group = (&'static str, &'static [(&'static str, &'static str)]);
+    const LEFT: &[Group] = &[(
+        "Sessions",
+        &[
+            ("s", "start a session"),
+            ("e", "end the session"),
+            ("n", "add a note"),
+            ("i", "count an interruption"),
+            ("d", "start a disruption"),
+            ("b", "start a break"),
+            ("r", "resume after either"),
+            ("q / Ctrl+C", "quit"),
+        ],
+    )];
+    const RIGHT: &[Group] = &[
         (
             "Sections",
             &[
-                ("Tab / Shift+Tab", "focus next / previous"),
+                ("Tab / Shift+Tab", "focus next / prev"),
                 ("Space", "collapse or expand"),
                 ("+ / -", "grow or shrink"),
                 ("=", "reset sizes"),
-                ("↑↓ j k PgUp PgDn", "scroll today's sessions"),
-                ("Home / End", "jump to first / last"),
+                ("↑↓ j k PgUp PgDn", "scroll today"),
+                ("Home / End", "first / last session"),
             ],
         ),
         (
@@ -1787,39 +1802,76 @@ fn draw_help(frame: &mut Frame, content: Rect) {
             &[
                 ("drag a border", "resize"),
                 ("click a title", "collapse or expand"),
-                ("wheel", "scroll today's sessions"),
+                ("wheel", "scroll today"),
             ],
         ),
     ];
 
-    let key_width = 18;
-    let mut lines = Vec::new();
-    // No blank rows between groups: the bold headings separate them, and
-    // the whole list fits a 24-row terminal.
-    for (heading, keys) in SECTIONS {
-        lines.push(Line::from(Span::styled(
-            heading.to_string(),
-            Style::new().fg(theme::MUTED).add_modifier(Modifier::BOLD),
-        )));
-        for (key, desc) in *keys {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{key:<key_width$}"),
-                    Style::new().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(desc.to_string(), theme::DIMMED),
-            ]));
-        }
+    fn key_width(groups: &[Group]) -> usize {
+        let keys = groups.iter().flat_map(|(_, keys)| keys.iter());
+        keys.map(|(key, _)| key.chars().count()).max().unwrap_or(0) + 2
     }
 
-    let (modal, inner) = modal_layout(content, HELP_WIDTH, lines.len() as u16 + 2);
+    /// Columns needed to show every key and description of `groups`.
+    fn column_width(groups: &[Group]) -> u16 {
+        let keys = groups.iter().flat_map(|(_, keys)| keys.iter());
+        let desc = keys.map(|(_, d)| d.chars().count()).max().unwrap_or(0);
+        (key_width(groups) + desc) as u16
+    }
+
+    /// One column: each group is a heading with a rule to the column's
+    /// width, its keys, and a blank row before the next group.
+    fn column(groups: &[Group], width: u16) -> Vec<Line<'static>> {
+        let key_width = key_width(groups);
+        let mut lines = Vec::new();
+        for (heading, keys) in groups {
+            if !lines.is_empty() {
+                lines.push(Line::default());
+            }
+            let rule = "─".repeat((width as usize).saturating_sub(heading.chars().count() + 1));
+            lines.push(Line::from(vec![
+                Span::styled(format!("{heading} "), theme::TITLE),
+                Span::styled(rule, theme::DIMMED),
+            ]));
+            for (key, desc) in *keys {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{key:<key_width$}"),
+                        Style::new().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(desc.to_string(), theme::DIMMED),
+                ]));
+            }
+        }
+        lines
+    }
+
+    let rows = |groups: &[Group]| -> u16 {
+        groups
+            .iter()
+            .map(|(_, keys)| keys.len() as u16 + 2)
+            .sum::<u16>()
+            - 1
+    };
+    let height = rows(LEFT).max(rows(RIGHT)) + 2;
+    let (left_width, right_width) = (column_width(LEFT), column_width(RIGHT));
+    // Border and padding (2 each side) plus a 3-column gutter.
+    let width = left_width + 3 + right_width + 4;
+    let (modal, inner) = modal_layout(content, width, height);
     frame.render_widget(
         Block::bordered()
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(" Keys ", theme::TITLE))),
         modal,
     );
-    frame.render_widget(Paragraph::new(lines), inner);
+    let [left, _, right] = Layout::horizontal([
+        Constraint::Length(left_width),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .areas(inner);
+    frame.render_widget(Paragraph::new(column(LEFT, left.width)), left);
+    frame.render_widget(Paragraph::new(column(RIGHT, right.width)), right);
 }
 
 /// Splits `text` into rows of at most `width` chars, breaking after the last
@@ -2280,7 +2332,7 @@ mod tests {
         // Narrower than the help hint itself (a pty can report 0 columns).
         assert_eq!(text(5), "[?] help");
         assert_eq!(text(0), "[?] help");
-        assert_eq!(text(120).matches('[').count(), 10); // everything, quit included
+        assert!(text(120).ends_with("[?] help  [Tab] sections  [q] quit")); // everything
     }
 
     #[test]
