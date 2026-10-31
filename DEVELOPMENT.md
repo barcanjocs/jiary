@@ -174,6 +174,8 @@ from its scope note alone, without re-deriving context.
   the user manual, `docs/user/` (keys in `keys.md`); keep it in sync when
   behavior changes. The README stays short: what Jiary is and isn't,
   install, a typical day. Building and releasing live in `docs/dev/`.
+  After a visible change to the main screen, regenerate the README's
+  picture: `cargo test screenshot -- --ignored`.
 
 ## Verification
 
@@ -212,4 +214,5 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
   file per screen (`main_screen`, `forms`, `palette`, `period_view`,
   `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
-  `items`, `graphs`, `text`), and `tests.rs`. See docs/dev/implementation.md.
+  `items`, `graphs`, `text`), `tests.rs`, and `screenshot.rs` (the
+  README's picture, an ignored test). See docs/dev/implementation.md.

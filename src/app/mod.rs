@@ -32,6 +32,8 @@ mod main_screen;
 mod modal;
 mod palette;
 mod period_view;
+#[cfg(test)]
+mod screenshot;
 mod sections;
 #[cfg(test)]
 mod tests;
