@@ -61,7 +61,7 @@ fn run(terminal: &mut DefaultTerminal, mut app: app::App) -> io::Result<()> {
 
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
-            && app.handle_key(key.code)
+            && app.handle_key(key)
         {
             return Ok(());
         }

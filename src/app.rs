@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, 
 use crate::db::Db;
 use crate::session::Session;
 use crate::theme;
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
@@ -237,8 +237,19 @@ impl App {
         }
     }
 
-    pub fn handle_key(&mut self, key: KeyCode) -> bool {
-        // Returns true if the app should quit
+    /// Handles one key event. Returns true if the app should quit.
+    pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // Some terminals (e.g. on Windows) also report releases and repeats;
+        // act on presses only so each key fires once.
+        if key.kind != KeyEventKind::Press {
+            return false;
+        }
+        // Ctrl+C quits from any screen; other Ctrl combinations are ignored
+        // rather than typed into input fields as plain letters.
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return key.code == KeyCode::Char('c');
+        }
+        let key = key.code;
         match &self.screen {
             Screen::Main => return self.handle_main(key),
             Screen::StartSession(_) => self.handle_start_session(key),
@@ -1294,6 +1305,37 @@ mod tests {
         }
     }
 
+    /// A plain key press, as the terminal reports it.
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    // --- key events ---------------------------------------------------
+
+    #[test]
+    fn ctrl_c_quits_from_any_screen() {
+        let mut t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(t.app.handle_key(ctrl_c));
+    }
+
+    #[test]
+    fn key_releases_and_ctrl_combinations_are_ignored() {
+        let mut t = TestApp::new().on_project_step(vec![], "", "", 0);
+        let mut release = press(KeyCode::Char('x'));
+        release.kind = KeyEventKind::Release;
+        assert!(!t.app.handle_key(release));
+        assert!(
+            !t.app
+                .handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL))
+        );
+        assert_eq!(t.form().project_input, "");
+        // Shift is how uppercase arrives, so it must still type.
+        t.app
+            .handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        assert_eq!(t.form().project_input, "X");
+    }
+
     // --- fuzzy_filter -------------------------------------------------
 
     #[test]
@@ -1326,7 +1368,7 @@ mod tests {
     #[test]
     fn tab_accepts_first_suggestion() {
         let mut t = TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "", "", 0);
-        t.app.handle_key(KeyCode::Tab);
+        t.app.handle_key(press(KeyCode::Tab));
         let f = t.form();
         assert_eq!(f.project_input, "alpha");
         assert_eq!(f.project_selection, 0);
@@ -1337,7 +1379,7 @@ mod tests {
         // Input already equals the highlighted suggestion, so Tab moves on.
         let mut t =
             TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "alpha", "", 0);
-        t.app.handle_key(KeyCode::Tab);
+        t.app.handle_key(press(KeyCode::Tab));
         let f = t.form();
         assert_eq!(f.project_input, "beta");
         assert_eq!(f.project_selection, 1);
@@ -1347,7 +1389,7 @@ mod tests {
     fn tab_wraps_around_to_first() {
         let mut t =
             TestApp::new().on_project_step(vec!["alpha".into(), "beta".into()], "beta", "", 1);
-        t.app.handle_key(KeyCode::Tab);
+        t.app.handle_key(press(KeyCode::Tab));
         let f = t.form();
         assert_eq!(f.project_input, "alpha");
         assert_eq!(f.project_selection, 0);
@@ -1359,7 +1401,7 @@ mod tests {
         // must accept the highlighted suggestion rather than skip past it.
         let mut t =
             TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "a", "a", 0);
-        t.app.handle_key(KeyCode::Tab);
+        t.app.handle_key(press(KeyCode::Tab));
         assert_eq!(t.form().project_input, "alpha");
     }
 
@@ -1367,7 +1409,7 @@ mod tests {
     fn backspace_resets_selection() {
         let mut t =
             TestApp::new().on_project_step(vec!["alpha".into(), "alpine".into()], "al", "al", 1);
-        t.app.handle_key(KeyCode::Backspace);
+        t.app.handle_key(press(KeyCode::Backspace));
         let f = t.form();
         assert_eq!(f.project_input, "a");
         assert_eq!(f.project_query, "a");
@@ -1377,7 +1419,7 @@ mod tests {
     #[test]
     fn tab_is_noop_when_no_suggestions() {
         let mut t = TestApp::new().on_project_step(vec!["alpha".into()], "zzz", "zzz", 0);
-        t.app.handle_key(KeyCode::Tab);
+        t.app.handle_key(press(KeyCode::Tab));
         assert_eq!(t.form().project_input, "zzz");
     }
 
