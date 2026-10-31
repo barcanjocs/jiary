@@ -190,6 +190,23 @@ impl Db {
         Ok(())
     }
 
+    /// Distinct activities, most recently used first, so the activity step
+    /// can offer the last one with a single Tab.
+    pub fn recent_activities(&self) -> Result<Vec<String>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT activity FROM sessions WHERE activity != ''
+                 GROUP BY activity
+                 ORDER BY MAX(started_at) DESC, MAX(id) DESC",
+            )
+            .map_err(DbError::Sqlite)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(DbError::Sqlite)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
     pub fn distinct_projects(&self) -> Result<Vec<String>, DbError> {
         let mut stmt = self.conn.prepare(
         "SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL AND project != '' ORDER BY project",
@@ -498,6 +515,29 @@ mod tests {
         assert!(now.ends_with('Z'));
         insert_started_at(&tmp.db, &now);
         assert_eq!(tmp.db.sessions_for_today().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recent_activities_are_distinct_and_most_recent_first() {
+        let tmp = TmpDb::new();
+        for (ts, activity) in [
+            ("2026-01-01T09:00:00+00:00", "Reading"),
+            ("2026-01-01T10:00:00+00:00", "Writing"),
+            ("2026-01-01T11:00:00+00:00", "Reading"),
+            ("2026-01-01T12:00:00+00:00", "Gardening"),
+        ] {
+            tmp.db
+                .conn
+                .execute(
+                    "INSERT INTO sessions (started_at, ended_at, activity) VALUES (?1, ?1, ?2)",
+                    params![ts, activity],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            tmp.db.recent_activities().unwrap(),
+            ["Gardening", "Reading", "Writing"]
+        );
     }
 
     #[test]

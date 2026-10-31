@@ -171,7 +171,7 @@ the process is an unopenable database (handled in `main.rs` before `App::new`).
 ```rust
 enum Screen {
     Main,
-    StartSession(StartSessionForm),
+    StartSession(Box<StartSessionForm>),  // boxed: by far the largest variant
     EndSession(EndSessionForm),
     AddNote(AddNoteForm),
 }
@@ -217,11 +217,11 @@ form data*, it **copies the values out first** — call arguments keep their
 borrow alive across the call:
 
 ```rust
-let activity = ACTIVITIES[form.activity_index];
+let Some(activity) = form.activity.value() else { return };
 let project = form.project.value();
 let task = form.task.value();
 ...
-self.start_session(activity, project, task);  // borrow of `form` is dead here
+self.start_session(&activity, project, task);  // borrow of `form` is dead here
 ```
 
 These three patterns are load-bearing; the compiler rejects most violations,
@@ -231,12 +231,17 @@ but knowing them makes new handlers much easier to write.
 
 Steps: `Activity → Project → Task` (the tabs row shows progress).
 
-- **Activity** — a fixed list of 7 (`ACTIVITIES` const); ↑/↓ moves the index,
-  1–7 selects and advances, Enter advances. No free typing (backlog item C).
-- **Project / Task** — each an `Autocomplete` (see *Fuzzy autocomplete*); the
-  step handlers only intercept Enter and forward every other key to it. The
-  project field's candidates are copied from `App::projects` when the form
-  opens; one shared `draw_autocomplete` renders both steps.
+- **Activity / Project / Task** — each an `Autocomplete` (see *Fuzzy
+  autocomplete*); the step handlers only intercept Enter and forward every
+  other key to it. The activity and project fields' candidates are copied from
+  `App::activities` / `App::projects` when the form opens; one shared
+  `draw_suggestions` renders every step's list.
+- Activities are free text. `App::activities` comes from `recent_activities`
+  (distinct, most recently used first, so one Tab repeats the last one), or
+  `DEFAULT_ACTIVITIES` when the db has none yet. The defaults are only a seed:
+  once there is history they are not merged in, so unused ones drop out.
+- Activity is required (`activity` is `NOT NULL`): Enter on the Activity step
+  advances only when `value()` is `Some`.
 - On Enter at the Project step, the task field is rebuilt with its
   candidates: all known tasks if the project is blank, else
   `tasks_for_project(project)` (a failure goes to the error line).
@@ -345,7 +350,7 @@ in height only with a wrapped input:
 
 ### Wrapped inputs
 
-All four text inputs (Project, Task, Notes, Note) are drawn as a
+All five text inputs (Activity, Project, Task, Notes, Note) are drawn as a
 `WrappedInput`, built by `App::wrapped_input` from `text_input()` (the
 current screen's label and value) and the modal's inner width
 (`modal_inner_width`):
@@ -361,8 +366,8 @@ current screen's label and value) and the modal's inner width
   last rows are kept, so the cursor stays visible.
 
 Modal structure: a `Block::bordered()` (rounded) with a titled accent span, a
-`Tabs` row marking the current step, then the step body (picker `List`, or an
-wrapped input plus suggestion `List`). Picker lists use `theme::picker_symbol()`
+`Tabs` row marking the current step, then the step body (a wrapped input plus
+suggestion `List`, or the rating line). Picker lists use `theme::picker_symbol()`
 (bold accent `>`) and `PICKER_HIGHLIGHT`.
 
 ### Terminal cursor
@@ -403,7 +408,7 @@ modal.
 - Otherwise: subsequence match via `SkimMatcherV2`, sorted by score descending,
   capped at **5** results.
 
-`Autocomplete` (project and task steps) holds `input` (the value), `query`
+`Autocomplete` (activity, project and task steps) holds `input` (the value), `query`
 (what was typed; suggestions filter on it), `selection: Option<usize>` and its
 `candidates`. Its invariant: **the input line shows exactly what Enter
 submits.**

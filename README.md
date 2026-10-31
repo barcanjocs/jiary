@@ -39,15 +39,21 @@ On first run, a database is created at:
 
 ### Starting a session
 
-1. **Activity** — navigate with ↑/↓ or press 1–7, confirm with Enter
-2. **Project** — type to filter suggestions (fuzzy match), Tab or ↑/↓ to pick one, Enter to confirm
-3. **Task** — same as project (suggestions filtered by selected project)
+1. **Activity** — type to filter suggestions (fuzzy match), Tab or ↑/↓ to pick one, Enter to confirm
+2. **Project** — same as activity
+3. **Task** — same as activity (suggestions filtered by selected project)
 
-All fields after activity are optional; press Enter on an empty field to skip.
+Activity is required; project and task are optional (press Enter on an empty field to skip).
+
+### Activities
+
+Activities are free text, like projects: type any name to use a new one. Suggestions are the activities you have used, most recent first, so `s`, Tab, Enter repeats your last one. A new database suggests a starter set (Programming, Reading, Writing, Meeting, Administration, Disruption, Other) until you have history; after that, built-ins you never use drop out of the list.
+
+`Disruption` is the activity `d` starts and `r` resumes from.
 
 ### Autocomplete
 
-Project and task fields show all previous values as soon as the field is active. As you type, suggestions are filtered using fuzzy matching (subsequence-based, via `SkimMatcherV2`). Task suggestions are further filtered by the selected project.
+Activity, project and task fields show all previous values as soon as the field is active. As you type, suggestions are filtered using fuzzy matching (subsequence-based, via `SkimMatcherV2`). Task suggestions are further filtered by the selected project.
 
 Tab (or ↓) picks the best suggestion; further Tabs cycle through them, ↑/↓ move between them, and ↑ past the top returns to what you typed. The input line always shows what Enter will submit. Typing after picking a suggestion continues from it. You can always type a new value that doesn't match any suggestion.
 

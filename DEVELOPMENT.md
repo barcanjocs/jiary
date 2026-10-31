@@ -30,7 +30,10 @@ truth for state — this file plus `git log` is all that is needed to resume.
   session); shared row mapper; same-second `id` tiebreak; corrected the
   "SQLite ignores `Z`" claim (it parses it; legacy rows are fine); multi-line
   previous notes. README and IMPLEMENTATION.md synced. Tree green, 51 tests.
-- Next: backlog item C (free-text activities).
+  Then on main: text inputs wrap inside their modal; backlog C done
+  (free-text activities, requested by a user). Tree green, 61 tests.
+- Next: UI work. H (merge labels) is deferred until I (`/` commands)
+  exists, since it will be one of them.
 - Blockers / open questions: none.
 
 ## Backlog
@@ -43,12 +46,25 @@ from its scope note alone, without re-deriving context.
       pickers and terminal cursor on input lines, plus the full render-test
       suite (harness/chrome/main/forms). Taste decisions landed: cyan accent,
       rounded borders, centered modals. See git log `1f204c8..7349d6a`.
-- [ ] **C. Free-text activities** (small). Activities are a hardcoded list of
-      7 (`ACTIVITIES` in app.rs); anything that doesn't fit forces "Other".
-      Make the activity step work like project/task: fuzzy autocomplete seeded
-      from distinct past activities plus the defaults, free typing allowed.
-      Touches: `Step::Activity` handling and its rendering, plus a new db query
-      (`distinct_activities`, patterned on `distinct_projects`).
+- [x] **C. Free-text activities** — done 2026-10-31: the activity step is an
+      `Autocomplete` over `recent_activities` (most recent first);
+      `DEFAULT_ACTIVITIES` only seed a fresh db, so unused built-ins drop out;
+      activity is required (empty Enter stays on the step); 1–7 shortcuts
+      removed.
+- [ ] **H. Merge labels** (small). Free-text labels can't be deleted — they
+      are derived from history, so a typo ("Progamming") is suggested as long
+      as any session uses it. Add a way to rename every use of an activity,
+      project or task to another value (`UPDATE sessions SET activity = ?new
+      WHERE activity = ?old`, same for project/task), which removes the old
+      label from suggestions while keeping history truthful. Decided
+      2026-10-31: exposed as a `/` command (needs I first). Open: command
+      syntax, and confirming the rename before writing.
+- [ ] **I. `/` commands** (medium). Typing `/` opens a command line for
+      less frequent actions that don't deserve a single-key binding; label
+      cleanup (H) is the first planned command. Open: where it is reachable
+      from (main screen only?), completion of command names and arguments
+      (reuse `Autocomplete`), and how results/errors are reported (status
+      line).
 - [ ] **B. Weekly summary** (small-medium). A key (e.g. `w`) showing the last
       7 days: total time per activity and per project, average focus rating,
       interruption/disruption counts. Pure SQL aggregation plus one new screen;

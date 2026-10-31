@@ -12,7 +12,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
-const ACTIVITIES: &[&str] = &[
+/// Suggested on the activity step until there is history to suggest from
+/// (a fresh database). After that, suggestions are the activities actually
+/// used, so built-ins that are never used drop out of the list.
+const DEFAULT_ACTIVITIES: &[&str] = &[
     "Programming",
     "Reading",
     "Writing",
@@ -27,6 +30,9 @@ pub struct App {
     active_session: Option<Session>,
     today_sessions: Vec<Session>,
 
+    /// Activity suggestions: most recently used first, or the defaults on a
+    /// fresh database.
+    activities: Vec<String>,
     projects: Vec<String>,
     tasks: Vec<String>,
     screen: Screen,
@@ -40,7 +46,8 @@ pub struct App {
 
 enum Screen {
     Main,
-    StartSession(StartSessionForm),
+    // Boxed: three autocompletes make it far larger than the other variants.
+    StartSession(Box<StartSessionForm>),
     EndSession(EndSessionForm),
     AddNote(AddNoteForm),
 }
@@ -61,7 +68,7 @@ struct AddNoteForm {
 
 struct StartSessionForm {
     step: Step,
-    activity_index: usize,
+    activity: Autocomplete,
     project: Autocomplete,
     task: Autocomplete,
 }
@@ -144,6 +151,7 @@ impl App {
             db,
             active_session: None,
             today_sessions: Vec::new(),
+            activities: Vec::new(),
             projects: Vec::new(),
             tasks: Vec::new(),
             screen: Screen::Main,
@@ -185,9 +193,16 @@ impl App {
         self.refresh_previous_notes();
     }
 
-    /// Reloads the project/task autocomplete candidates. Called at startup
-    /// and after starting a session (which may introduce new values).
+    /// Reloads the activity/project/task autocomplete candidates. Called at
+    /// startup and after starting a session (which may introduce new values).
     fn refresh_suggestions(&mut self) {
+        match self.db.recent_activities() {
+            Ok(activities) if activities.is_empty() => {
+                self.activities = DEFAULT_ACTIVITIES.iter().map(|a| a.to_string()).collect();
+            }
+            Ok(activities) => self.activities = activities,
+            Err(e) => self.set_error(e),
+        }
         match self.db.distinct_projects() {
             Ok(projects) => self.projects = projects,
             Err(e) => self.set_error(e),
@@ -378,12 +393,12 @@ impl App {
                 }
             }
             KeyCode::Char('s') => {
-                self.screen = Screen::StartSession(StartSessionForm {
+                self.screen = Screen::StartSession(Box::new(StartSessionForm {
                     step: Step::Activity,
-                    activity_index: 0,
+                    activity: Autocomplete::new(self.activities.clone()),
                     project: Autocomplete::new(self.projects.clone()),
                     task: Autocomplete::new(Vec::new()),
-                });
+                }));
             }
             KeyCode::Char('n') => {
                 if self.active_session.is_some() {
@@ -428,22 +443,14 @@ impl App {
             return;
         };
         match key {
-            KeyCode::Up => {
-                if form.activity_index > 0 {
-                    form.activity_index -= 1;
+            // Activity is required (the db column is NOT NULL), so Enter only
+            // advances once the input holds one.
+            KeyCode::Enter => {
+                if form.activity.value().is_some() {
+                    form.step = Step::Project;
                 }
             }
-            KeyCode::Down => {
-                if form.activity_index < ACTIVITIES.len() - 1 {
-                    form.activity_index += 1;
-                }
-            }
-            KeyCode::Char(c) if c >= '1' && (c as usize - '1' as usize) < ACTIVITIES.len() => {
-                form.activity_index = c as usize - '1' as usize;
-                form.step = Step::Project;
-            }
-            KeyCode::Enter => form.step = Step::Project,
-            _ => {}
+            _ => form.activity.handle_key(key),
         }
     }
 
@@ -482,7 +489,9 @@ impl App {
 
         // Copy everything out of `form` before any call that needs &mut
         // self, so the screen borrow is dead.
-        let activity = ACTIVITIES[form.activity_index];
+        let Some(activity) = form.activity.value() else {
+            return; // unreachable: the Activity step requires one
+        };
         let project = form.project.value();
         let task = form.task.value();
 
@@ -494,7 +503,7 @@ impl App {
             return;
         }
 
-        self.start_session(activity, project, task);
+        self.start_session(&activity, project, task);
 
         self.refresh_after_session_change();
         self.refresh_suggestions();
@@ -623,7 +632,7 @@ impl App {
             Screen::StartSession(form) => match form.step {
                 Step::Project => Some(("Project", &form.project.input)),
                 Step::Task => Some(("Task", &form.task.input)),
-                Step::Activity => None,
+                Step::Activity => Some(("Activity", &form.activity.input)),
             },
             Screen::EndSession(form) if form.step == EndStep::Notes => Some(("Notes", &form.notes)),
             Screen::AddNote(form) => Some(("Note", &form.input)),
@@ -918,7 +927,7 @@ impl App {
 
     /// The start form is a centered fixed-size modal: a `Tabs` row for
     /// Activity·Project·Task with the current step selected, then the step's
-    /// content (a picker `List`, or an input line plus suggestion `List`).
+    /// content: a wrapped input plus its suggestion `List`.
     fn draw_start_session(
         &self,
         frame: &mut Frame,
@@ -946,17 +955,7 @@ impl App {
         );
 
         match form.step {
-            Step::Activity => {
-                let items = ACTIVITIES
-                    .iter()
-                    .map(|a| ListItem::new(*a))
-                    .collect::<Vec<_>>();
-                frame.render_stateful_widget(
-                    picker_list(items),
-                    list_area,
-                    &mut ListState::default().with_selected(Some(form.activity_index)),
-                );
-            }
+            Step::Activity => draw_suggestions(frame, list_area, &form.activity),
             Step::Project => draw_suggestions(frame, list_area, &form.project),
             Step::Task => draw_suggestions(frame, list_area, &form.task),
         }
@@ -1047,7 +1046,7 @@ impl App {
 
 /// Fixed size of the modals; centered in the content area and shrunk to fit
 /// on tiny terminals (see `centered_rect`). The start form needs room for the
-/// activity list; end/note forms only hold a tabs/context line plus one input.
+/// suggestion list; end/note forms only hold a tabs/context line plus one input.
 const MODAL_WIDTH: u16 = 40;
 const START_MODAL_HEIGHT: u16 = 12;
 const SMALL_MODAL_HEIGHT: u16 = 6;
@@ -1117,7 +1116,7 @@ fn modal_layout(
 
 /// Layout of the start-session modal: (modal rect, tabs row, input rows,
 /// list). The modal grows by one row per input row beyond the first, so the
-/// list keeps its room; the Activity step passes 0 input rows. Shared by the
+/// list keeps its room. Shared by the
 /// renderer and `cursor_position` so the two can never disagree.
 fn start_modal_layout(
     content: ratatui::layout::Rect,
@@ -1320,10 +1319,14 @@ mod tests {
             let mut project = Autocomplete::new(projects);
             project.input = typed.to_string();
             project.query = typed.to_string();
-            self.app.screen = Screen::StartSession(StartSessionForm {
+            // An activity was picked on the previous step (it is required).
+            let mut activity = Autocomplete::new(Vec::new());
+            activity.input = "Reading".to_string();
+            self.app.screen = Screen::StartSession(Box::new(StartSessionForm {
+                activity,
                 project,
                 ..Self::empty_form(Step::Project)
-            });
+            }));
             self
         }
 
@@ -1337,7 +1340,7 @@ mod tests {
         fn empty_form(step: Step) -> StartSessionForm {
             StartSessionForm {
                 step,
-                activity_index: 0,
+                activity: Autocomplete::new(Vec::new()),
                 project: Autocomplete::new(Vec::new()),
                 task: Autocomplete::new(Vec::new()),
             }
@@ -1345,15 +1348,13 @@ mod tests {
 
         /// A start-session screen at the given step, everything else empty.
         fn start_form_at(step: Step) -> Screen {
-            Screen::StartSession(Self::empty_form(step))
+            Screen::StartSession(Box::new(Self::empty_form(step)))
         }
 
-        /// Puts the app on the Activity step of the start-session form.
-        fn on_activity_step(mut self, activity_index: usize) -> Self {
-            self.app.screen = Screen::StartSession(StartSessionForm {
-                activity_index,
-                ..Self::empty_form(Step::Activity)
-            });
+        /// Opens the start-session form the way `s` does, on the Activity
+        /// step with the app's activity suggestions.
+        fn on_activity_step(mut self) -> Self {
+            self.key(KeyCode::Char('s'));
             self
         }
 
@@ -1849,7 +1850,7 @@ mod tests {
 
     #[test]
     fn start_modal_shows_title_and_selected_tab() {
-        let t = TestApp::new().on_activity_step(0);
+        let t = TestApp::new().on_activity_step();
         let buf = render(&t.app);
         // The modal border is default color; only the title carries the accent.
         assert_eq!(buf[(20, 6)].symbol(), "╭");
@@ -1867,18 +1868,75 @@ mod tests {
     }
 
     #[test]
-    fn start_modal_activity_picker_highlights_selected() {
-        let t = TestApp::new().on_activity_step(2); // "Writing"
+    fn start_modal_activity_step_shows_input_and_suggestions() {
+        let mut t = TestApp::new().on_activity_step();
+        for _ in 0..3 {
+            t.key(KeyCode::Down);
+        }
         let buf = render(&t.app);
-        // The picker body starts at row 8; the selected item gets a bold
-        // accent `>` and highlighted text (list content always sits one
-        // column right of the symbol).
-        assert!(line_from(&buf, 10, 21).starts_with(" >Writing"));
-        assert_eq!(buf[(22, 10)].fg, Color::Cyan);
-        assert!(buf[(22, 10)].modifier.contains(Modifier::BOLD));
-        assert_eq!(buf[(23, 10)].fg, Color::Cyan);
-        assert!(line_from(&buf, 8, 21).starts_with("  Programming"));
-        assert_eq!(buf[(23, 8)].fg, Color::Reset); // unselected item text
+        // Input row at y=8 shows the selection; suggestions from y=9. The
+        // selected item gets a bold accent `>` and highlighted text (list
+        // content always sits one column right of the symbol).
+        assert!(line_from(&buf, 8, 22).starts_with("Activity  Writing"));
+        assert!(line_from(&buf, 9, 21).starts_with("  Programming"));
+        assert_eq!(buf[(23, 9)].fg, Color::Reset); // unselected item text
+        assert!(line_from(&buf, 11, 21).starts_with(" >Writing"));
+        assert_eq!(buf[(22, 11)].fg, Color::Cyan);
+        assert!(buf[(22, 11)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(23, 11)].fg, Color::Cyan);
+    }
+
+    // --- custom activities ------------------------------------------------
+
+    fn activity_suggestions(t: &TestApp) -> Vec<String> {
+        match &t.app.screen {
+            Screen::StartSession(form) => form.activity.suggestions(),
+            _ => panic!("expected start-session screen"),
+        }
+    }
+
+    #[test]
+    fn fresh_database_suggests_the_default_activities() {
+        let t = TestApp::new().on_activity_step();
+        assert_eq!(activity_suggestions(&t), DEFAULT_ACTIVITIES);
+    }
+
+    #[test]
+    fn typed_activity_is_stored_and_replaces_the_defaults() {
+        let mut t = TestApp::new().on_activity_step();
+        t.typed("Gardening");
+        t.key(KeyCode::Enter); // → project
+        t.key(KeyCode::Enter); // → task
+        t.key(KeyCode::Enter); // start
+        assert_eq!(activity(&t), Some("Gardening"));
+
+        // With history, only activities actually used are suggested.
+        t.key(KeyCode::Char('s'));
+        assert_eq!(activity_suggestions(&t), ["Gardening"]);
+    }
+
+    #[test]
+    fn activities_are_suggested_most_recent_first() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.app.complete_active(None);
+        t.app.start_session("Writing", None, None);
+        t.app.refresh_suggestions();
+        // One Tab repeats the most recent activity.
+        let mut t = t.on_activity_step();
+        t.key(KeyCode::Tab);
+        assert_eq!(t.form().activity.value().as_deref(), Some("Writing"));
+        assert_eq!(activity_suggestions(&t), ["Writing", "Reading"]);
+    }
+
+    #[test]
+    fn enter_on_an_empty_activity_stays_on_the_step() {
+        let mut t = TestApp::new().on_activity_step();
+        t.key(KeyCode::Enter);
+        assert!(matches!(t.form().step, Step::Activity));
+        t.typed("   ");
+        t.key(KeyCode::Enter);
+        assert!(matches!(t.form().step, Step::Activity));
     }
 
     #[test]
@@ -1953,7 +2011,7 @@ mod tests {
         assert_eq!(t.app.cursor_position((80, 24)), Some((28, 8))); // "Task  "
 
         let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Activity));
-        assert_eq!(t.app.cursor_position((80, 24)), None); // picker, no input
+        assert_eq!(t.app.cursor_position((80, 24)), Some((32, 8))); // "Activity  "
 
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: "hi".into(),
