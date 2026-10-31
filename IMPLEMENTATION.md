@@ -283,11 +283,16 @@ Steps: `Activity → Project → Task` (the tabs row shows progress).
 
 ### End form
 
-Steps: `Notes → Focus`.
+Steps: `Notes → Focus`, or just `Notes` for breaks and disruptions
+(`session::asks_focus`): they aren't focused work, so there is no rating to
+ask for, and the modal shows no Focus tab.
 
-- Notes: Enter advances; the typed notes stay in the form.
-- Focus: `1`/`2`/`3` or Enter (no rating) commits: append the notes (if
-  non-empty), then `complete_active(focus)`.
+- Notes: Enter advances to Focus (the typed notes stay in the form), or, when
+  no rating is asked, commits right away.
+- Focus: `1`/`2`/`3` or Enter (no rating) commits.
+- Committing (`finish_ending`) appends the notes (if non-empty), then
+  `complete_active(focus)`, and triggers the cat's rating reaction when
+  there is a rating.
 - Esc at either step cancels: back to Main with the session still running and
   nothing written, so an accidental `e` is harmless.
 

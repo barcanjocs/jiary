@@ -106,7 +106,7 @@ Meetings you start with `s` (activity "Meeting") are detours too, so `r` never r
 
 ### Focus rating
 
-When ending a session (`e`), after the notes prompt you'll be asked to rate your focus:
+When ending a session (`e`), after the notes prompt you'll be asked to rate your focus (except for breaks and disruptions, which end right after the notes, since they aren't focused work):
 
 - `1` — bad (fragmented, many context switches)
 - `2` — ok

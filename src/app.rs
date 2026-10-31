@@ -625,6 +625,8 @@ impl App {
     }
 
     fn end_notes_key(&mut self, key: KeyCode) {
+        // Read before borrowing the form.
+        let asks_focus = self.ending_asks_focus();
         let Screen::EndSession(form) = &mut self.screen else {
             return;
         };
@@ -635,23 +637,37 @@ impl App {
             KeyCode::Backspace => {
                 form.notes.pop();
             }
-            KeyCode::Enter => form.step = EndStep::Focus,
+            KeyCode::Enter if asks_focus => form.step = EndStep::Focus,
+            KeyCode::Enter => self.finish_ending(None),
             _ => {}
         }
     }
 
+    /// Whether ending the active session asks for a focus rating (not for
+    /// breaks and disruptions; see `session::asks_focus`).
+    fn ending_asks_focus(&self) -> bool {
+        self.active_session
+            .as_ref()
+            .is_none_or(|s| session::asks_focus(&s.activity))
+    }
+
     fn end_focus_key(&mut self, key: KeyCode) {
-        let Screen::EndSession(form) = &mut self.screen else {
-            return;
-        };
         let focus = match key {
             KeyCode::Char(c) if ('1'..='3').contains(&c) => Some(c as i32 - '0' as i32),
             KeyCode::Enter => None,
             _ => return,
         };
-        // Notes are only saved once the session actually ends, so cancelling
-        // at either step leaves the session untouched. Copy them out of
-        // `form` before calling into self.
+        self.finish_ending(focus);
+    }
+
+    /// Ends the active session with the end form's notes and `focus`, and
+    /// returns to the main screen. Notes are only saved here, once the
+    /// session actually ends, so cancelling the form leaves it untouched.
+    fn finish_ending(&mut self, focus: Option<i32>) {
+        let Screen::EndSession(form) = &mut self.screen else {
+            return;
+        };
+        // Copy the notes out of `form` before calling into self.
         let notes = std::mem::take(&mut form.notes);
         if !notes.is_empty() {
             self.append_active_note(&notes);
@@ -841,7 +857,10 @@ impl App {
             Screen::Help => &[("any key", "close")],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
             Screen::EndSession(form) => match form.step {
-                EndStep::Notes => &[("Enter", "continue"), ("Esc", "cancel")],
+                EndStep::Notes if self.ending_asks_focus() => {
+                    &[("Enter", "continue"), ("Esc", "cancel")]
+                }
+                EndStep::Notes => &[("Enter", "end"), ("Esc", "cancel")],
                 EndStep::Focus => &[
                     ("1", "bad"),
                     ("2", "ok"),
@@ -1521,8 +1540,14 @@ impl App {
             EndStep::Notes => 0,
             EndStep::Focus => 1,
         };
+        // No Focus tab when this session won't ask for a rating.
+        let tabs: &[&str] = if self.ending_asks_focus() {
+            &["Notes", "Focus"]
+        } else {
+            &["Notes"]
+        };
         frame.render_widget(
-            Tabs::new(["Notes", "Focus"])
+            Tabs::new(tabs.to_vec())
                 .select(step_index)
                 .highlight_style(Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
             tabs_area,
@@ -3532,6 +3557,38 @@ mod tests {
         let mut t = TestApp::new();
         t.key(KeyCode::Char('b'));
         assert!(t.app.active_session.is_none());
+    }
+
+    #[test]
+    fn ending_a_break_or_disruption_keeps_notes_but_skips_focus() {
+        for kind in [BREAK, DISRUPTION] {
+            let mut t = TestApp::new();
+            t.app.start_session(kind, None, None);
+            t.key(KeyCode::Char('e'));
+            let buf = render(&t.app);
+            assert!(line_from(&buf, 10, 22).starts_with(" Notes "));
+            assert!(!line(&buf, 10).contains("Focus"));
+            assert_eq!(line(&buf, RENDER_HEIGHT - 1), "[Enter] end  [Esc] cancel");
+
+            t.typed("lunch");
+            t.key(KeyCode::Enter); // ends straight away
+            assert!(t.app.active_session.is_none(), "{kind}");
+            assert!(matches!(t.app.screen, Screen::Main));
+            let ended = &t.app.today_sessions[0];
+            assert_eq!(ended.notes.as_deref(), Some("lunch\n"));
+            assert_eq!(ended.focus, None);
+            assert!(t.app.current_reaction().is_none());
+        }
+
+        // A meeting still asks.
+        let mut t = TestApp::new();
+        t.app.start_session(MEETING, None, None);
+        t.key(KeyCode::Char('e'));
+        t.key(KeyCode::Enter);
+        assert!(matches!(
+            &t.app.screen,
+            Screen::EndSession(form) if form.step == EndStep::Focus
+        ));
     }
 
     #[test]

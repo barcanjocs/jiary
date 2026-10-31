@@ -13,6 +13,13 @@ pub fn is_detour(activity: &str) -> bool {
     DETOURS.contains(&activity)
 }
 
+/// Whether ending a session of this activity asks for a focus rating.
+/// Breaks and disruptions aren't focused work, so they skip it (their
+/// notes are still asked for).
+pub fn asks_focus(activity: &str) -> bool {
+    activity != BREAK && activity != DISRUPTION
+}
+
 #[derive(Debug)]
 pub struct Session {
     pub id: i64,
