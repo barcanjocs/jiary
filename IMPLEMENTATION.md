@@ -54,7 +54,8 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   rows per terminal row), `render` to half-block `Line`s, and the frame
   schedule (`lines(millis)`). Pure; colors come from `theme::CAT_*`.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
-  activity and project, focus, interruptions, disruptions, span and gaps.
+  activity and project, focus, interruptions, disruptions, breaks, span and
+  gaps.
   Pure; computed from in-memory sessions every frame.
 - **`db.rs`** — `Db` wraps a `rusqlite::Connection`. The schema (including the
   single-active-session trigger) is a `const SCHEMA` string applied with
@@ -315,14 +316,16 @@ the UI believing a session ended.
 
 Main-screen flows built from these:
 
-- **`d` (disrupt)** — only if a non-Disruption session is active: close it,
-  start a `Disruption` session with no project/task. During a Disruption it
-  is a no-op rather than splitting it in two.
+- **`d` (disrupt) / `b` (break)** — `pause(kind)`: only if a session is
+  active and isn't already that kind of pause: close it, start a
+  `DISRUPTION` / `BREAK` session with no project/task. Repeating the same key
+  is a no-op rather than splitting the pause in two; the other key switches
+  between disruption and break. Both are *pauses* (`session::is_pause`).
 - **`r` (resume)** — proceeds only when there is no active session or the
-  active one *is* a Disruption. Looks up `latest_non_disruption` (most recent
-  completed non-Disruption row's activity/project/task) **first**, so the
-  Disruption keeps running when there is nothing to resume; then closes it
-  and starts a fresh session with that combo. The round trip `d` … `r` is two
+  active one is a pause. Looks up `latest_work_session` (most recent
+  completed row that is not a pause) **first**, so the pause keeps running
+  when there is nothing to resume; then closes it and starts a fresh session
+  with that activity/project/task. The round trip `d`/`b` … `r` is two
   keystrokes.
 - **`i`** — `db.increment_interruptions` (guarded by `ended_at IS NULL` in
   SQL) plus the in-memory counter bump.
@@ -558,7 +561,7 @@ removed.
   running session's in-memory copy, focus/disruption figures.
 - *app.rs state machine* — key handling against a `TestApp` (real db):
   key-event filtering, autocomplete semantics, end/note form commit and
-  cancel, disrupt/resume edge cases, section focus/collapse/resize/scroll,
+  cancel, disrupt/break/resume edge cases, section focus/collapse/resize/scroll,
   mouse drag/click/wheel (`mouse`, `drag` helpers), layout persistence
   across two `App`s, status-line content and width fitting. Keys go through
   `press(code)` / `TestApp::key` / `TestApp::typed`. Setup helpers

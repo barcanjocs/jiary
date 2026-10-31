@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, Row, params};
 
-use crate::session::Session;
+use crate::session::{BREAK, DISRUPTION, Session};
 
 /// The (activity, project, task) of a session, as returned by
-/// [`Db::latest_non_disruption`] for resuming work.
+/// [`Db::latest_work_session`] for resuming work.
 type SessionCombo = (String, Option<String>, Option<String>);
 
 pub struct Db {
@@ -255,12 +255,14 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
     }
 
-    pub fn latest_non_disruption(&self) -> Result<Option<SessionCombo>, DbError> {
+    /// The most recent completed session that is work, not a pause
+    /// (disruption or break): what `r` resumes.
+    pub fn latest_work_session(&self) -> Result<Option<SessionCombo>, DbError> {
         let result = self.conn.query_row(
             "SELECT activity, project, task FROM sessions
-         WHERE activity != 'Disruption' AND ended_at IS NOT NULL
+         WHERE activity NOT IN (?1, ?2) AND ended_at IS NOT NULL
          ORDER BY started_at DESC, id DESC LIMIT 1",
-            [],
+            params![DISRUPTION, BREAK],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         );
 
@@ -468,7 +470,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        let (activity, _, _) = tmp.db.latest_non_disruption().unwrap().unwrap();
+        let (activity, _, _) = tmp.db.latest_work_session().unwrap().unwrap();
         assert_eq!(activity, "Writing");
     }
 
@@ -539,6 +541,18 @@ mod tests {
             tmp.db.recent_activities().unwrap(),
             ["Gardening", "Reading", "Writing"]
         );
+    }
+
+    #[test]
+    fn latest_work_session_skips_disruptions_and_breaks() {
+        let tmp = TmpDb::new();
+        for activity in ["Writing", DISRUPTION, BREAK, DISRUPTION] {
+            let session = tmp.db.create_session(activity, Some("p"), None).unwrap();
+            tmp.db.complete_session(session.id, None).unwrap();
+        }
+        let (activity, project, _) = tmp.db.latest_work_session().unwrap().unwrap();
+        assert_eq!(activity, "Writing");
+        assert_eq!(project.as_deref(), Some("p"));
     }
 
     #[test]

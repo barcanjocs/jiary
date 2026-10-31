@@ -34,7 +34,8 @@ On first run, a database is created at:
 | `n` | Add a note to the active session |
 | `i` | Increment interruption counter |
 | `d` | Stop current session, start a Disruption session (no-op during one) |
-| `r` | Resume last non-Disruption session |
+| `b` | Stop current session, start a Break session (no-op during one) |
+| `r` | Resume the last work session (ends a disruption or break) |
 | `?` | Show all keys |
 | `q` / `Ctrl+C` | Quit |
 
@@ -44,7 +45,7 @@ The main screen has three stacked sections:
 
 - **Active** (top) — the running session: timer, project, task, activity, interruptions and notes, with a small pixel-art cat on the right (shown when the section has room for it).
 - **Today** (middle) — today's sessions, newest first. Scrollable.
-- **Summary** (bottom) — time per activity and per project, average focus, interruptions and disruptions, and the day's span with tracked time and gaps.
+- **Summary** (bottom) — time per activity and per project, average focus, interruptions and disruptions, and the day's span with tracked time, breaks and gaps.
 
 | Key | Action |
 |-----|--------|
@@ -70,9 +71,9 @@ Activity is required; project and task are optional (press Enter on an empty fie
 
 ### Activities
 
-Activities are free text, like projects: type any name to use a new one. Suggestions are the activities you have used, most recent first, so `s`, Tab, Enter repeats your last one. A new database suggests a starter set (Programming, Reading, Writing, Meeting, Administration, Disruption, Other) until you have history; after that, built-ins you never use drop out of the list.
+Activities are free text, like projects: type any name to use a new one. Suggestions are the activities you have used, most recent first, so `s`, Tab, Enter repeats your last one. A new database suggests a starter set (Programming, Reading, Writing, Meeting, Administration, Disruption, Break, Other) until you have history; after that, built-ins you never use drop out of the list.
 
-`Disruption` is the activity `d` starts and `r` resumes from.
+`Disruption` and `Break` are the activities `d` and `b` start and `r` resumes from.
 
 ### Autocomplete
 
@@ -86,11 +87,11 @@ Press `n` at any time during an active session to append a note. Notes are saved
 
 You can also add a note when ending a session (press `e`).
 
-### Disruptions & Resume
+### Disruptions, Breaks & Resume
 
-If you're interrupted (colleague conversation, phone call, context switch), press `d` to instantly stop your current session and start a "Disruption" session. When you're ready to get back to work, press `r` to end the disruption and restart your previous activity/project/task.
+If you're interrupted (colleague conversation, phone call, context switch), press `d` to instantly stop your current session and start a "Disruption" session. When you're taking a break on purpose (coffee, lunch, a walk), press `b` instead to start a "Break" session. When you're ready to get back to work, press `r` to end the disruption or break and restart your previous activity/project/task.
 
-The full round-trip is two keystrokes: `d` … work … `r`.
+The full round-trip is two keystrokes: `d` (or `b`) … `r`. `r` always goes back to the last session that was actual work, so a break that turns into a disruption (`b`, then `d`) still resumes your work. Both need a running session to pause.
 
 ### Focus rating
 

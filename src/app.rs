@@ -13,7 +13,7 @@ use ratatui::widgets::{
 use crate::db::Db;
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
 use crate::mascot;
-use crate::session::Session;
+use crate::session::{self, BREAK, DISRUPTION, Session};
 use crate::summary::{DaySummary, summarize};
 use crate::theme;
 use crossterm::event::{
@@ -31,7 +31,8 @@ const DEFAULT_ACTIVITIES: &[&str] = &[
     "Writing",
     "Meeting",
     "Administration",
-    "Disruption",
+    DISRUPTION,
+    BREAK,
     "Other",
 ];
 
@@ -419,19 +420,20 @@ impl App {
                 }
             }
             KeyCode::Char('r') => {
+                // Resume ends a pause (disruption or break), or picks work
+                // back up when nothing is running; it never ends work.
                 let should_proceed = match &self.active_session {
                     None => true,
-                    Some(s) if s.activity == "Disruption" => true,
-                    Some(_) => false,
+                    Some(s) => session::is_pause(&s.activity),
                 };
 
                 if !should_proceed {
                     return false;
                 }
 
-                // Look up what to resume before closing the disruption, so
-                // it keeps running when there is nothing to resume.
-                let combo = match self.db.latest_non_disruption() {
+                // Look up what to resume before closing the pause, so it
+                // keeps running when there is nothing to resume.
+                let combo = match self.db.latest_work_session() {
                     Ok(Some(combo)) => {
                         self.clear_error();
                         combo
@@ -453,18 +455,8 @@ impl App {
                 self.refresh_after_session_change();
             }
 
-            KeyCode::Char('d') => {
-                // Only start a Disruption if there was a session to interrupt,
-                // and not another one on top of a running Disruption.
-                let interruptible = self
-                    .active_session
-                    .as_ref()
-                    .is_some_and(|s| s.activity != "Disruption");
-                if interruptible && self.close_active_session() {
-                    self.start_session("Disruption", None, None);
-                    self.refresh_after_session_change();
-                }
-            }
+            KeyCode::Char('d') => self.pause(DISRUPTION),
+            KeyCode::Char('b') => self.pause(BREAK),
             KeyCode::Char('s') => {
                 self.screen = Screen::StartSession(Box::new(StartSessionForm {
                     step: Step::Activity,
@@ -489,6 +481,21 @@ impl App {
             _ => {}
         };
         false
+    }
+
+    /// Ends the active session and starts a pause (`DISRUPTION` or `BREAK`)
+    /// with no project or task; `r` later resumes the work it interrupted.
+    /// Only when there is a session to pause, and not on top of the same
+    /// kind of pause (switching between a disruption and a break is fine).
+    fn pause(&mut self, kind: &str) {
+        let pausable = self
+            .active_session
+            .as_ref()
+            .is_some_and(|s| s.activity != kind);
+        if pausable && self.close_active_session() {
+            self.start_session(kind, None, None);
+            self.refresh_after_session_change();
+        }
     }
 
     /// Handles keys while starting a session (activity → project → task).
@@ -786,6 +793,7 @@ impl App {
                     ("n", "note"),
                     ("i", "interrupt"),
                     ("d", "disrupt"),
+                    ("b", "break"),
                     ("r", "resume"),
                     ("Tab", "sections"),
                     ("q", "quit"),
@@ -1208,6 +1216,11 @@ impl App {
         let day = vec![
             format!("{} – {}", fmt_time(&start), fmt_time(&end)),
             format!("tracked {}", fmt_hms(summary.tracked)),
+            if summary.break_time.is_zero() {
+                "no breaks".to_string()
+            } else {
+                format!("breaks {}", fmt_hms(summary.break_time))
+            },
             format!("gaps {}", fmt_hms(summary.untracked())),
         ];
 
@@ -1753,7 +1766,8 @@ fn draw_help(frame: &mut Frame, content: Rect) {
                 ("n", "add a note"),
                 ("i", "count an interruption"),
                 ("d", "start a disruption"),
-                ("r", "resume after a disruption"),
+                ("b", "start a break"),
+                ("r", "resume after either"),
                 ("q / Ctrl+C", "quit"),
             ],
         ),
@@ -2247,7 +2261,7 @@ mod tests {
         let buf = render(&t.app);
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
-            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [r] resume  [?] help"
+            "[s] start  [e] end  [n] note  [i] interrupt  [d] disrupt  [b] break  [?] help"
         );
     }
 
@@ -2266,7 +2280,7 @@ mod tests {
         // Narrower than the help hint itself (a pty can report 0 columns).
         assert_eq!(text(5), "[?] help");
         assert_eq!(text(0), "[?] help");
-        assert_eq!(text(120).matches('[').count(), 9); // everything, quit included
+        assert_eq!(text(120).matches('[').count(), 10); // everything, quit included
     }
 
     #[test]
@@ -2781,7 +2795,7 @@ mod tests {
                 .starts_with("Focus     avg 3.0 (2 rated) · 0 interruptions · no disruptions ")
         );
         // 30m + 10m gap + 30m.
-        assert!(line_from(&buf, y + 3, 1).contains("· tracked 1h 0m · gaps 10m"));
+        assert!(line_from(&buf, y + 3, 1).contains("· tracked 1h 0m · no breaks · gaps 10m"));
     }
 
     #[test]
@@ -3240,7 +3254,7 @@ mod tests {
         t.app
             .start_session("Reading", Some("alpha".into()), Some("beta".into()));
         t.app.handle_key(press(KeyCode::Char('d')));
-        assert_eq!(activity(&t), Some("Disruption"));
+        assert_eq!(activity(&t), Some(DISRUPTION));
         t.app.handle_key(press(KeyCode::Char('r')));
         let active = t.app.active_session.as_ref().unwrap();
         assert_eq!(active.activity, "Reading");
@@ -3261,11 +3275,47 @@ mod tests {
     }
 
     #[test]
+    fn break_then_resume_restores_previous_session() {
+        let mut t = TestApp::new();
+        t.app
+            .start_session("Reading", Some("alpha".into()), Some("beta".into()));
+        t.key(KeyCode::Char('b'));
+        assert_eq!(activity(&t), Some(BREAK));
+        t.key(KeyCode::Char('b')); // no-op on top of a break
+        assert_eq!(t.app.today_sessions.len(), 2);
+        t.key(KeyCode::Char('r'));
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.activity, "Reading");
+        assert_eq!(active.project.as_deref(), Some("alpha"));
+        assert_eq!(active.task.as_deref(), Some("beta"));
+    }
+
+    #[test]
+    fn breaks_and_disruptions_switch_and_resume_skips_both() {
+        let mut t = TestApp::new();
+        t.app.start_session("Writing", None, None);
+        t.key(KeyCode::Char('b'));
+        t.key(KeyCode::Char('d')); // the break turned into a disruption
+        assert_eq!(activity(&t), Some(DISRUPTION));
+        t.key(KeyCode::Char('b')); // and back
+        assert_eq!(activity(&t), Some(BREAK));
+        t.key(KeyCode::Char('r')); // past the break and the disruption
+        assert_eq!(activity(&t), Some("Writing"));
+    }
+
+    #[test]
+    fn break_needs_a_session_to_pause() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('b'));
+        assert!(t.app.active_session.is_none());
+    }
+
+    #[test]
     fn resume_with_nothing_to_resume_keeps_the_disruption() {
         let mut t = TestApp::new();
-        t.app.start_session("Disruption", None, None);
+        t.app.start_session(DISRUPTION, None, None);
         t.app.handle_key(press(KeyCode::Char('r')));
-        assert_eq!(activity(&t), Some("Disruption"));
+        assert_eq!(activity(&t), Some(DISRUPTION));
     }
 
     #[test]

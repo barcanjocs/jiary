@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::session::Session;
+use crate::session::{BREAK, DISRUPTION, Session};
 
 #[derive(Debug, PartialEq)]
 pub struct DaySummary {
@@ -18,6 +18,7 @@ pub struct DaySummary {
     pub interruptions: i32,
     pub disruptions: usize,
     pub disruption_time: Duration,
+    pub break_time: Duration,
     /// First start and last end (now, while a session runs).
     pub span: Option<(DateTime<Utc>, DateTime<Utc>)>,
     pub tracked: Duration,
@@ -61,7 +62,7 @@ pub fn summarize(today: &[Session], active: Option<&Session>, now: DateTime<Utc>
     let ratings = sessions.iter().filter_map(|s| s.focus).collect::<Vec<_>>();
     let disruptions = sessions
         .iter()
-        .filter(|s| s.activity == "Disruption")
+        .filter(|s| s.activity == DISRUPTION)
         .collect::<Vec<_>>();
     let span = sessions
         .iter()
@@ -78,6 +79,11 @@ pub fn summarize(today: &[Session], active: Option<&Session>, now: DateTime<Utc>
         interruptions: sessions.iter().filter_map(|s| s.interruptions).sum(),
         disruptions: disruptions.len(),
         disruption_time: disruptions.iter().map(|s| duration(s)).sum(),
+        break_time: sessions
+            .iter()
+            .filter(|s| s.activity == BREAK)
+            .map(|s| duration(s))
+            .sum(),
         span,
         tracked: sessions.iter().map(|s| duration(s)).sum(),
     }
@@ -187,17 +193,19 @@ mod tests {
         let mut a = session(at(9, 0), Some(at(10, 0)), "Programming", None);
         a.focus = Some(3);
         a.interruptions = Some(2);
-        let mut b = session(at(10, 0), Some(at(10, 20)), "Disruption", None);
+        let mut b = session(at(10, 0), Some(at(10, 20)), DISRUPTION, None);
         b.interruptions = Some(1);
         let mut c = session(at(10, 20), Some(at(11, 0)), "Programming", None);
         c.focus = Some(2);
-        let d = session(at(11, 0), Some(at(11, 5)), "Disruption", None);
+        let d = session(at(11, 0), Some(at(11, 5)), DISRUPTION, None);
+        let e = session(at(11, 5), Some(at(11, 50)), BREAK, None);
 
-        let s = summarize(&[a, b, c, d], None, at(12, 0));
+        let s = summarize(&[a, b, c, d, e], None, at(12, 0));
         assert_eq!(s.average_focus, Some(2.5));
         assert_eq!(s.rated, 2);
         assert_eq!(s.interruptions, 3);
         assert_eq!(s.disruptions, 2);
         assert_eq!(s.disruption_time, Duration::minutes(25));
+        assert_eq!(s.break_time, Duration::minutes(45));
     }
 }
