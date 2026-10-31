@@ -53,6 +53,8 @@ On first run, a database is created at:
 - **macOS:** `~/Library/Application Support/jiary/jiary.db`
 - **Linux:** `~/.local/share/jiary/jiary.db`
 
+Only one Jiary runs at a time, so two can't write to the diary at once: a second one says the first is already running (and its process id) and exits. A `jiary.lock` file next to the database holds the lock; it is released however Jiary ends, even on a crash.
+
 ## Usage
 
 | Key | Action |

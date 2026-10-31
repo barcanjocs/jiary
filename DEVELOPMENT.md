@@ -83,16 +83,10 @@ from its scope note alone, without re-deriving context.
       next launch shows a "live" timer that actually started before today.
       Detect `started_at` before local midnight and mark it clearly (e.g.
       "since yesterday"); make sure `e` still ends it sensibly.
-- [ ] **E. Single-instance lock** (small). Nothing prevents two jiary
-      processes from running at once and interleaving writes. At startup,
-      before opening the db, acquire an exclusive `flock` on a dedicated
-      lock file in the data dir (e.g. `jiary.lock`); on contention exit(1)
-      with "already running (pid N)" — same philosophy as the unopenable-db
-      exit (our own pid written into the lockfile, best-effort). flock is
-      kernel-managed: released on crash/kill, no stale-lock logic, and a
-      separate namespace from SQLite's POSIX locks. Dep: `fs2` or raw libc.
-      Test headlessly by holding the lock and asserting a second acquire
-      fails. Touches: main.rs startup, new error path, README.
+- [x] **E. Single-instance lock** — done 2026-10-31: `lock.rs` takes an
+      exclusive `flock` (std `File::try_lock`, no dependency) on
+      `jiary.lock` in the data dir before the db opens, writing our pid;
+      a second jiary prints "already running (pid N)" and exits 1.
 - [ ] **F. Relaunch-as-focus** (small-medium, builds on E). Re-running
       `jiary` while an instance is live should focus its terminal window
       instead of erroring: the first instance records pid + `$WINDOWID` in

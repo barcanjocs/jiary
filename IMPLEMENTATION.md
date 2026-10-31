@@ -63,6 +63,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   a sentence to a list. Two fixed lines take over for a moment: `FLINCH`
   ("oups!") while the cat flinches at `i`, after which `resample_caption`
   picks a different sentence, and `RATING` during the rating window.
+- **`lock.rs`** — `acquire(path)`: the single-instance lock, an exclusive
+  `flock` on a file held for the process's lifetime; `LockError::Running`
+  (with the holder's pid) when another jiary has it.
 - **`idle.rs`** — `system_idle()`: time since the last keyboard or mouse
   input system-wide, from `ioreg -c IOHIDSystem` on macOS or `xprintidle` on
   Linux, `None` elsewhere or when the tool fails.
@@ -232,6 +235,13 @@ render site for errors and makes "the line reflects the most recent db
 operation" fall out of the design.
 
 ### Startup
+
+`main.rs` handles `--help` / `--version` first, then refuses to run
+without a terminal, then takes the single-instance lock (`lock.rs`: an
+exclusive `flock` on `jiary.lock` in the data dir, via std's
+`File::try_lock`, held for the process's lifetime and released by the OS
+however it ends; the holder's pid is written in it, so a second jiary can
+name it before exiting 1). All of this before the db is opened.
 
 `App::new` attempts **every** load — active session, today's sessions,
 projects, tasks — recording failures via `set_error` instead of aborting, so a

@@ -3,6 +3,7 @@ mod captions;
 mod db;
 mod idle;
 mod layout;
+mod lock;
 mod mascot;
 mod period;
 mod session;
@@ -51,6 +52,23 @@ fn main() {
         eprintln!("jiary: needs to run in a terminal");
         std::process::exit(1);
     }
+
+    // One jiary at a time, checked before the db is touched; held until
+    // this one exits (see lock.rs). Without a data dir there is nothing to
+    // lock, and Db::open reports that just below.
+    let _lock = match db::data_dir() {
+        Some(dir) => {
+            let _ = std::fs::create_dir_all(&dir);
+            match lock::acquire(&dir.join("jiary.lock")) {
+                Ok(lock) => Some(lock),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
 
     let db = match db::Db::open() {
         Ok(db) => db,
