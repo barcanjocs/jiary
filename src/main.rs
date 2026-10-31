@@ -6,11 +6,11 @@ mod theme;
 use std::io;
 
 use crossterm::{
+    cursor::Show,
     event::{self, Event},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::DefaultTerminal;
 
 fn main() {
     let db = match db::Db::open() {
@@ -21,25 +21,31 @@ fn main() {
         }
     };
 
-    if let Err(e) = run(db) {
+    // init() enters raw mode and the alternate screen, and installs a panic
+    // hook that restores the terminal; ours chains onto it to also show the
+    // cursor (hidden outside input lines). restore() covers every other exit
+    // path, so an error never leaves the shell in raw mode.
+    let mut terminal = ratatui::init();
+    let restore_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(io::stdout(), Show);
+        restore_hook(info);
+    }));
+
+    let result = run(&mut terminal, app::App::new(db));
+    let _ = terminal.show_cursor();
+    ratatui::restore();
+
+    if let Err(e) = result {
         eprintln!("{e}");
         std::process::exit(1);
     }
 }
 
-fn run(db: db::Db) -> io::Result<()> {
-    enable_raw_mode()?;
-
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+fn run(terminal: &mut DefaultTerminal, mut app: app::App) -> io::Result<()> {
     // Hidden at startup; cursor_position() says where the cursor belongs each
     // frame (only the start form's input steps show it).
     terminal.hide_cursor()?;
-
-    let mut app = app::App::new(db);
 
     loop {
         terminal.draw(|frame| app.draw(frame))?;
@@ -57,12 +63,7 @@ fn run(db: db::Db) -> io::Result<()> {
             && let Event::Key(key) = event::read()?
             && app.handle_key(key.code)
         {
-            break;
+            return Ok(());
         }
     }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    Ok(())
 }
