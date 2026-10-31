@@ -71,7 +71,7 @@ focus grid colored from red (1) to green (3). See
   <tr>
     <td valign="top"><a href="docs/images/weekly.svg"><img src="docs/images/weekly.svg" width="280" alt="The week view: a timeline row per day, the week's totals and its focus grid"></a></td>
     <td valign="top"><a href="docs/images/monthly.svg"><img src="docs/images/monthly.svg" width="280" alt="The month view: a row per day grouped by week, the month's totals and its focus grid"></a></td>
-    <td valign="top"><a href="docs/images/yearly.svg"><img src="docs/images/yearly.svg" width="280" alt="The year view: the year's focus grid, a row per month and the year's totals"></a></td>
+    <td valign="top"><a href="docs/images/yearly.svg"><img src="docs/images/yearly.svg" width="280" alt="The year view: a row per month, the year's totals and its focus grid"></a></td>
   </tr>
 </table>
 

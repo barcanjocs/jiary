@@ -464,16 +464,18 @@ It is centered on the view's width as a block (every row the same width,
 so `centered` gives them the same padding), with the ramp's legend
 (`focus_legend`) centered a blank row below.
 
-A year leads with `year_focus_grid` instead, the same colors fitted to
-53 weeks in 80 columns: a column per week with the month names over it
-(where they fit), the weekdays two to a character row (`▀` with the upper
-day as foreground and the lower as background, so each day is a square
-half a row tall, without gaps; `theme::EMPTY_DAY` where nothing was
-tracked, since half blocks can't carry a texture), centered with its
-legend. Then a row per month instead of per day: the month's
+A year has a row per month instead of per day: the month's
 `activity_bar` with its length scaled to the busiest month, and its
-`day_total` (tracked time, focus average). Then the totals; no grid
-after them. Focus averages everywhere are colored on the
+`day_total` (tracked time, focus average). Then the totals, and under
+them, in the same place as the other views' grid, `year_focus_grid`: the
+same colors fitted to 53 weeks in 80 columns, a column per week with the
+month names over it (where they fit), the weekdays two to a character row
+(`▀` with the upper day as foreground and the lower as background, so
+each day is a square half a row tall, without gaps; `theme::EMPTY_DAY`
+where nothing was tracked, since half blocks can't carry a texture),
+centered with its legend. Every view keeps the same order (rows, totals,
+grid) so paging between them with `w`/`m`/`y` doesn't move things around.
+Focus averages everywhere are colored on the
 same ramp (`focus_color`), so a number matches its day's square. The
 running session counts through its in-memory copy, as today. Projects get
 colors distinct within the period (`theme::project_colors` over its

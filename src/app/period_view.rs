@@ -188,20 +188,7 @@ impl App {
         let label_width = SUMMARY_LABEL_WIDTH as usize;
         let mut lines = Vec::new();
         if view.period == Period::Year {
-            // A year leads with its focus grid, the view's point, then a
-            // row per month instead of per day.
-            let grid = year_focus_grid(&days, view.first, view.last, today);
-            let block_width = grid.iter().map(item_width).max().unwrap_or(0);
-            lines.extend(
-                grid.into_iter()
-                    .map(|row| centered(row, block_width, width)),
-            );
-            lines.push(Line::default());
-            let legend = focus_legend();
-            let legend_width = item_width(&legend);
-            lines.push(centered(legend, legend_width, width));
-            lines.push(Line::default());
-
+            // A row per month instead of per day.
             let months = (1..=12)
                 .filter_map(|month| view.first.with_month(month))
                 .map(|first| {
@@ -363,12 +350,11 @@ impl App {
         }
 
         // Under the focus text, the focus grid, centered as a block, and
-        // a row further down its legend, centered on its own (a year's
-        // leads the view instead).
-        if view.period == Period::Year {
-            return lines;
-        }
-        let grid = focus_grid(&days, view.first, view.last, today);
+        // a row further down its legend, centered on its own.
+        let grid = match view.period {
+            Period::Year => year_focus_grid(&days, view.first, view.last, today),
+            _ => focus_grid(&days, view.first, view.last, today),
+        };
         let block_width = grid.iter().map(item_width).max().unwrap_or(0);
         lines.push(Line::default());
         lines.extend(

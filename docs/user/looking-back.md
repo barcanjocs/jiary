@@ -39,15 +39,15 @@ days with nothing tracked show a faint texture.
 
 ## Years
 
-`/yearly` shows the whole year:
+`/yearly` shows the whole year, laid out like the other views:
 
-1. its focus grid, compact enough for 53 weeks (each day is half a row tall,
-   two to a character), with the month names over it;
-2. a row per month, with its activity bar (scaled to your busiest month),
+1. a row per month, with its activity bar (scaled to your busiest month),
    its tracked time and its focus;
-3. the year's totals.
+2. the year's totals;
+3. its focus grid, compact enough for 53 weeks (each day is half a row tall,
+   two to a character), with the month names over it.
 
-![The year view: the focus grid for the whole year, a row per month, and the year's totals](../images/yearly.svg)
+![The year view: a row per month, the year's totals, and the focus grid for the whole year](../images/yearly.svg)
 
 ## Keys in these views
 

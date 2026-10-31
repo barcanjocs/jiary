@@ -2453,7 +2453,7 @@ fn the_focus_grid_colors_each_day_by_its_focus() {
 }
 
 #[test]
-fn yearly_leads_with_the_focus_grid_then_a_row_per_month() {
+fn yearly_has_a_row_per_month_then_its_totals_then_the_focus_grid() {
     use chrono::Datelike;
     let mut t = TestApp::new();
     t.app.start_session("Reading", None, None);
@@ -2471,10 +2471,25 @@ fn yearly_leads_with_the_focus_grid_then_a_row_per_month() {
             .map(|s| s.content.as_ref())
             .collect::<String>()
     };
-    // The month names over the grid, then four rows of weekday pairs.
-    assert!(text(&lines[0]).contains("Jan"), "{}", text(&lines[0]));
+    // It opens on the months, like the other views open on their days.
+    assert!(text(&lines[0]).starts_with("Jan "), "{}", text(&lines[0]));
+    // Under the focus text, as in the other views: the month names over
+    // the grid, then four rows of weekday pairs.
+    let focus = lines
+        .iter()
+        .position(|l| text(l).starts_with("Focus"))
+        .unwrap();
+    assert!(
+        text(&lines[focus + 2]).contains("Jan"),
+        "{}",
+        text(&lines[focus + 2])
+    );
     for (row, weekday) in ["Mon", "Wed", "Fri", "Sun"].iter().enumerate() {
-        assert!(text(&lines[1 + row]).trim_start().starts_with(weekday));
+        assert!(
+            text(&lines[focus + 3 + row])
+                .trim_start()
+                .starts_with(weekday)
+        );
     }
     // A row per month, this one with its hour and rating.
     let months = lines
