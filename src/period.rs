@@ -1,5 +1,5 @@
-//! The longer views' periods: calendar weeks (Monday first) and months,
-//! counted back from the current one. Pure date arithmetic; the view
+//! The longer views' periods: calendar weeks (Monday first), months and
+//! years, counted back from the current one. Pure date arithmetic; the view
 //! itself lives in app.rs.
 
 use chrono::{Datelike, Duration, Months, NaiveDate};
@@ -8,6 +8,7 @@ use chrono::{Datelike, Duration, Months, NaiveDate};
 pub enum Period {
     Week,
     Month,
+    Year,
 }
 
 impl Period {
@@ -26,11 +27,16 @@ impl Period {
                 let last = shift_months(first, 1) - Duration::days(1);
                 (first, last)
             }
+            Period::Year => {
+                let year = today.year() + offset;
+                let day = |month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap_or(today);
+                (day(1, 1), day(12, 31))
+            }
         }
     }
 
     /// The title for the period from `first` to `last`, e.g. "WEEK · 26 Oct
-    /// – 1 Nov 2026" or "OCTOBER 2026".
+    /// – 1 Nov 2026", "OCTOBER 2026" or "2026".
     pub fn title(self, first: NaiveDate, last: NaiveDate) -> String {
         match self {
             Period::Week if first.year() == last.year() => format!(
@@ -44,6 +50,7 @@ impl Period {
                 last.format("%-d %b %Y")
             ),
             Period::Month => first.format("%B %Y").to_string().to_uppercase(),
+            Period::Year => first.year().to_string(),
         }
     }
 }
@@ -103,6 +110,20 @@ mod tests {
             Period::Month.days(1, d(2028, 1, 15)),
             (d(2028, 2, 1), d(2028, 2, 29))
         );
+    }
+
+    #[test]
+    fn years_run_from_january_to_december() {
+        let today = d(2026, 10, 31);
+        assert_eq!(
+            Period::Year.days(0, today),
+            (d(2026, 1, 1), d(2026, 12, 31))
+        );
+        assert_eq!(
+            Period::Year.days(-2, today),
+            (d(2024, 1, 1), d(2024, 12, 31))
+        );
+        assert_eq!(Period::Year.title(d(2026, 1, 1), d(2026, 12, 31)), "2026");
     }
 
     #[test]

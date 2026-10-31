@@ -58,6 +58,10 @@ pub const BAD: Color = Color::Red;
 /// line, the focus grid).
 pub const UNRATED: Color = Color::DarkGray;
 
+/// A day with nothing tracked in the year's compact focus grid, whose
+/// half-block squares can't show a texture: a faint square.
+pub const EMPTY_DAY: Color = Color::Indexed(236);
+
 /// The focus grid's ramp, from 256-color hues: red, through orange and
 /// yellow, to green, evenly over a day's average focus from 1 to 3.
 pub const FOCUS_RAMP: [Color; 9] = [

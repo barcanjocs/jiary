@@ -66,7 +66,7 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 - **`idle.rs`** — `system_idle()`: time since the last keyboard or mouse
   input system-wide, from `ioreg -c IOHIDSystem` on macOS or `xprintidle` on
   Linux, `None` elsewhere or when the tool fails.
-- **`period.rs`** — `Period` (week, month): which days the one `offset`
+- **`period.rs`** — `Period` (week, month, year): which days the one `offset`
   periods from the current one covers, and its title. Pure date arithmetic.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
   activity and project, focus (averaged weighted by session length),
@@ -411,19 +411,21 @@ view by `ListState`. A command's `Action` is either a main-screen key
 (`Action::Key`) or a view with no key of its own (`Action::View`:
 `/weekly`, `/monthly`), listed first.
 
-### Weeks and months
+### Weeks, months and years
 
 `Screen::Period(PeriodView)`: the period (`period.rs`: `Period::Week` runs
-Monday to Sunday, `Period::Month` the calendar month; `days(offset,
+Monday to Sunday, `Period::Month` the calendar month, `Period::Year`
+January to December; `days(offset,
 today)` gives the first and last day `offset` periods from the current
 one, `title` names it), its offset, its days, and its sessions as loaded
 by `open_period` (`db.sessions_between`: started, in local time, on one
 of its days), since draw never queries the db. `handle_period`: ←→ / h l
-reopen the period before or after (never past the current one), w / m
-this week or month, the scroll keys move `scroll` (clamped to
+reopen the period before or after (never past the current one), w / m / y
+this week, month or year, the scroll keys move `scroll` (clamped to
 `period_max_scroll`), Esc / q back to Main.
 
-`period_lines` draws it: a row per day (a month adds a blank row after
+`period_lines` draws it. Sessions are grouped by day once (a year has 365
+summaries to make). A week or month has a row per day (a month adds a blank row after
 each Sunday) with the day's label (accent for today, dimmed when nothing
 was tracked), its timeline (`timeline_row` over that day's `summarize`)
 on an hour axis shared by all the days (the earliest start's hour to the
@@ -440,7 +442,18 @@ yellow to green over 1–3), `UNRATED` gray when tracked without a rating,
 `░░` when nothing was tracked, blank outside the period or after today.
 It is centered on the view's width as a block (every row the same width,
 so `centered` gives them the same padding), with the ramp's legend
-(`focus_legend`) centered a blank row below. Focus averages everywhere are colored on the
+(`focus_legend`) centered a blank row below.
+
+A year leads with `year_focus_grid` instead, the same colors fitted to
+53 weeks in 80 columns: a column per week with the month names over it
+(where they fit), the weekdays two to a character row (`▀` with the upper
+day as foreground and the lower as background, so each day is a square
+half a row tall, without gaps; `theme::EMPTY_DAY` where nothing was
+tracked, since half blocks can't carry a texture), centered with its
+legend. Then a row per month instead of per day: the month's
+`activity_bar` with its length scaled to the busiest month, and its
+`day_total` (tracked time, focus average). Then the totals; no grid
+after them. Focus averages everywhere are colored on the
 same ramp (`focus_color`), so a number matches its day's square. The
 running session counts through its in-memory copy, as today. Projects get
 colors distinct within the period (`theme::project_colors` over its

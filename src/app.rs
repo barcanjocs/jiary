@@ -208,6 +208,7 @@ const fn view(name: &'static str, description: &'static str, period: Period) -> 
 const COMMANDS: &[Command] = &[
     view("weekly", "this week, by day", Period::Week),
     view("monthly", "this month, by day", Period::Month),
+    view("yearly", "this year's focus", Period::Year),
     command("start", "start a session", 's', "s"),
     command("end", "end the session", 'e', "e"),
     command("note", "add a note", 'n', "n"),
@@ -1095,9 +1096,9 @@ impl App {
         });
     }
 
-    /// Keys in a week or month: ←→ (h l) page to the period before or
-    /// after (not past the current one), w and m switch to this week or
-    /// month, the scroll keys scroll, Esc or q go back.
+    /// Keys in a week, month or year: ←→ (h l) page to the period before
+    /// or after (not past the current one), w, m and y switch to this week,
+    /// month or year, the scroll keys scroll, Esc or q go back.
     fn handle_period(&mut self, key: KeyCode) {
         let Screen::Period(view) = &self.screen else {
             return;
@@ -1112,6 +1113,7 @@ impl App {
             }
             KeyCode::Char('w') => self.open_period(Period::Week, 0),
             KeyCode::Char('m') => self.open_period(Period::Month, 0),
+            KeyCode::Char('y') => self.open_period(Period::Year, 0),
             _ => {
                 let Screen::Period(view) = &mut self.screen else {
                     return;
@@ -1158,15 +1160,21 @@ impl App {
                 .as_ref()
                 .filter(|s| within(local_day(s.started_at)))
         };
+        // Grouped by day once: a year has 365 of them.
+        let mut by_day: std::collections::BTreeMap<chrono::NaiveDate, Vec<&Session>> =
+            Default::default();
+        for session in &view.sessions {
+            by_day
+                .entry(local_day(session.started_at))
+                .or_default()
+                .push(session);
+        }
         let days = view
             .first
             .iter_days()
             .take_while(|day| *day <= view.last)
             .map(|day| {
-                let sessions = view
-                    .sessions
-                    .iter()
-                    .filter(|s| local_day(s.started_at) == day);
+                let sessions = by_day.get(&day).into_iter().flatten().copied();
                 (day, summarize(sessions, active(&|d| d == day), now))
             })
             .collect::<Vec<_>>();
@@ -1210,7 +1218,70 @@ impl App {
             (width as usize).saturating_sub(SUMMARY_LABEL_WIDTH as usize + DAY_TOTAL_WIDTH);
         let label_width = SUMMARY_LABEL_WIDTH as usize;
         let mut lines = Vec::new();
-        for (day, summary) in &days {
+        if view.period == Period::Year {
+            // A year leads with its focus grid, the view's point, then a
+            // row per month instead of per day.
+            let grid = year_focus_grid(&days, view.first, view.last, today);
+            let block_width = grid.iter().map(item_width).max().unwrap_or(0);
+            lines.extend(
+                grid.into_iter()
+                    .map(|row| centered(row, block_width, width)),
+            );
+            lines.push(Line::default());
+            let legend = focus_legend();
+            let legend_width = item_width(&legend);
+            lines.push(centered(legend, legend_width, width));
+            lines.push(Line::default());
+
+            let months = (1..=12)
+                .filter_map(|month| view.first.with_month(month))
+                .map(|first| {
+                    let in_month = |d: chrono::NaiveDate| d.month() == first.month();
+                    let sessions = by_day
+                        .iter()
+                        .filter(|(day, _)| in_month(**day))
+                        .flat_map(|(_, sessions)| sessions.iter().copied());
+                    (first, summarize(sessions, active(&in_month), now))
+                })
+                .collect::<Vec<_>>();
+            // Bars scaled to the busiest month, so their lengths compare.
+            let busiest = months
+                .iter()
+                .map(|(_, s)| s.tracked.num_seconds())
+                .max()
+                .unwrap_or(0)
+                .max(1);
+            for (first, summary) in &months {
+                let tracked = !summary.tracked.is_zero();
+                let this_month = first.year() == today.year() && first.month() == today.month();
+                let label_style = if this_month {
+                    theme::TITLE
+                } else if tracked {
+                    theme::VALUE
+                } else {
+                    theme::DIMMED
+                };
+                let mut row = vec![Span::styled(
+                    format!("{:label_width$}", first.format("%b").to_string()),
+                    label_style,
+                )];
+                // At least a cell for any time tracked; none for none.
+                let length = match tracked {
+                    true => ((graph_width as i64 * summary.tracked.num_seconds() / busiest)
+                        as usize)
+                        .max(1),
+                    false => 0,
+                };
+                row.extend(activity_bar(summary, length));
+                row.push(Span::raw(" ".repeat(graph_width.saturating_sub(length))));
+                if tracked {
+                    row.extend(day_total(summary));
+                }
+                lines.push(Line::from(row));
+            }
+            lines.push(Line::default());
+        }
+        for (day, summary) in days.iter().filter(|_| view.period != Period::Year) {
             let tracked = !summary.tracked.is_zero();
             let label_style = if *day == today {
                 theme::TITLE
@@ -1230,16 +1301,7 @@ impl App {
                 _ => row.push(Span::raw(" ".repeat(graph_width))),
             }
             if tracked {
-                row.push(Span::styled(
-                    format!(" {:>7}", fmt_hms(summary.tracked)),
-                    theme::VALUE,
-                ));
-                row.push(match summary.average_focus {
-                    Some(avg) => {
-                        Span::styled(format!(" {avg:.1}"), theme::VALUE.fg(focus_color(avg)))
-                    }
-                    None => Span::styled("   -", theme::DIMMED),
-                });
+                row.extend(day_total(summary));
             }
             lines.push(Line::from(row));
             // A month reads in weeks: a blank row after each Sunday.
@@ -1250,19 +1312,21 @@ impl App {
                 lines.push(Line::default());
             }
         }
-        if let (Some(from), Some(to)) =
-            (at_hour(view.first, from_hour), at_hour(view.first, to_hour))
+        if view.period != Period::Year
+            && let (Some(from), Some(to)) =
+                (at_hour(view.first, from_hour), at_hour(view.first, to_hour))
         {
             let mut hours = vec![Span::raw(" ".repeat(label_width))];
             hours.extend(hour_labels(from, to, graph_width));
             lines.push(Line::from(hours));
+            lines.push(Line::default());
         }
-        lines.push(Line::default());
 
         if total.tracked.is_zero() {
             let what = match view.period {
                 Period::Week => "this week",
                 Period::Month => "this month",
+                Period::Year => "this year",
             };
             lines.push(Line::from(Span::styled(
                 format!("Nothing tracked {what}."),
@@ -1330,7 +1394,11 @@ impl App {
         }
 
         // Under the focus text, the focus grid, centered as a block, and
-        // a row further down its legend, centered on its own.
+        // a row further down its legend, centered on its own (a year's
+        // leads the view instead).
+        if view.period == Period::Year {
+            return lines;
+        }
         let grid = focus_grid(&days, view.first, view.last, today);
         let block_width = grid.iter().map(item_width).max().unwrap_or(0);
         lines.push(Line::default());
@@ -1546,7 +1614,7 @@ impl App {
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
             Screen::Period(_) => &[
                 ("←→", "previous/next"),
-                ("w/m", "week/month"),
+                ("w/m/y", "week/month/year"),
                 ("↑↓", "scroll"),
                 ("Esc", "back"),
             ],
@@ -3261,6 +3329,94 @@ fn focus_grid(
             if w + 1 < weeks {
                 row.push(Span::raw(" "));
             }
+        }
+        rows.push(row);
+    }
+    rows
+}
+
+/// A day's (or month's) tracked time and focus average, at the end of its
+/// row in the longer views (`DAY_TOTAL_WIDTH` columns).
+fn day_total(summary: &DaySummary) -> Item {
+    vec![
+        Span::styled(format!(" {:>7}", fmt_hms(summary.tracked)), theme::VALUE),
+        match summary.average_focus {
+            Some(avg) => Span::styled(format!(" {avg:.1}"), theme::VALUE.fg(focus_color(avg))),
+            None => Span::styled("   -", theme::DIMMED),
+        },
+    ]
+}
+
+/// A year's focus grid, compact enough for 53 weeks in 80 columns: a
+/// column per week, the month names over them, and the weekdays two to a
+/// row, each day half a row tall (`▀`: the top day in front, the bottom one
+/// behind), so the squares stay square without gaps. Colors as in
+/// `focus_grid`, with `theme::EMPTY_DAY` where nothing was tracked.
+fn year_focus_grid(
+    days: &[(chrono::NaiveDate, DaySummary)],
+    first: chrono::NaiveDate,
+    last: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+) -> Vec<Item> {
+    use chrono::Datelike;
+    const WEEKDAY: usize = 4; // "Mon "
+    let monday = first - chrono::Duration::days(first.weekday().num_days_from_monday() as i64);
+    let weeks = ((last - monday).num_days() / 7 + 1) as usize;
+    let date = |week: usize, weekday: u32| {
+        monday + chrono::Duration::weeks(week as i64) + chrono::Duration::days(weekday as i64)
+    };
+
+    // Month names over the week each month starts in, where they fit.
+    let mut header = vec![' '; WEEKDAY + weeks];
+    let mut free = WEEKDAY;
+    for month in first
+        .iter_days()
+        .take_while(|d| *d <= last)
+        .filter(|d| d.day() == 1)
+    {
+        let column = WEEKDAY + ((month - monday).num_days() / 7) as usize;
+        let name = month.format("%b").to_string();
+        if column >= free && column + name.len() <= header.len() {
+            header[column..column + name.len()]
+                .iter_mut()
+                .zip(name.chars())
+                .for_each(|(cell, c)| *cell = c);
+            free = column + name.len() + 1;
+        }
+    }
+    let mut rows = vec![vec![Span::styled(
+        header.into_iter().collect::<String>(),
+        theme::DIMMED,
+    )]];
+
+    let color = |day: chrono::NaiveDate| -> Option<Color> {
+        if day < first || day > last || day > today {
+            return None;
+        }
+        let summary = days.iter().find(|(d, _)| *d == day).map(|(_, s)| s)?;
+        Some(match summary.average_focus {
+            Some(avg) => theme::focus_gradient(avg),
+            None if !summary.tracked.is_zero() => theme::UNRATED,
+            None => theme::EMPTY_DAY,
+        })
+    };
+    for top in [0, 2, 4, 6] {
+        let name = date(0, top).format("%a ").to_string();
+        let mut row = vec![Span::styled(name, theme::DIMMED)];
+        for week in 0..weeks {
+            let upper = color(date(week, top));
+            let lower = if top < 6 {
+                color(date(week, top + 1))
+            } else {
+                None
+            };
+            row.push(match (upper, lower) {
+                (None, None) => Span::raw(" "),
+                (Some(u), None) => Span::styled("▀", Style::new().fg(u)),
+                (None, Some(l)) => Span::styled("▄", Style::new().fg(l)),
+                (Some(u), Some(l)) if u == l => Span::styled("█", Style::new().fg(u)),
+                (Some(u), Some(l)) => Span::styled("▀", Style::new().fg(u).bg(l)),
+            });
         }
         rows.push(row);
     }
@@ -5232,6 +5388,14 @@ mod tests {
                     selection: 0,
                 }),
                 Screen::Period(PeriodView {
+                    period: Period::Year,
+                    offset: 0,
+                    first: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+                    last: chrono::NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+                    sessions: Vec::new(),
+                    scroll: 99,
+                }),
+                Screen::Period(PeriodView {
                     period: Period::Month,
                     offset: 0,
                     first: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
@@ -5900,7 +6064,7 @@ mod tests {
         row_with(&buf, "Project   ");
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
-            "[←→] previous/next  [w/m] week/month  [↑↓] scroll  [Esc] back"
+            "[←→] previous/next  [w/m/y] week/month/year  [↑↓] scroll  [Esc] back"
         );
     }
 
@@ -5972,6 +6136,100 @@ mod tests {
             .map(|s| s.content.as_ref())
             .collect::<String>();
         assert_eq!(legend, "1 █████████ 3");
+    }
+
+    #[test]
+    fn yearly_leads_with_the_focus_grid_then_a_row_per_month() {
+        use chrono::Datelike;
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        backdate(&mut t, 60);
+        t.key(KeyCode::Char('e'));
+        t.key(KeyCode::Char('3'));
+        open(&mut t, "yearly");
+        let today = chrono::Local::now().date_naive();
+        let view = period_view(&t);
+        assert_eq!(view.period, Period::Year);
+        let lines = t.app.period_lines(view, 78);
+        let text = |l: &Line| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        // The month names over the grid, then four rows of weekday pairs.
+        assert!(text(&lines[0]).contains("Jan"), "{}", text(&lines[0]));
+        for (row, weekday) in ["Mon", "Wed", "Fri", "Sun"].iter().enumerate() {
+            assert!(text(&lines[1 + row]).trim_start().starts_with(weekday));
+        }
+        // A row per month, this one with its hour and rating.
+        let months = lines
+            .iter()
+            .map(text)
+            .filter(|l| {
+                [
+                    "Jan ", "Feb ", "Mar ", "Apr ", "May ", "Jun ", "Jul ", "Aug ", "Sep ", "Oct ",
+                    "Nov ", "Dec ",
+                ]
+                .iter()
+                .any(|m| l.starts_with(m))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(months.len(), 12, "{months:#?}");
+        let this_month = &months[today.month0() as usize];
+        assert!(this_month.contains("1h 0m 3.0"), "{this_month}");
+        // Paging by year; y from another view.
+        t.key(KeyCode::Left);
+        assert_eq!(period_view(&t).first, Period::Year.days(-1, today).0);
+        t.key(KeyCode::Char('w'));
+        t.key(KeyCode::Char('y'));
+        assert_eq!(period_view(&t).period, Period::Year);
+    }
+
+    #[test]
+    fn the_year_grid_stacks_two_days_per_cell() {
+        let day = |m, d| chrono::NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        let at = |d, h| chrono::Local.with_ymd_and_hms(2026, 1, d, h, 0, 0).unwrap();
+        let summary_of = |sessions: Vec<Session>| summarize(&sessions, None, Utc::now());
+        // 2026 starts on a Thursday: its first week's column holds Thu 1
+        // (bottom of the Wed/Thu row) to Sun 4.
+        let days = vec![
+            (
+                day(1, 1),
+                summary_of(vec![finished_session(at(1, 9), at(1, 10), Some(3))]),
+            ),
+            (
+                day(1, 2),
+                summary_of(vec![finished_session(at(2, 9), at(2, 10), None)]),
+            ),
+            (day(1, 3), summary_of(Vec::new())),
+            (
+                day(1, 5),
+                summary_of(vec![finished_session(at(5, 9), at(5, 10), Some(1))]),
+            ),
+        ];
+        let grid = year_focus_grid(&days, day(1, 1), day(12, 31), day(1, 5));
+        assert_eq!(grid.len(), 5, "month names, then four weekday-pair rows");
+        assert!(grid[0][0].content.starts_with("    Jan"));
+        let cell = |row: usize, week: usize| &grid[row][1 + week];
+        let colors = |row, week| {
+            (
+                cell(row, week).content.as_ref(),
+                cell(row, week).style.fg,
+                cell(row, week).style.bg,
+            )
+        };
+        // Week 0: Wed (before the year) blank over Thu 1 (rated 3).
+        assert_eq!(colors(2, 0), ("▄", Some(theme::FOCUS_RAMP[8]), None));
+        // Fri 2 (unrated) over Sat 3 (nothing tracked).
+        assert_eq!(
+            colors(3, 0),
+            ("▀", Some(theme::UNRATED), Some(theme::EMPTY_DAY))
+        );
+        // Week 1: Mon 5 (rated 1) over Tue 6, still to come.
+        assert_eq!(colors(1, 1), ("▀", Some(theme::FOCUS_RAMP[0]), None));
+        // 53 weeks fit in 80 columns.
+        assert!(item_width(&grid[1]) <= 78);
     }
 
     #[test]

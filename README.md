@@ -74,13 +74,15 @@ Section sizes and collapsed sections are remembered between runs, in `layout.con
 
 Press `/` to open the command palette: every action by name, with what it does and its key. Type to filter (fuzzy, so `/und` finds `undo`), `↑`/`↓` to pick, `Tab` to complete the name, `Enter` to run it, `Esc` (or Backspace past the `/`) to close. A command does exactly what its key does, so the palette doubles as a way to learn the keys. The palette also opens the longer views, which have no key of their own.
 
-### Weeks and months
+### Weeks, months and years
 
 `/weekly` and `/monthly` show the current calendar week (Monday to Sunday) or month, a row per day: the day's timeline in activity colors, on an hour axis all the days share so they line up, with the day's tracked time and focus average at the end. Under the days come the period's totals, like today's summary: tracked time split into work, breaks and disruptions, the days you tracked and the average per day, the activity and project bars, and focus. A month is grouped by week and scrolls.
 
 Focus also shows as a grid of squares, GitHub style: a row per weekday, a column per week, each day colored on a gradient from red (1) through yellow to green (3) by its average focus. Days you tracked without rating show dark gray, days with nothing tracked a faint texture. Focus averages, here and in today's summary, weigh each session by its length, so a 3-hour session counts more than a 20-minute one.
 
-`←`/`→` (or `h`/`l`) page to the week or month before or after, `w` and `m` switch to this week or this month, `↑`/`↓` (or `j`/`k`), `PgUp`/`PgDn` and `Home`/`End` scroll, and `Esc` (or `q`) goes back.
+`/yearly` shows the whole year: its focus grid first, compact enough for 53 weeks (each day half a row tall, two to a character), with the month names over it, then a row per month (its activity bar, scaled to your busiest month, its tracked time and focus), then the year's totals.
+
+`←`/`→` (or `h`/`l`) page to the week, month or year before or after, `w`, `m` and `y` switch to this week, month or year, `↑`/`↓` (or `j`/`k`), `PgUp`/`PgDn` and `Home`/`End` scroll, and `Esc` (or `q`) goes back.
 
 ### Starting a session
 
