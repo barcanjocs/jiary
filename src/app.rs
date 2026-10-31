@@ -15,6 +15,7 @@ use crate::captions;
 use crate::db::{Db, SessionCombo};
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
 use crate::mascot::{self, Mood, Reaction};
+use crate::period::Period;
 use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
 use crate::summary::{DaySummary, summarize};
 use crate::theme;
@@ -135,9 +136,23 @@ enum Screen {
     AddNote(AddNoteForm),
     /// The command palette (`/`).
     Palette(PaletteForm),
+    /// A week or a month, day by day (`/weekly`, `/monthly`).
+    Period(PeriodView),
     /// Back after `AWAY_AFTER` or more without touching the computer,
     /// during a work session: what was that time?
     Away(chrono::DateTime<Utc>),
+}
+
+/// A week or a month on screen: which one (`offset` periods from the
+/// current one), its days, its sessions as loaded when it opened (draw
+/// never queries the db) and how far it is scrolled.
+struct PeriodView {
+    period: Period,
+    offset: i32,
+    first: chrono::NaiveDate,
+    last: chrono::NaiveDate,
+    sessions: Vec<Session>,
+    scroll: usize,
 }
 
 /// The command palette's state: what was typed (always starting with the
@@ -148,14 +163,22 @@ struct PaletteForm {
 }
 
 /// A command the palette offers: its name (typed after `/`), what it does,
-/// and what it runs. Commands for existing actions run their main-screen
-/// key, so a command can never drift from its key.
+/// and what it runs.
 struct Command {
     name: &'static str,
     description: &'static str,
-    key: KeyCode,
-    /// The key as shown beside the command.
+    action: Action,
+    /// The key as shown beside the command (none for the views, which have
+    /// no key).
     key_label: &'static str,
+}
+
+/// What a command runs. Commands for existing actions run their
+/// main-screen key, so a command can never drift from its key.
+#[derive(Clone, Copy)]
+enum Action {
+    Key(KeyCode),
+    View(Period),
 }
 
 const fn command(
@@ -167,13 +190,24 @@ const fn command(
     Command {
         name,
         description,
-        key: KeyCode::Char(key),
+        action: Action::Key(KeyCode::Char(key)),
         key_label,
+    }
+}
+
+const fn view(name: &'static str, description: &'static str, period: Period) -> Command {
+    Command {
+        name,
+        description,
+        action: Action::View(period),
+        key_label: "",
     }
 }
 
 /// Everything the palette offers, in the order it lists them.
 const COMMANDS: &[Command] = &[
+    view("weekly", "this week, by day", Period::Week),
+    view("monthly", "this month, by day", Period::Month),
     command("start", "start a session", 's', "s"),
     command("end", "end the session", 'e', "e"),
     command("note", "add a note", 'n', "n"),
@@ -564,6 +598,7 @@ impl App {
             Screen::StartSession(_) => self.handle_start_session(key),
             Screen::AddNote(_) => self.handle_add_note(key),
             Screen::Palette(_) => return self.handle_palette(key),
+            Screen::Period(_) => self.handle_period(key),
             Screen::Away(since) => {
                 let since = *since;
                 self.handle_away(key, since);
@@ -1022,12 +1057,296 @@ impl App {
             KeyCode::Enter => {
                 if let Some(command) = matches.get(form.selection) {
                     self.screen = Screen::Main;
-                    return self.handle_main(command.key);
+                    match command.action {
+                        Action::Key(key) => return self.handle_main(key),
+                        Action::View(period) => self.open_period(period, 0),
+                    }
                 }
             }
             _ => {}
         }
         false
+    }
+
+    // --- the longer views ----------------------------------------------------
+
+    /// Opens the week or month `offset` periods from the current one,
+    /// loading its sessions.
+    fn open_period(&mut self, period: Period, offset: i32) {
+        let today = chrono::Local::now().date_naive();
+        let (first, last) = period.days(offset, today);
+        let sessions = match self.db.sessions_between(first, last) {
+            Ok(sessions) => {
+                self.clear_error();
+                sessions
+            }
+            Err(e) => {
+                self.set_error(e);
+                Vec::new()
+            }
+        };
+        self.screen = Screen::Period(PeriodView {
+            period,
+            offset,
+            first,
+            last,
+            sessions,
+            scroll: 0,
+        });
+    }
+
+    /// Keys in a week or month: ←→ (h l) page to the period before or
+    /// after (not past the current one), w and m switch to this week or
+    /// month, the scroll keys scroll, Esc or q go back.
+    fn handle_period(&mut self, key: KeyCode) {
+        let Screen::Period(view) = &self.screen else {
+            return;
+        };
+        let (period, offset) = (view.period, view.offset);
+        let max_scroll = self.period_max_scroll(view);
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => self.screen = Screen::Main,
+            KeyCode::Left | KeyCode::Char('h') => self.open_period(period, offset - 1),
+            KeyCode::Right | KeyCode::Char('l') if offset < 0 => {
+                self.open_period(period, offset + 1);
+            }
+            KeyCode::Char('w') => self.open_period(Period::Week, 0),
+            KeyCode::Char('m') => self.open_period(Period::Month, 0),
+            _ => {
+                let Screen::Period(view) = &mut self.screen else {
+                    return;
+                };
+                let page = self.size.1.saturating_sub(6) as usize;
+                view.scroll = match key {
+                    KeyCode::Up | KeyCode::Char('k') => view.scroll.saturating_sub(1),
+                    KeyCode::Down | KeyCode::Char('j') => view.scroll + 1,
+                    KeyCode::PageUp => view.scroll.saturating_sub(page),
+                    KeyCode::PageDown => view.scroll + page,
+                    KeyCode::Home => 0,
+                    KeyCode::End => max_scroll,
+                    _ => return,
+                }
+                .min(max_scroll);
+            }
+        }
+    }
+
+    /// The period view's frame: (bordered area, its interior).
+    fn period_areas(&self) -> (Rect, Rect) {
+        let [_, content, _] = chrome_layout(Rect::new(0, 0, self.size.0, self.size.1));
+        (content, Block::bordered().inner(content))
+    }
+
+    fn period_max_scroll(&self, view: &PeriodView) -> usize {
+        let (_, inner) = self.period_areas();
+        self.period_lines(view, inner.width)
+            .len()
+            .saturating_sub(inner.height as usize)
+    }
+
+    /// The week or month: a row per day (its timeline on an axis shared by
+    /// all the days, its tracked time and focus), the hours under them,
+    /// then the period's totals like today's summary.
+    fn period_lines(&self, view: &PeriodView, width: u16) -> Vec<Line<'static>> {
+        use chrono::{Datelike, TimeZone};
+        let now = Utc::now();
+        let today = chrono::Local::now().date_naive();
+        let local_day = |at: chrono::DateTime<Utc>| at.with_timezone(&chrono::Local).date_naive();
+        // The in-memory copy of the running session stands in for its row.
+        let active = |within: &dyn Fn(chrono::NaiveDate) -> bool| {
+            self.active_session
+                .as_ref()
+                .filter(|s| within(local_day(s.started_at)))
+        };
+        let days = view
+            .first
+            .iter_days()
+            .take_while(|day| *day <= view.last)
+            .map(|day| {
+                let sessions = view
+                    .sessions
+                    .iter()
+                    .filter(|s| local_day(s.started_at) == day);
+                (day, summarize(sessions, active(&|d| d == day), now))
+            })
+            .collect::<Vec<_>>();
+        let total = summarize(
+            &view.sessions,
+            active(&|d| (view.first..=view.last).contains(&d)),
+            now,
+        );
+
+        // The hours the days share: from the earliest start's hour to the
+        // latest end's, as times of day (9–17 when nothing was tracked).
+        let midnight = |day: chrono::NaiveDate| {
+            chrono::Local
+                .from_local_datetime(&day.and_time(chrono::NaiveTime::MIN))
+                .earliest()
+                .map(|t| t.with_timezone(&Utc))
+        };
+        let mut minutes = days.iter().flat_map(|(day, summary)| {
+            let midnight = midnight(*day);
+            summary.blocks.iter().filter_map(move |block| {
+                let midnight = midnight?;
+                let start = (block.start - midnight).num_minutes();
+                let end = (block.end - midnight).num_minutes().min(24 * 60);
+                Some((start, end))
+            })
+        });
+        let (from_hour, to_hour) = match minutes.next() {
+            None => (9, 17),
+            Some(first) => {
+                let (start, end) = minutes.fold(first, |(s, e), (bs, be)| (s.min(bs), e.max(be)));
+                let from = (start / 60).clamp(0, 23);
+                let to = ((end + 59) / 60).clamp(from + 1, 24);
+                (from, to)
+            }
+        };
+        let at_hour = |day: chrono::NaiveDate, hour: i64| {
+            midnight(day).map(|m| m + chrono::Duration::hours(hour))
+        };
+
+        let graph_width =
+            (width as usize).saturating_sub(SUMMARY_LABEL_WIDTH as usize + DAY_TOTAL_WIDTH);
+        let label_width = SUMMARY_LABEL_WIDTH as usize;
+        let mut lines = Vec::new();
+        for (day, summary) in &days {
+            let tracked = !summary.tracked.is_zero();
+            let label_style = if *day == today {
+                theme::TITLE
+            } else if tracked {
+                theme::VALUE
+            } else {
+                theme::DIMMED
+            };
+            let mut row = vec![Span::styled(
+                format!("{:label_width$}", day.format("%a %-d").to_string()),
+                label_style,
+            )];
+            match (at_hour(*day, from_hour), at_hour(*day, to_hour)) {
+                (Some(from), Some(to)) if tracked => {
+                    row.extend(timeline_row(summary, from, to, graph_width));
+                }
+                _ => row.push(Span::raw(" ".repeat(graph_width))),
+            }
+            if tracked {
+                row.push(Span::styled(
+                    format!(" {:>7}", fmt_hms(summary.tracked)),
+                    theme::VALUE,
+                ));
+                row.push(match summary.average_focus {
+                    Some(avg) => {
+                        Span::styled(format!(" {avg:.1}"), theme::VALUE.fg(focus_color(avg)))
+                    }
+                    None => Span::styled("   -", theme::DIMMED),
+                });
+            }
+            lines.push(Line::from(row));
+            // A month reads in weeks: a blank row after each Sunday.
+            if view.period == Period::Month
+                && day.weekday() == chrono::Weekday::Sun
+                && *day != view.last
+            {
+                lines.push(Line::default());
+            }
+        }
+        if let (Some(from), Some(to)) =
+            (at_hour(view.first, from_hour), at_hour(view.first, to_hour))
+        {
+            let mut hours = vec![Span::raw(" ".repeat(label_width))];
+            hours.extend(hour_labels(from, to, graph_width));
+            lines.push(Line::from(hours));
+        }
+        lines.push(Line::default());
+
+        if total.tracked.is_zero() {
+            let what = match view.period {
+                Period::Week => "this week",
+                Period::Month => "this month",
+            };
+            lines.push(Line::from(Span::styled(
+                format!("Nothing tracked {what}."),
+                theme::DIMMED,
+            )));
+            return lines;
+        }
+
+        // The period's own project colors: distinct among its projects.
+        let mut projects = view
+            .sessions
+            .iter()
+            .filter_map(|s| s.project.clone())
+            .collect::<Vec<_>>();
+        projects.sort_unstable();
+        projects.dedup();
+        let ranks = projects
+            .iter()
+            .map(|p| self.project_rank(p))
+            .collect::<Vec<_>>();
+        let palette = theme::project_colors(&ranks);
+        let colors = |project: Option<&str>| match project {
+            None => theme::NO_PROJECT,
+            Some(name) => projects
+                .iter()
+                .position(|p| p == name)
+                .map_or(theme::NO_PROJECT, |i| palette[i]),
+        };
+
+        let active_days = days.iter().filter(|(_, s)| !s.tracked.is_zero()).count();
+        let mut totals = time_split_items(&total);
+        totals.push(vec![Span::styled(plural(active_days, "day"), theme::VALUE)]);
+        totals.push(vec![
+            Span::styled(
+                fmt_hms(total.tracked / active_days.max(1) as i32),
+                theme::VALUE,
+            ),
+            Span::raw(" a day"),
+        ]);
+        for (i, (label, bar, items)) in [
+            ("Total   ", None, totals),
+            (
+                "Activity",
+                Some(activity_bar(&total, graph_width)),
+                activity_items(&total),
+            ),
+            (
+                "Project ",
+                Some(project_bar(&total, graph_width, &colors)),
+                project_items(&total, &colors),
+            ),
+            ("Focus   ", None, focus_items(&total)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if i > 0 {
+                lines.push(Line::default());
+            }
+            let rows = [bar.into_iter().collect(), wrap_items(items, width, label)].concat();
+            lines.extend(hanging_lines(label, rows));
+        }
+        lines
+    }
+
+    /// The week or month in a bordered box titled with its dates, scrolled
+    /// to `scroll` (clamped), with a scrollbar when it doesn't all fit.
+    fn draw_period(&self, frame: &mut Frame, view: &PeriodView) {
+        let (area, inner) = self.period_areas();
+        let title = view.period.title(view.first, view.last);
+        frame.render_widget(
+            Block::bordered()
+                .border_type(BorderType::Rounded)
+                .border_style(Style::new().fg(theme::ACCENT))
+                .title(Line::from(Span::styled(format!(" {title} "), theme::TITLE))),
+            area,
+        );
+        let lines = self.period_lines(view, inner.width);
+        let visible = inner.height as usize;
+        let offset = view.scroll.min(lines.len().saturating_sub(visible));
+        let total = lines.len();
+        frame.render_widget(Paragraph::new(lines).scroll((offset as u16, 0)), inner);
+        let track = Rect::new(area.right().saturating_sub(1), inner.y, 1, inner.height);
+        draw_scrollbar(frame, track, total, visible, offset);
     }
 
     /// Handles keys while adding a note to the active session.
@@ -1074,6 +1393,7 @@ impl App {
             Screen::StartSession(form) => self.draw_start_session(frame, content, form, input),
             Screen::AddNote(_) => self.draw_add_note(frame, content, input),
             Screen::Palette(form) => draw_palette(frame, content, form, input),
+            Screen::Period(view) => self.draw_period(frame, view),
             Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 
@@ -1207,6 +1527,12 @@ impl App {
             },
             Screen::Help => &[("any key", "close")],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
+            Screen::Period(_) => &[
+                ("←→", "previous/next"),
+                ("w/m", "week/month"),
+                ("↑↓", "scroll"),
+                ("Esc", "back"),
+            ],
             Screen::Palette(_) => &[
                 ("↑↓", "select"),
                 ("Tab", "complete"),
@@ -1712,13 +2038,7 @@ impl App {
 
     /// A project's name, bold in its color, or a dimmed italic "(none)".
     fn project_span(&self, project: Option<&str>) -> Span<'static> {
-        match project {
-            Some(name) => Span::styled(
-                name.to_string(),
-                theme::VALUE.fg(self.project_color(project)),
-            ),
-            None => Span::styled("(none)", theme::NONE),
-        }
+        project_span(project, self.project_color(project))
     }
 
     /// The caption under the cat for the current mood and session
@@ -1830,88 +2150,15 @@ impl App {
             ))];
         };
 
-        // Names in their colors, times in bold, words plain, nothing to
-        // report dimmed.
         let time = |d: chrono::Duration| Span::styled(fmt_hms(d), theme::VALUE);
-        let dimmed = |text: &str| vec![Span::styled(text.to_string(), theme::DIMMED)];
-        let activities = summary
-            .per_activity
-            .iter()
-            .map(|(activity, d)| vec![theme::activity(activity), Span::raw(" "), time(*d)])
-            .collect::<Vec<_>>();
-        let projects = summary
-            .per_project
-            .iter()
-            .map(|(project, d)| {
-                vec![
-                    self.project_span(project.as_deref()),
-                    Span::raw(" "),
-                    time(*d),
-                ]
-            })
-            .collect::<Vec<_>>();
-        let focus = vec![
-            match summary.average_focus {
-                Some(avg) => vec![
-                    Span::raw("avg "),
-                    Span::styled(
-                        format!("{avg:.1}"),
-                        theme::VALUE.fg(match avg.round() as i32 {
-                            ..=1 => theme::BAD,
-                            2 => theme::OK,
-                            _ => theme::GOOD,
-                        }),
-                    ),
-                    Span::styled(format!(" ({} rated)", summary.rated), theme::DIMMED),
-                ],
-                None => vec![Span::styled("not rated", theme::NONE)],
-            },
-            match summary.interruptions {
-                0 => dimmed("0 interruptions"),
-                n => vec![
-                    interruptions_span(n, ""),
-                    Span::raw(if n == 1 {
-                        " interruption"
-                    } else {
-                        " interruptions"
-                    }),
-                ],
-            },
-            match summary.disruptions {
-                0 => dimmed("no disruptions"),
-                // Their time is on the `Day` row.
-                n => vec![Span::styled(
-                    plural(n, "disruption"),
-                    theme::VALUE.fg(theme::DISRUPTION_COLOR),
-                )],
-            },
-        ];
-        let mut day = vec![
-            vec![Span::styled(
-                format!("{} – {}", fmt_time(&start), fmt_time(&end)),
-                theme::VALUE,
-            )],
-            // Tracked, then what it was made of, each part's time in the
-            // color the graphs give it; parts that didn't happen are left
-            // out, keeping the row short.
-            vec![Span::raw("tracked "), time(summary.tracked)],
-            vec![
-                Span::raw("work "),
-                colored_time(summary.work_time(), theme::WORK),
-            ],
-        ];
-        for (word, duration, color) in [
-            ("breaks ", summary.break_time, theme::BREAK_COLOR),
-            (
-                "disrupted ",
-                summary.disruption_time,
-                theme::DISRUPTION_COLOR,
-            ),
-        ] {
-            if !duration.is_zero() {
-                day.push(vec![Span::raw(word), colored_time(duration, color)]);
-            }
-        }
+        let activities = activity_items(&summary);
+        let projects = project_items(&summary, &|p| self.project_color(p));
+        let focus = focus_items(&summary);
+        let mut day = vec![vec![Span::styled(
+            format!("{} – {}", fmt_time(&start), fmt_time(&end)),
+            theme::VALUE,
+        )]];
+        day.extend(time_split_items(&summary));
         day.push(vec![Span::raw("gaps "), time(summary.untracked())]);
 
         // Two pictures lead their rows when there is room for them: the day
@@ -1927,18 +2174,10 @@ impl App {
             let from = start_of_hour(start);
             day_rows.push(timeline_row(&summary, from, end, graph_width));
             day_rows.push(hour_labels(from, end, graph_width));
-            let activity_shares = summary
-                .per_activity
-                .iter()
-                .map(|(activity, d)| (theme::activity_color(activity), *d))
-                .collect::<Vec<_>>();
-            activity_rows.push(share_row(&activity_shares, graph_width));
-            let project_shares = summary
-                .per_project
-                .iter()
-                .map(|(project, d)| (self.project_color(project.as_deref()), *d))
-                .collect::<Vec<_>>();
-            project_rows.push(share_row(&project_shares, graph_width));
+            activity_rows.push(activity_bar(&summary, graph_width));
+            project_rows.push(project_bar(&summary, graph_width, &|p| {
+                self.project_color(p)
+            }));
             // The hours under the timeline already show the span.
             day.remove(0);
         }
@@ -2720,6 +2959,9 @@ fn wrap_items(items: Vec<Item>, width: u16, label: &str) -> Vec<Item> {
 /// Columns the summary's labels take ("Activity" and its gap), before the
 /// values and graphs.
 const SUMMARY_LABEL_WIDTH: u16 = 10;
+/// The columns a day's total and focus take at the end of its row in the
+/// longer views (" 10h 30m 2.5").
+const DAY_TOTAL_WIDTH: usize = 12;
 /// Narrower than this, the summary's graphs are left out.
 const MIN_GRAPH_WIDTH: usize = 10;
 /// Rows the graphs add to the summary: the focus line, the timeline, its
@@ -2864,6 +3106,143 @@ fn share_row(shares: &[(Color, chrono::Duration)], width: usize) -> Item {
     }
     colors.resize(halves, None);
     half_cells(&colors)
+}
+
+// --- summary pieces, shared by today's summary and the longer views -------
+
+/// How a view colors projects (by name; `None`: no project).
+type ProjectColors<'a> = &'a dyn Fn(Option<&str>) -> Color;
+
+/// A project's name, bold in `color`, or a dimmed italic "(none)".
+fn project_span(project: Option<&str>, color: Color) -> Span<'static> {
+    match project {
+        Some(name) => Span::styled(name.to_string(), theme::VALUE.fg(color)),
+        None => Span::styled("(none)", theme::NONE),
+    }
+}
+
+/// Each activity with its time, the name in its color, longest first.
+fn activity_items(summary: &DaySummary) -> Vec<Item> {
+    summary
+        .per_activity
+        .iter()
+        .map(|(activity, d)| {
+            vec![
+                theme::activity(activity),
+                Span::raw(" "),
+                Span::styled(fmt_hms(*d), theme::VALUE),
+            ]
+        })
+        .collect()
+}
+
+/// Each project with its time, the name in its color, longest first.
+fn project_items(summary: &DaySummary, colors: ProjectColors) -> Vec<Item> {
+    summary
+        .per_project
+        .iter()
+        .map(|(project, d)| {
+            let project = project.as_deref();
+            vec![
+                project_span(project, colors(project)),
+                Span::raw(" "),
+                Span::styled(fmt_hms(*d), theme::VALUE),
+            ]
+        })
+        .collect()
+}
+
+/// The focus average (in its outcome color), interruptions and the
+/// disruption count; nothing to report dimmed.
+fn focus_items(summary: &DaySummary) -> Vec<Item> {
+    let dimmed = |text: &str| vec![Span::styled(text.to_string(), theme::DIMMED)];
+    vec![
+        match summary.average_focus {
+            Some(avg) => vec![
+                Span::raw("avg "),
+                Span::styled(format!("{avg:.1}"), theme::VALUE.fg(focus_color(avg))),
+                Span::styled(format!(" ({} rated)", summary.rated), theme::DIMMED),
+            ],
+            None => vec![Span::styled("not rated", theme::NONE)],
+        },
+        match summary.interruptions {
+            0 => dimmed("0 interruptions"),
+            n => vec![
+                interruptions_span(n, ""),
+                Span::raw(if n == 1 {
+                    " interruption"
+                } else {
+                    " interruptions"
+                }),
+            ],
+        },
+        match summary.disruptions {
+            0 => dimmed("no disruptions"),
+            // Their time is with the tracked time's split.
+            n => vec![Span::styled(
+                plural(n, "disruption"),
+                theme::VALUE.fg(theme::DISRUPTION_COLOR),
+            )],
+        },
+    ]
+}
+
+/// The color of a focus average: its rounded rating's outcome color.
+fn focus_color(average: f64) -> Color {
+    match average.round() as i32 {
+        ..=1 => theme::BAD,
+        2 => theme::OK,
+        _ => theme::GOOD,
+    }
+}
+
+/// Tracked time, then what it was made of (work, breaks, disruptions),
+/// each part's time in the color the graphs give it; parts that didn't
+/// happen are left out, keeping the row short.
+fn time_split_items(summary: &DaySummary) -> Vec<Item> {
+    let mut items = vec![
+        vec![
+            Span::raw("tracked "),
+            Span::styled(fmt_hms(summary.tracked), theme::VALUE),
+        ],
+        vec![
+            Span::raw("work "),
+            colored_time(summary.work_time(), theme::WORK),
+        ],
+    ];
+    for (word, duration, color) in [
+        ("breaks ", summary.break_time, theme::BREAK_COLOR),
+        (
+            "disrupted ",
+            summary.disruption_time,
+            theme::DISRUPTION_COLOR,
+        ),
+    ] {
+        if !duration.is_zero() {
+            items.push(vec![Span::raw(word), colored_time(duration, color)]);
+        }
+    }
+    items
+}
+
+/// Each activity's share of the tracked time as one bar.
+fn activity_bar(summary: &DaySummary, width: usize) -> Item {
+    let shares = summary
+        .per_activity
+        .iter()
+        .map(|(activity, d)| (theme::activity_color(activity), *d))
+        .collect::<Vec<_>>();
+    share_row(&shares, width)
+}
+
+/// Each project's share of the tracked time as one bar.
+fn project_bar(summary: &DaySummary, width: usize, colors: ProjectColors) -> Item {
+    let shares = summary
+        .per_project
+        .iter()
+        .map(|(project, d)| (colors(project.as_deref()), *d))
+        .collect::<Vec<_>>();
+    share_row(&shares, width)
 }
 
 /// A duration in bold `color`.
@@ -4467,20 +4846,20 @@ mod tests {
     #[test]
     fn projects_sharing_a_preferred_color_get_distinct_ones_on_the_same_day() {
         let mut t = TestApp::new();
-        // Ranks 0..=9: "p2" and "p10" both prefer the palette's third color.
-        t.app.project_order = (0..10).map(|i| format!("p{i}")).collect();
+        // Ranks 0..=19: "p2" and "p18" both prefer the palette's third color.
+        t.app.project_order = (0..20).map(|i| format!("p{i}")).collect();
         let p = theme::PROJECT_PALETTE;
         // Alone on a day, each gets its usual color.
-        assert_eq!(t.app.project_color(Some("p10")), p[2]);
+        assert_eq!(t.app.project_color(Some("p18")), p[2]);
         let start = chrono::Local::now() - chrono::Duration::hours(2);
-        for name in ["p10", "p2"] {
+        for name in ["p18", "p2"] {
             let mut s = finished_session(start, start + chrono::Duration::minutes(30), None);
             s.project = Some(name.into());
             t.app.today_sessions.push(s);
         }
         // Together, the older keeps it and the other moves on.
         assert_eq!(t.app.project_color(Some("p2")), p[2]);
-        assert_eq!(t.app.project_color(Some("p10")), p[3]);
+        assert_eq!(t.app.project_color(Some("p18")), p[3]);
     }
 
     #[test]
@@ -4750,6 +5129,14 @@ mod tests {
                 Screen::Palette(PaletteForm {
                     input: format!("/{}", "x".repeat(100)),
                     selection: 0,
+                }),
+                Screen::Period(PeriodView {
+                    period: Period::Month,
+                    offset: 0,
+                    first: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+                    last: chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
+                    sessions: Vec::new(),
+                    scroll: 99,
                 }),
             ]
         };
@@ -5269,12 +5656,14 @@ mod tests {
         let buf = render(&t.app);
         row_with(&buf, "Commands");
         row_with(&buf, &format!("{} commands", COMMANDS.len()));
-        let first = row_with(&buf, "start");
-        assert!(line(&buf, first).contains("start a session"));
+        // The views first (they have no key), then the actions with theirs.
+        let first = row_with(&buf, "weekly");
+        assert!(line(&buf, first).contains("this week, by day"));
+        assert!(line(&buf, row_with(&buf, "start")).contains("start a session      s"));
         // Names line up under the typed text after "› /", the pick marked.
-        assert_eq!(col_of(&buf, first, "start"), col_of(&buf, 8, "/") + 1);
+        assert_eq!(col_of(&buf, first, "weekly"), col_of(&buf, 8, "/") + 1);
         assert!(
-            line(&buf, first).contains(">start"),
+            line(&buf, first).contains(">weekly"),
             "{}",
             line(&buf, first)
         );
@@ -5323,11 +5712,11 @@ mod tests {
         t.key(KeyCode::Down);
         t.key(KeyCode::Down);
         t.key(KeyCode::Up);
-        t.key(KeyCode::Tab); // the second command: end
-        assert_eq!(palette_input(&t), "/end");
+        t.key(KeyCode::Tab); // the second command
+        assert_eq!(palette_input(&t), "/monthly");
         t.key(KeyCode::Up); // stays at the top
         t.key(KeyCode::Enter);
-        assert!(matches!(t.app.screen, Screen::Main));
+        assert!(matches!(&t.app.screen, Screen::Period(v) if v.period == Period::Month));
     }
 
     #[test]
@@ -5358,6 +5747,113 @@ mod tests {
         t.key(KeyCode::Char('/'));
         t.typed("quit");
         assert!(t.app.handle_key(press(KeyCode::Enter)));
+    }
+
+    // --- weeks and months -------------------------------------------------
+
+    fn period_view(t: &TestApp) -> &PeriodView {
+        match &t.app.screen {
+            Screen::Period(view) => view,
+            _ => panic!("no period on screen"),
+        }
+    }
+
+    fn open(t: &mut TestApp, command: &str) {
+        t.key(KeyCode::Char('/'));
+        t.typed(command);
+        t.key(KeyCode::Enter);
+    }
+
+    #[test]
+    fn weekly_shows_this_week_day_by_day() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", Some("alpha".into()), None);
+        backdate(&mut t, 30);
+        t.key(KeyCode::Char('e'));
+        open(&mut t, "weekly");
+
+        let today = chrono::Local::now().date_naive();
+        let (first, last) = Period::Week.days(0, today);
+        let view = period_view(&t);
+        assert_eq!((view.first, view.last, view.offset), (first, last, 0));
+        let buf = render(&t.app);
+        assert!(line(&buf, 1).contains(&Period::Week.title(first, last)));
+        // Monday to Sunday, one row each, from the box's first row.
+        for (i, day) in first.iter_days().take(7).enumerate() {
+            let label = day.format("%a %-d").to_string();
+            assert!(
+                line_from(&buf, 2 + i as u16, 1).starts_with(&label),
+                "{label}"
+            );
+        }
+        // Today: the accent label, its timeline in the activity's color,
+        // its time.
+        // (By position: the header line names today too.)
+        let y = 2 + (today - first).num_days() as u16;
+        assert_eq!(buf[(1, y)].fg, Color::Cyan);
+        assert!(line(&buf, y).contains("30m"));
+        assert!((11..67).any(|x| buf[(x, y)].fg == Color::LightBlue));
+        // Then the totals.
+        assert!(line(&buf, row_with(&buf, "Total ")).contains("tracked 30m · work 30m · 1 day"));
+        row_with(&buf, "Activity  ");
+        row_with(&buf, "Project   ");
+        assert_eq!(
+            line(&buf, RENDER_HEIGHT - 1),
+            "[←→] previous/next  [w/m] week/month  [↑↓] scroll  [Esc] back"
+        );
+    }
+
+    #[test]
+    fn arrows_page_through_weeks_but_not_into_the_future() {
+        let mut t = TestApp::new();
+        open(&mut t, "weekly");
+        t.key(KeyCode::Right); // already the current week
+        assert_eq!(period_view(&t).offset, 0);
+        t.key(KeyCode::Left);
+        t.key(KeyCode::Char('h'));
+        let view = period_view(&t);
+        assert_eq!(view.offset, -2);
+        let today = chrono::Local::now().date_naive();
+        assert_eq!(view.first, Period::Week.days(-2, today).0);
+        let buf = render(&t.app);
+        row_with(&buf, "Nothing tracked this week.");
+        t.key(KeyCode::Char('l'));
+        assert_eq!(period_view(&t).offset, -1);
+        t.key(KeyCode::Esc);
+        assert!(matches!(t.app.screen, Screen::Main));
+    }
+
+    #[test]
+    fn monthly_has_a_row_per_day_in_weeks_and_scrolls() {
+        let mut t = TestApp::new();
+        open(&mut t, "monthly");
+        let today = chrono::Local::now().date_naive();
+        let (first, last) = Period::Month.days(0, today);
+        let view = period_view(&t);
+        assert_eq!(view.period, Period::Month);
+        let lines = t.app.period_lines(view, 78);
+        let labels = lines
+            .iter()
+            .filter_map(|l| l.spans.first())
+            .map(|span| span.content.trim().to_string())
+            .collect::<Vec<_>>();
+        for day in first.iter_days().take_while(|d| *d <= last) {
+            let label = day.format("%a %-d").to_string();
+            assert_eq!(labels.iter().filter(|l| **l == label).count(), 1, "{label}");
+        }
+        // More than fits: it scrolls, and not past its end.
+        t.key(KeyCode::End);
+        let end = period_view(&t).scroll;
+        assert!(end > 0);
+        t.key(KeyCode::Down);
+        assert_eq!(period_view(&t).scroll, end);
+        t.key(KeyCode::Home);
+        assert_eq!(period_view(&t).scroll, 0);
+        // w switches to this week; q goes back too.
+        t.key(KeyCode::Char('w'));
+        assert_eq!(period_view(&t).period, Period::Week);
+        t.key(KeyCode::Char('q'));
+        assert!(matches!(t.app.screen, Screen::Main));
     }
 
     fn activity(t: &TestApp) -> Option<&str> {

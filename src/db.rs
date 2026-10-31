@@ -264,6 +264,31 @@ impl Db {
         rows.into_iter().map(row_to_session).collect()
     }
 
+    /// Sessions started (in local time) on the days from `first` to
+    /// `last`, both included, earliest first: a week's or a month's.
+    pub fn sessions_between(
+        &self,
+        first: chrono::NaiveDate,
+        last: chrono::NaiveDate,
+    ) -> Result<Vec<Session>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions
+                 WHERE date(started_at, 'localtime') BETWEEN ?1 AND ?2
+                 ORDER BY started_at, id"
+            ))
+            .map_err(DbError::Sqlite)?;
+        let day = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+        let rows = stmt
+            .query_map(params![day(first), day(last)], read_session_row)
+            .map_err(DbError::Sqlite)?;
+        let rows = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::Sqlite)?;
+        rows.into_iter().map(row_to_session).collect()
+    }
+
     pub fn recent_notes(&self, project: &str, task: &str) -> Result<Vec<String>, DbError> {
         let mut stmt = self
             .conn
@@ -516,6 +541,33 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn sessions_between_takes_the_local_days_given() {
+        use chrono::TimeZone;
+        let t = TmpDb::new();
+        let at = |day, h| {
+            chrono::Local
+                .with_ymd_and_hms(2026, 10, day, h, 0, 0)
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        for (day, activity) in [(25, "Before"), (27, "Late"), (26, "Early"), (28, "After")] {
+            t.db.insert_finished_session(activity, at(day, 9), at(day, 10))
+                .unwrap();
+        }
+        let day = |d| chrono::NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+        let sessions = t.db.sessions_between(day(26), day(27)).unwrap();
+        let activities = sessions
+            .iter()
+            .map(|s| s.activity.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            activities,
+            ["Early", "Late"],
+            "both days included, earliest first"
+        );
     }
 
     #[test]

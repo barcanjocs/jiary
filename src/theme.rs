@@ -112,10 +112,11 @@ pub const NONE: Style = Style::new().fg(MUTED).add_modifier(Modifier::ITALIC);
 pub const TIME: Style = Style::new().fg(ACCENT).add_modifier(Modifier::BOLD);
 
 /// Project colors, from the 256-color palette: hand-picked hues that stay
-/// apart from each other and from the activity, focus and accent colors,
-/// readable on dark and light backgrounds. Projects take them in the order
-/// they were first used (see `project_color`).
-pub const PROJECT_PALETTE: [Color; 8] = [
+/// apart from the activity, focus and accent colors, readable on dark and
+/// light backgrounds. Projects take them in the order they were first used
+/// (see `project_colors`). The first eight are the most distinct, enough
+/// for a day; the rest are for weeks and months, where more projects show.
+pub const PROJECT_PALETTE: [Color; 16] = [
     Color::Indexed(208), // orange
     Color::Indexed(141), // lavender
     Color::Indexed(211), // pink
@@ -124,6 +125,14 @@ pub const PROJECT_PALETTE: [Color; 8] = [
     Color::Indexed(108), // sage
     Color::Indexed(139), // mauve
     Color::Indexed(173), // copper
+    Color::Indexed(73),  // cadet teal
+    Color::Indexed(168), // raspberry
+    Color::Indexed(98),  // violet
+    Color::Indexed(142), // olive
+    Color::Indexed(180), // tan
+    Color::Indexed(96),  // plum
+    Color::Indexed(125), // wine
+    Color::Indexed(137), // light brown
 ];
 /// Time without a project.
 pub const NO_PROJECT: Color = MUTED;
@@ -186,13 +195,13 @@ mod tests {
         let p = PROJECT_PALETTE;
         // No clash: each by its rank.
         assert_eq!(project_colors(&[0, 1, 5]), [p[0], p[1], p[5]]);
-        // Ranks 2 and 10 both prefer p[2]: the older keeps it, whatever
+        // Ranks 2 and 18 both prefer p[2]: the older keeps it, whatever
         // the order given, and the other takes the next free one.
-        assert_eq!(project_colors(&[10, 2]), [p[3], p[2]]);
-        assert_eq!(project_colors(&[2, 3, 10]), [p[2], p[3], p[4]]);
+        assert_eq!(project_colors(&[18, 2]), [p[3], p[2]]);
+        assert_eq!(project_colors(&[2, 3, 18]), [p[2], p[3], p[4]]);
         // Past the palette, colors repeat (preferred again).
-        let ranks = (0..9).collect::<Vec<_>>();
-        assert_eq!(project_colors(&ranks)[8], p[0]);
+        let ranks = (0..17).collect::<Vec<_>>();
+        assert_eq!(project_colors(&ranks)[16], p[0]);
     }
 
     #[test]

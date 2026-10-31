@@ -70,13 +70,18 @@ impl DaySummary {
     }
 }
 
-/// Summarizes `today` (the day's sessions as loaded from the db). The
+/// Summarizes `today` (the day's sessions as loaded from the db; or any
+/// period's, for the longer views). The
 /// running session's row is replaced by `active`, the in-memory copy, which
 /// is kept current between reloads (interruptions, notes), and is counted up
 /// to `now`.
-pub fn summarize(today: &[Session], active: Option<&Session>, now: DateTime<Utc>) -> DaySummary {
+pub fn summarize<'a>(
+    today: impl IntoIterator<Item = &'a Session>,
+    active: Option<&'a Session>,
+    now: DateTime<Utc>,
+) -> DaySummary {
     let sessions = today
-        .iter()
+        .into_iter()
         .filter(|s| s.ended_at.is_some())
         .chain(active)
         .collect::<Vec<_>>();

@@ -66,6 +66,8 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
 - **`idle.rs`** — `system_idle()`: time since the last keyboard or mouse
   input system-wide, from `ioreg -c IOHIDSystem` on macOS or `xprintidle` on
   Linux, `None` elsewhere or when the tool fails.
+- **`period.rs`** — `Period` (week, month): which days the one `offset`
+  periods from the current one covers, and its title. Pure date arithmetic.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
   activity and project, focus, interruptions, disruptions, breaks, span and
   gaps.
@@ -78,9 +80,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   timestamps already parsed to `DateTime<Utc>`. Nothing else.
 - **`theme.rs`** — the 16-color palette (`ACCENT`, `MUTED`, `GOOD`, `OK`,
   `BAD`), a color per kind of activity (`activity_color`: work, meeting,
-  break, disruption), the project palette (`PROJECT_PALETTE`: 8
-  hand-picked 256-color hues, apart from each other and from the activity,
-  focus and accent colors; `NO_PROJECT` gray) and shared styles (`TITLE`,
+  break, disruption), the project palette (`PROJECT_PALETTE`: 16
+  hand-picked 256-color hues, the first 8 the most distinct, all apart
+  from the activity, focus and accent colors; `NO_PROJECT` gray) and shared styles (`TITLE`,
   `DIMMED`, `VALUE`, `TIME`, `NONE`, `ERROR`, `kv()`, `activity()`,
   `focus_badge()`, `picker_symbol()`). All widgets take their styles from
   here so the look is tweaked in one place. Everything but projects uses
@@ -404,8 +406,36 @@ for an empty query; ties keep the list's order). The modal reuses the
 start form's layout: a dimmed count of the matches in the tabs row, the
 input, then the matches as `name  description  key`, indented two columns
 so names sit under the typed name, with the pick highlighted and kept in
-view by `ListState`. Views with no key of their own (the coming `/weekly`
-and `/monthly`) will need commands that run something other than a key.
+view by `ListState`. A command's `Action` is either a main-screen key
+(`Action::Key`) or a view with no key of its own (`Action::View`:
+`/weekly`, `/monthly`), listed first.
+
+### Weeks and months
+
+`Screen::Period(PeriodView)`: the period (`period.rs`: `Period::Week` runs
+Monday to Sunday, `Period::Month` the calendar month; `days(offset,
+today)` gives the first and last day `offset` periods from the current
+one, `title` names it), its offset, its days, and its sessions as loaded
+by `open_period` (`db.sessions_between`: started, in local time, on one
+of its days), since draw never queries the db. `handle_period`: ←→ / h l
+reopen the period before or after (never past the current one), w / m
+this week or month, the scroll keys move `scroll` (clamped to
+`period_max_scroll`), Esc / q back to Main.
+
+`period_lines` draws it: a row per day (a month adds a blank row after
+each Sunday) with the day's label (accent for today, dimmed when nothing
+was tracked), its timeline (`timeline_row` over that day's `summarize`)
+on an hour axis shared by all the days (the earliest start's hour to the
+latest end's, as times of day; 9–17 when empty) and, in
+`DAY_TOTAL_WIDTH`, its tracked time and focus average; the axis's hours
+under them; then the totals over the whole period, built from the same
+pieces as today's summary (`time_split_items` plus the days tracked and
+the average per day, `activity_bar` / `activity_items`, `project_bar` /
+`project_items`, `focus_items`), bars as wide as the timelines. The
+running session counts through its in-memory copy, as today. Projects get
+colors distinct within the period (`theme::project_colors` over its
+projects). `draw_period` frames it in an accent box titled with the
+period and scrolls it, with a scrollbar on the border.
 
 ### Add-note form
 

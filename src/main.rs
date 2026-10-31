@@ -4,6 +4,7 @@ mod db;
 mod idle;
 mod layout;
 mod mascot;
+mod period;
 mod session;
 mod summary;
 mod theme;

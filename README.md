@@ -72,7 +72,13 @@ Section sizes and collapsed sections are remembered between runs, in `layout.con
 
 ### Command palette
 
-Press `/` to open the command palette: every action by name, with what it does and its key. Type to filter (fuzzy, so `/und` finds `undo`), `↑`/`↓` to pick, `Tab` to complete the name, `Enter` to run it, `Esc` (or Backspace past the `/`) to close. A command does exactly what its key does, so the palette doubles as a way to learn the keys.
+Press `/` to open the command palette: every action by name, with what it does and its key. Type to filter (fuzzy, so `/und` finds `undo`), `↑`/`↓` to pick, `Tab` to complete the name, `Enter` to run it, `Esc` (or Backspace past the `/`) to close. A command does exactly what its key does, so the palette doubles as a way to learn the keys. The palette also opens the longer views, which have no key of their own.
+
+### Weeks and months
+
+`/weekly` and `/monthly` show the current calendar week (Monday to Sunday) or month, a row per day: the day's timeline in activity colors, on an hour axis all the days share so they line up, with the day's tracked time and focus average at the end. Under the days come the period's totals, like today's summary: tracked time split into work, breaks and disruptions, the days you tracked and the average per day, the activity and project bars, and focus. A month is grouped by week and scrolls.
+
+`←`/`→` (or `h`/`l`) page to the week or month before or after, `w` and `m` switch to this week or this month, `↑`/`↓` (or `j`/`k`), `PgUp`/`PgDn` and `Home`/`End` scroll, and `Esc` (or `q`) goes back.
 
 ### Starting a session
 
