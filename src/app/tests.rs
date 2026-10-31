@@ -2572,7 +2572,7 @@ fn the_year_grid_stacks_two_days_per_cell() {
     ];
     let grid = year_focus_grid(&days, day(1, 1), day(12, 31), day(2, 1));
     assert_eq!(grid.len(), 5, "month names, then four weekday-pair rows");
-    assert!(grid[0][0].content.starts_with("      Jan"));
+    assert!(grid[0][0].content.starts_with("       Jan"));
     // Each row names both its days, top then bottom.
     let labels = grid[1..]
         .iter()
@@ -2601,14 +2601,19 @@ fn the_year_grid_stacks_two_days_per_cell() {
     assert_eq!(colors(3, 4), ("▄", Some(theme::focus_gradient(2.0)), None));
     assert_eq!(colors(4, 4), (" ", None, None));
     assert_eq!(colors(4, 5), ("▀", Some(theme::FOCUS_RAMP[8]), None));
-    // So each month's name sits over its own block.
-    assert!(grid[0][0].content.starts_with("      Jan  Feb"));
+    // So each month's name sits centered over its own block: January's and
+    // February's are five columns wide, from columns 0 and 5.
+    assert!(
+        grid[0][0].content.starts_with("       Jan  Feb"),
+        "{:?}",
+        grid[0][0].content
+    );
     // May 2026 ends on a Sunday: no split week sets it apart from June, so
     // a blank column does (May's five weeks, the gap, then June).
     let header = grid[0][0].content.as_ref();
     let may = header.find("May").unwrap();
     assert_eq!(header.find("Jun").unwrap(), may + 6, "{header}");
-    let gap = may - 6 + 5;
+    let gap = (may - 1) - 6 + 5; // May's name is centered over its 5 columns
     for row in &grid[1..] {
         assert_eq!(row[1 + gap].content, " ");
     }

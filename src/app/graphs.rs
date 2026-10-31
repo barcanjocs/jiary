@@ -225,7 +225,7 @@ pub(super) fn focus_grid(
 /// of each month, the weeks split where a month ends (so each month is a
 /// block of its own and the week it shares with the next shows its days
 /// in both, blank where the other month's are; a blank column after a
-/// month that ends on a Sunday), the month names over their
+/// month that ends on a Sunday), the month names centered over their
 /// blocks, and the weekdays two to a row, labelled with both ("Mo Tu"),
 /// each day half a row tall (`▀`: the top day in front, the bottom one
 /// behind), so the squares stay square without gaps. Colors as in
@@ -242,8 +242,8 @@ pub(super) fn year_focus_grid(
     // The columns: each month's weeks, Monday to Sunday, holding only that
     // month's days (`None` for the other month's and outside the period).
     let mut columns: Vec<[Option<chrono::NaiveDate>; 7]> = Vec::new();
-    let mut header = vec![' '; WEEKDAY];
-    let mut free = WEEKDAY;
+    // Each month's name, the column its block starts at and its width.
+    let mut labels = Vec::new();
     for month_start in first
         .iter_days()
         .take_while(|d| *d <= last)
@@ -252,13 +252,7 @@ pub(super) fn year_focus_grid(
         let in_month = |day: chrono::NaiveDate| {
             day.month() == month_start.month() && day.year() == month_start.year()
         };
-        let column = WEEKDAY + columns.len();
-        let name = month_start.format("%b").to_string();
-        header.resize(column, ' ');
-        if column >= free {
-            header.extend(name.chars());
-            free = column + name.len() + 1;
-        }
+        let start = columns.len();
         let mut monday = month_start
             - chrono::Duration::days(month_start.weekday().num_days_from_monday() as i64);
         while in_month(monday) || in_month(monday + chrono::Duration::days(6)) {
@@ -268,6 +262,11 @@ pub(super) fn year_focus_grid(
             }));
             monday += chrono::Duration::weeks(1);
         }
+        labels.push((
+            month_start.format("%b").to_string(),
+            start,
+            columns.len() - start,
+        ));
         // A month ending on a Sunday has no split week to set it apart from
         // the next one, so a blank column does.
         if columns.last().is_some_and(|week| week[6].is_some()) {
@@ -280,11 +279,15 @@ pub(super) fn year_focus_grid(
     {
         columns.pop();
     }
-    header.resize(WEEKDAY + columns.len(), ' ');
-    let header = header
-        .into_iter()
-        .take(WEEKDAY + columns.len())
-        .collect::<String>();
+    // Each name centered over its block (blocks are at least 4 wide).
+    let mut header = vec![' '; WEEKDAY + columns.len()];
+    for (name, start, width) in labels {
+        let at = WEEKDAY + start + width.saturating_sub(name.len()) / 2;
+        for (cell, c) in header.iter_mut().skip(at).zip(name.chars()) {
+            *cell = c;
+        }
+    }
+    let header = header.into_iter().collect::<String>();
     let mut rows = vec![vec![Span::styled(header, theme::DIMMED)]];
 
     let color = |day: Option<chrono::NaiveDate>| -> Option<Color> {
