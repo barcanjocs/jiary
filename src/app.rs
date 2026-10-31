@@ -107,6 +107,9 @@ struct Undo {
     started: Option<i64>,
 }
 
+/// How far `[` and `]` move the active session's start.
+const START_STEP: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+
 /// How many recent activity/project/task picks the start form offers.
 const RECENT_PICKS: usize = 5;
 
@@ -390,10 +393,7 @@ impl App {
                 self.clear_error();
                 self.rating = None;
                 self.react(Reaction::Rated(focus));
-                match self.db.sessions_for_today() {
-                    Ok(sessions) => self.today_sessions = sessions,
-                    Err(e) => self.set_error(e),
-                }
+                self.reload_today();
             }
         }
     }
@@ -468,6 +468,64 @@ impl App {
             Screen::AddNote(_) => self.handle_add_note(key),
         }
         false
+    }
+
+    // --- moving the start ---------------------------------------------------
+
+    /// Moves the active session's start by `delta`, for a session started
+    /// late (or early). It stays in the past, and doesn't run into the
+    /// session before it: when that one ended as this one started (a
+    /// switch), the boundary between them moves instead, leaving it at
+    /// least a minute. After a gap the start stops at that session's end;
+    /// from there the two touch, so pressing on moves both.
+    fn move_start(&mut self, delta: chrono::TimeDelta) {
+        let Some(session) = self.active_session.as_ref() else {
+            return;
+        };
+        let (id, started) = (session.id, session.started_at);
+        let previous = match self.db.previous_session(id) {
+            Ok(previous) => previous,
+            Err(e) => return self.set_error(e),
+        };
+        let mut start = (started + delta).min(Utc::now());
+        let mut moved_end = None;
+        if let Some(previous) = previous
+            && let Some(end) = previous.ended_at
+        {
+            if (started - end).num_seconds().abs() <= 2 {
+                start = start.max(previous.started_at + chrono::TimeDelta::minutes(1));
+                moved_end = Some(previous.id);
+            } else {
+                start = start.max(end);
+            }
+        }
+        if start == started {
+            return;
+        }
+        let result = match moved_end {
+            Some(previous) => self.db.set_ended_at(previous, start),
+            None => Ok(()),
+        }
+        .and_then(|()| self.db.set_started_at(id, start));
+        match result {
+            Err(e) => self.set_error(e),
+            Ok(()) => {
+                self.clear_error();
+                if let Some(session) = &mut self.active_session {
+                    session.started_at = start;
+                }
+                self.reload_today();
+            }
+        }
+    }
+
+    /// Reloads today's sessions only (a rating or a moved start), keeping
+    /// the caption and scroll positions.
+    fn reload_today(&mut self) {
+        match self.db.sessions_for_today() {
+            Ok(sessions) => self.today_sessions = sessions,
+            Err(e) => self.set_error(e),
+        }
     }
     /// Handles keys for the main screen. Returns true if the app should quit.
     fn handle_main(&mut self, key: KeyCode) -> bool {
@@ -596,6 +654,8 @@ impl App {
             }
             KeyCode::Char(c @ '1'..='3') => self.rate(c as i32 - '0' as i32),
             KeyCode::Char('u') => self.undo(),
+            KeyCode::Char('[') => self.move_start(-START_STEP),
+            KeyCode::Char(']') => self.move_start(START_STEP),
             _ => {}
         };
         false
@@ -1483,10 +1543,16 @@ impl App {
         );
 
         let mut lines = vec![
-            Line::from(Span::styled(
-                format!("{h:02}:{m:02}:{s:02}"),
-                Style::new().add_modifier(Modifier::BOLD),
-            )),
+            Line::from(vec![
+                Span::styled(
+                    format!("{h:02}:{m:02}:{s:02}"),
+                    Style::new().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  since {}", fmt_time(&session.started_at)),
+                    theme::DIMMED,
+                ),
+            ]),
             theme::kv("Project", session.project.as_deref().unwrap_or("(none)")),
             theme::kv("Task", session.task.as_deref().unwrap_or("(none)")),
             theme::kv("Activity", session.activity.as_str()),
@@ -2120,6 +2186,7 @@ fn draw_help(frame: &mut Frame, content: Rect) {
             ("r", "resume after d, b or m"),
             ("1 / 2 / 3", "rate focus, just after"),
             ("u", "undo last start or end"),
+            ("[ / ]", "move start by 5 min"),
             ("q / Ctrl+C", "quit"),
         ],
     )];
@@ -3904,6 +3971,22 @@ mod tests {
         assert!(t.app.today_sessions.is_empty());
     }
 
+    /// Moves the active session's start `minutes` into the past, in the db
+    /// and in memory; returns the new start.
+    fn backdate(t: &mut TestApp, minutes: i64) -> chrono::DateTime<Utc> {
+        let session = t.app.active_session.as_mut().unwrap();
+        session.started_at -= chrono::TimeDelta::minutes(minutes);
+        t.app
+            .db
+            .set_started_at(session.id, session.started_at)
+            .unwrap();
+        session.started_at
+    }
+
+    fn started_at(t: &TestApp) -> chrono::DateTime<Utc> {
+        t.app.active_session.as_ref().unwrap().started_at
+    }
+
     #[test]
     fn recent_picks_start_with_one_key() {
         let mut t = TestApp::new();
@@ -3929,6 +4012,66 @@ mod tests {
         t.key(KeyCode::Char('s'));
         t.typed("v2");
         assert_eq!(t.form().activity.input, "v2");
+    }
+
+    #[test]
+    fn brackets_move_the_start_but_never_into_the_future() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        let start = backdate(&mut t, 20);
+        t.key(KeyCode::Char('['));
+        assert_eq!(started_at(&t), start - START_STEP);
+        assert_eq!(t.app.today_sessions[0].started_at, start - START_STEP);
+        for _ in 0..10 {
+            t.key(KeyCode::Char(']'));
+        }
+        assert!((Utc::now() - started_at(&t)).num_seconds() < 2);
+    }
+
+    #[test]
+    fn moving_the_start_after_a_switch_moves_the_switch() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        let reading_start = backdate(&mut t, 60);
+        t.key(KeyCode::Char('m'));
+        let meeting_start = started_at(&t);
+        t.key(KeyCode::Char('['));
+        t.key(KeyCode::Char('['));
+        assert_eq!(started_at(&t), meeting_start - START_STEP * 2);
+        assert_eq!(t.app.today_sessions[1].ended_at, Some(started_at(&t)));
+        // The reading keeps at least a minute.
+        for _ in 0..20 {
+            t.key(KeyCode::Char('['));
+        }
+        assert_eq!(
+            started_at(&t),
+            reading_start + chrono::TimeDelta::minutes(1)
+        );
+    }
+
+    #[test]
+    fn moving_the_start_stops_once_at_the_end_of_a_session_before_a_gap() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        backdate(&mut t, 60);
+        t.key(KeyCode::Char('e'));
+        let reading = t.app.today_sessions[0].id;
+        let reading_end = Utc::now() - chrono::TimeDelta::minutes(12);
+        t.app.db.set_ended_at(reading, reading_end).unwrap();
+        t.app.start_session("Writing", None, None);
+        for _ in 0..3 {
+            t.key(KeyCode::Char('['));
+        }
+        let ended = |t: &TestApp| t.app.today_sessions[1].ended_at.unwrap().timestamp();
+        assert_eq!(started_at(&t).timestamp(), reading_end.timestamp());
+        assert_eq!(ended(&t), reading_end.timestamp());
+        // Now they touch: pressing on moves both, as after a switch.
+        t.key(KeyCode::Char('['));
+        assert_eq!(
+            started_at(&t).timestamp(),
+            (reading_end - START_STEP).timestamp()
+        );
+        assert_eq!(ended(&t), started_at(&t).timestamp());
     }
 
     fn activity(t: &TestApp) -> Option<&str> {

@@ -33,6 +33,7 @@ On first run, a database is created at:
 | `e` | End the active session |
 | `1` `2` `3` | Rate your focus, within 5 seconds of a session ending |
 | `u` | Undo the last start or end |
+| `[` / `]` | Move the active session's start 5 minutes earlier / later |
 | `n` | Add a note to the active session |
 | `i` | Increment interruption counter |
 | `d` | Stop current session, start a Disruption session (no-op during one) |
@@ -121,6 +122,10 @@ Or ignore it and carry on: starting the next thing is fine, and the session simp
 Ended by mistake? `u` undoes the last start or end: the session you ended is running again (its rating cleared), and any session that replaced it is removed.
 
 The rating is shown in the daily history as `F1`–`F3`, or `F-` if not rated.
+
+### Fixing the times
+
+Started late? `[` moves the running session's start 5 minutes earlier, and `]` 5 minutes later. It never goes into the future. If you switched from another session (pressed `s`, `d`, `b`, `m` or `r`), the switch moves with it, so the session before ends earlier too (keeping at least a minute). If there was a gap, the start stops at the end of the session before; pressing on from there moves both.
 
 ### Interruptions
 

@@ -328,6 +328,17 @@ alike:
   Undo also stands in for the old end-form notes step: `e`, `u`, `n`, `e`
   adds a last note.
 
+### Moving the start
+
+`[` / `]` (`move_start`) move the active session's start by `START_STEP`
+(5 min), capped at now. The session just before it (`db.previous_session`)
+limits it: when that one ended within 2 s of this start (a switch), the
+boundary moves, so its end moves too (`db.set_ended_at`), leaving it at
+least a minute; otherwise the start stops at its end. A start stopped there
+touches it, so the next press moves both. Only today's list is reloaded
+(`reload_today`), keeping the caption and scroll. The timer row shows
+`since HH:MM` beside the elapsed time, so the move is visible.
+
 ### Add-note form
 
 Single (wrapping) input; Enter appends (if non-empty) and returns to Main, Esc

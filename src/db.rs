@@ -143,6 +143,47 @@ impl Db {
         Ok(())
     }
 
+    /// Moves a session's start.
+    pub fn set_started_at(&self, id: i64, at: DateTime<Utc>) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE sessions SET started_at = ?1 WHERE id = ?2",
+                params![stamp(at), id],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// Moves an ended session's end.
+    pub fn set_ended_at(&self, id: i64, at: DateTime<Utc>) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE sessions SET ended_at = ?1 WHERE id = ?2 AND ended_at IS NOT NULL",
+                params![stamp(at), id],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// The session just before session `id` (the latest one started before
+    /// it), if any.
+    pub fn previous_session(&self, id: i64) -> Result<Option<Session>, DbError> {
+        let result = self.conn.query_row(
+            &format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions
+                 WHERE id != ?1 AND started_at <= (SELECT started_at FROM sessions WHERE id = ?1)
+                 ORDER BY started_at DESC, id DESC LIMIT 1"
+            ),
+            params![id],
+            read_session_row,
+        );
+        match result {
+            Ok(row) => Ok(Some(row_to_session(row)?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(DbError::Sqlite(e)),
+        }
+    }
+
     /// Rates an ended session after the fact (the rating window after it
     /// ends).
     pub fn set_focus(&self, id: i64, focus: i32) -> Result<(), DbError> {
@@ -326,6 +367,11 @@ impl Db {
             Err(e) => Err(DbError::Sqlite(e)),
         }
     }
+}
+
+/// A timestamp as stored: RFC 3339 to the second with an explicit offset.
+fn stamp(at: DateTime<Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
 }
 
 /// A session row with timestamps still as raw strings. Row mappers can only
