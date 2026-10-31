@@ -1,8 +1,9 @@
 use super::cat::{CAT_BLOCK_HEIGHT, cat_fits};
 use super::graphs::{GRAPH_ROWS, MIN_GRAPH_WIDTH};
 use super::items::SUMMARY_LABEL_WIDTH;
+use super::main_screen::text_width;
 use super::text::{fmt_hms, plural};
-use super::{App, Screen, chrome_layout, text_width};
+use super::{App, Screen, chrome_layout};
 use crate::layout::{Areas, ContentHeights, Section};
 use crate::theme;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};

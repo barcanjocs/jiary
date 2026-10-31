@@ -4,6 +4,7 @@ use super::graphs::{
     focus_grid, focus_legend, focus_row, half_cells, hour_labels, item_width, share_row,
     start_of_hour, timeline_row, year_focus_grid,
 };
+use super::main_screen::START_STEP;
 use super::modal::START_MODAL_HEIGHT;
 use super::palette::{COMMANDS, PaletteForm, palette_matches};
 use super::period_view::PeriodView;
@@ -13,6 +14,7 @@ use crate::db::Db;
 use crate::idle;
 use crate::mascot::Mood;
 use crate::period::Period;
+use crate::summary::summarize;
 use chrono::TimeZone;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
