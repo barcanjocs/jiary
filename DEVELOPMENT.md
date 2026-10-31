@@ -160,6 +160,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/layout.rs` — main-screen section geometry (`LayoutPrefs::resolve`,
   resizing with clamping) and the `layout.conf` file. Pure; unit tests at
   the bottom.
+- `src/mascot.rs` — the cat: half-block pixel-art sprites and their
+  time-based frame schedule. Pure; unit tests at the bottom.
 - `src/summary.rs` — `summarize`: the day summary over in-memory sessions.
   Pure; unit tests at the bottom.
 - `src/theme.rs` — palette (16 named colors) and shared style helpers; all

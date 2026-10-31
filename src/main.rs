@@ -1,6 +1,7 @@
 mod app;
 mod db;
 mod layout;
+mod mascot;
 mod session;
 mod summary;
 mod theme;

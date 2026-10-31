@@ -12,6 +12,7 @@ use ratatui::widgets::{
 
 use crate::db::Db;
 use crate::layout::{Areas, ContentHeights, LayoutPrefs, Section};
+use crate::mascot;
 use crate::session::Session;
 use crate::summary::{DaySummary, summarize};
 use crate::theme;
@@ -1048,7 +1049,12 @@ impl App {
         let block = self.section_block(Section::Active);
         let inner = block.inner(areas.active);
         frame.render_widget(block, areas.active);
-        frame.render_widget(Paragraph::new(self.active_lines()), inner);
+        let (text_area, cat_area) = split_for_cat(inner);
+        frame.render_widget(Paragraph::new(self.active_lines()), text_area);
+        if let Some(cat_area) = cat_area {
+            let millis = Utc::now().timestamp_millis().max(0) as u64;
+            frame.render_widget(Paragraph::new(mascot::lines(millis)), cat_area);
+        }
 
         if self.layout.today_collapsed {
             self.draw_collapsed(frame, areas.today, Section::Today);
@@ -1521,6 +1527,29 @@ fn draw_suggestions(frame: &mut Frame, area: ratatui::layout::Rect, field: &Auto
             &mut ListState::default().with_selected(field.selection),
         );
     }
+}
+
+/// Splits the active section's interior into the session text and, when it
+/// fits, the cat on the right (top-aligned, one column in from the border).
+/// The cat is left out rather than squeezing the text below
+/// `MIN_TEXT_WIDTH` or being cut off vertically.
+fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>) {
+    const MIN_TEXT_WIDTH: u16 = 24;
+    let cat_columns = mascot::WIDTH + 2; // a gap on each side
+    if inner.width < MIN_TEXT_WIDTH + cat_columns || inner.height < mascot::HEIGHT {
+        return (inner, None);
+    }
+    let text = Rect {
+        width: inner.width - cat_columns,
+        ..inner
+    };
+    let cat = Rect::new(
+        inner.right() - mascot::WIDTH - 1,
+        inner.y,
+        mascot::WIDTH,
+        mascot::HEIGHT,
+    );
+    (text, Some(cat))
 }
 
 /// The global chrome: header row, content area, status row. Shared by `draw`
@@ -2639,6 +2668,41 @@ mod tests {
 
         let t = TestApp::new();
         assert_eq!(t.app.cursor_position((80, 24)), None); // main screen
+    }
+
+    // --- mascot -------------------------------------------------------------
+
+    #[test]
+    fn the_cat_sits_on_the_right_of_the_active_section() {
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 0));
+        let buf = render(&t.app);
+        // Inner area is columns 1–78; the 14-wide cat ends one column before
+        // the border, so its left edge is column 64. The left ear (same in
+        // every frame): full block, then a lower half beside it.
+        assert_eq!(buf[(65, 2)].symbol(), "█");
+        assert_eq!(buf[(65, 2)].fg, Color::Yellow);
+        assert_eq!(buf[(66, 2)].symbol(), "▄");
+        // The session text keeps the left side.
+        assert!(line(&buf, 3).starts_with("│Project  alpha"));
+    }
+
+    #[test]
+    fn the_cat_hides_when_the_section_is_too_small() {
+        // No session: the active section is one row tall.
+        let t = TestApp::new();
+        let buf = render(&t.app);
+        assert!((1..79).all(|x| buf[(x, 2)].fg != Color::Yellow));
+
+        // Too narrow to keep 24 columns of text beside it.
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::seconds(60), 0));
+        t.app.set_size((40, 24));
+        let backend = TestBackend::new(40, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| t.app.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        assert!((1..39).all(|x| (2..7).all(|y| buf[(x, y)].fg != Color::Yellow)));
     }
 
     // --- main screen sections ----------------------------------------------

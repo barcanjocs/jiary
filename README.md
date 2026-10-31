@@ -42,7 +42,7 @@ On first run, a database is created at:
 
 The main screen has three stacked sections:
 
-- **Active** (top) — the running session: timer, project, task, activity, interruptions and notes.
+- **Active** (top) — the running session: timer, project, task, activity, interruptions and notes, with a small pixel-art cat on the right (shown when the section has room for it).
 - **Today** (middle) — today's sessions, newest first. Scrollable.
 - **Summary** (bottom) — time per activity and per project, average focus, interruptions and disruptions, and the day's span with tracked time and gaps.
 

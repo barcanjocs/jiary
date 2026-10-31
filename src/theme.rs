@@ -7,6 +7,15 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+/// The cat mascot (an orange tabby): fur, forehead stripe, pink inner
+/// ears and nose, eyes and their shine. Readable on dark and light
+/// backgrounds alike.
+pub const CAT_FUR: Color = Color::Yellow;
+pub const CAT_STRIPE: Color = Color::Red;
+pub const CAT_PINK: Color = Color::LightRed;
+pub const CAT_EYE: Color = Color::Black;
+pub const CAT_SHINE: Color = Color::White;
+
 /// Accent: panel titles, timer, active tab, selected items.
 pub const ACCENT: Color = Color::Cyan;
 /// Secondary text: labels, key hints, notes, past data.

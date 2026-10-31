@@ -19,6 +19,7 @@ main.rs        event loop: size → draw → place cursor → poll(100 ms) → k
        ├─ Session  one db row with parsed timestamps (session.rs)
        ├─ LayoutPrefs  main-screen section geometry + layout file (layout.rs)
        ├─ summarize  day totals over in-memory sessions (summary.rs)
+       ├─ mascot  the cat's pixel-art frames + animation (mascot.rs)
        └─ theme  palette + shared style helpers    (theme.rs)
 ```
 
@@ -49,6 +50,9 @@ shared state — `Db`'s `Connection` is owned by `App` alone.
   pure geometry: `resolve` splits the content area into the three main-screen
   sections, `resize` / `set_*_height` move borders with clamping, plus the
   lenient `key=value` layout file (`parse`, `load`, `save`). No rendering.
+- **`mascot.rs`** — the cat: sprites as palette-character grids (two pixel
+  rows per terminal row), `render` to half-block `Line`s, and the frame
+  schedule (`lines(millis)`). Pure; colors come from `theme::CAT_*`.
 - **`summary.rs`** — `summarize(today, active, now) -> DaySummary`: time per
   activity and project, focus, interruptions, disruptions, span and gaps.
   Pure; computed from in-memory sessions every frame.
@@ -345,7 +349,24 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
 - **Active** (` ACTIVE `) — bold timer, dimmed label/value rows via
   `theme::kv`, interruptions red when > 0, cached previous notes, then the
   session's own notes as bullets; a dimmed hint when there is no session.
-  Never collapses.
+  Never collapses. The cat sits top-right (`split_for_cat`), one column in
+  from the border, and is left out when the section is shorter than the
+  sprite or the text would get under 24 columns.
+
+### The cat (`mascot.rs`)
+
+Pixel art drawn with half blocks: each sprite is 14×10 pixels (14×5 cells),
+each cell showing a top and a bottom pixel. `render` picks per cell: blank
+for two transparent pixels, `█` for two equal colors, `▀`/`▄` in the
+pixel's color when one half is transparent (the terminal background shows
+through), and `▀` with fg = top, bg = bottom otherwise. Palette characters
+map to `theme::CAT_*` (an orange tabby that reads on dark and light
+backgrounds).
+
+Animation is a schedule of (milliseconds, frame) steps looped by wall-clock
+time, so it runs at the same pace regardless of how often the app redraws
+(~10×/sec). All frames share one size so swapping them never shifts the
+layout. The idle loop is mostly still, with blinks and tail flicks.
 - **Today** (` ▾ TODAY · N sessions `) — timeline items, one per session
   (completed and the running one), newest first, separated by blank rows:
   bold time range + duration, a focus badge (`F1` red / `F2` yellow / `F3`
