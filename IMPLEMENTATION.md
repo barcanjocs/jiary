@@ -212,7 +212,6 @@ the process is an unopenable database (handled in `main.rs` before `App::new`).
 enum Screen {
     Main,
     StartSession(Box<StartSessionForm>),  // boxed: by far the largest variant
-    EndSession(EndSessionForm),
     AddNote(AddNoteForm),
 }
 ```
@@ -291,20 +290,29 @@ Steps: `Activity → Project → Task` (the tabs row shows progress).
   trigger's generic error instead of the real one), `start_session`, refresh,
   `refresh_suggestions`, return to Main.
 
-### End form
+### Ending, rating and undo
 
-Steps: `Notes → Focus`, or just `Notes` for breaks and disruptions
-(`session::asks_focus`): they aren't focused work, so there is no rating to
-ask for, and the modal shows no Focus tab.
+Ending a session has no form. `e` closes the session straight away
+(`close_active_session`), and every other way of ending one (starting a new
+session, a detour, `r`) goes through the same function, so they all behave
+alike:
 
-- Notes: Enter advances to Focus (the typed notes stay in the form), or, when
-  no rating is asked, commits right away.
-- Focus: `1`/`2`/`3` or Enter (no rating) commits.
-- Committing (`finish_ending`) appends the notes (if non-empty), then
-  `complete_active(focus)`, and triggers the cat's rating reaction when
-  there is a rating.
-- Esc at either step cancels: back to Main with the session still running and
-  nothing written, so an accidental `e` is harmless.
+- **Rating window.** When the closed session asks for focus
+  (`session::asks_focus`: not breaks or disruptions), `rating` holds its id
+  and end time. For `RATING_WINDOW` (5 s) after that, `1`/`2`/`3` rate it
+  (`rate` → `db.set_focus`) and play the cat's rating reaction. The window
+  is kept short on purpose, since a rating given right away is the honest
+  one. The status line leads with `[1/2/3] rate bad/ok/good Ns  [u] undo`
+  while it is open. Starting from nothing (`b` right after `e`) leaves the
+  window open; closing another session replaces it (and closes it for a
+  break or disruption).
+- **Undo.** `close_active_session` begins an `Undo` record of the change
+  (the id it ended, if any) and `start_session` adds the id it started. `u`
+  (`undo`) deletes the started session (`db.delete_session`), reopens the
+  ended one (`db.reopen_session`: `ended_at` and `focus` back to NULL), and
+  reloads the active session from the db. Only the last change can be undone.
+  Undo also stands in for the old end-form notes step: `e`, `u`, `n`, `e`
+  adds a last note.
 
 ### Add-note form
 
@@ -319,9 +327,8 @@ the UI believing a session ended.
 
 - `start_session(activity, project, task)` — `db.create_session`, whose
   returned `Session` becomes the active one.
-- `complete_active(focus)` — `db.complete_session(id, focus)`, restore on
-  error, then always `refresh_after_session_change`.
-- `close_active_session() -> bool` — completes with no rating. Returns `true`
+- `close_active_session() -> bool` — completes with no rating, starting the
+  undo record and the rating window (see *Ending, rating and undo*). Returns `true`
   when there was nothing to close or the close succeeded; on failure it
   restores `active_session`, records the error, and returns `false` so callers
   can abort (the start form uses this to avoid creating a second active
@@ -347,6 +354,7 @@ Main-screen flows built from these:
   keystrokes. Known limitation: the activity alone decides what is a detour,
   so a meeting started with `s` is skipped by `r` too; recording which
   session each detour interrupted would fix that (needs a schema change).
+- **`e` (end)** — `close_active_session`, then refresh.
 - **`i`** — `db.increment_interruptions` (guarded by `ended_at IS NULL` in
   SQL) plus the in-memory counter bump.
 
@@ -362,7 +370,8 @@ UI never jumps when an error appears or disappears.
   "today". The total is computed from in-memory sessions only: completed
   durations plus the active session's elapsed time.
 - **Status line** — the red `✗ <error>` when `error` is set, otherwise the
-  key hints for the current screen. This is the *only* place errors and hints
+  key hints for the current screen (led by the rating countdown and undo
+  while the rating window is open). This is the *only* place errors and hints
   are rendered.
 
 ### Main screen
@@ -497,7 +506,7 @@ current screen's value and placeholder) and the modal's inner width
 
 Modal structure: a `Block::bordered()` (rounded) with a titled accent span, a
 `Tabs` row marking the current step, then the step body (a wrapped input plus
-suggestion `List`, or the rating line). Picker lists use `theme::picker_symbol()`
+suggestion `List`). Picker lists use `theme::picker_symbol()`
 (bold accent `>`) and `PICKER_HIGHLIGHT`, with `HighlightSpacing::Always` so
 items don't shift right when one gets selected. `draw_suggestions` indents
 the list one column, putting suggestion text under the typed text and the

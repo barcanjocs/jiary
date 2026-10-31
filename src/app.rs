@@ -84,31 +84,37 @@ pub struct App {
     /// Picks the caption under the cat; renewed on every session change so
     /// the caption only changes then (or when the mood does).
     caption_seed: u64,
+    /// The session that just ended and when, while `1`–`3` can still rate
+    /// its focus (for `RATING_WINDOW`; only sessions that ask for focus).
+    rating: Option<(i64, Instant)>,
+    /// The last session change, for `u` to undo.
+    undo: Option<Undo>,
 }
 
 /// After this long in a work session the cat gets drowsy, a nudge to take a
 /// break. (A candidate for a user setting.)
 const DROWSY_AFTER_MINUTES: i64 = 25;
 
+/// How long after a session ends its focus can be rated. Short on purpose:
+/// a rating given right away is the honest one.
+const RATING_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A session change, as the sessions it ended and started (either may be
+/// missing: `e` only ends one, starting from nothing only starts one).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Undo {
+    ended: Option<i64>,
+    started: Option<i64>,
+}
+
 enum Screen {
     Main,
     Help,
     // Boxed: three autocompletes make it far larger than the other variants.
     StartSession(Box<StartSessionForm>),
-    EndSession(EndSessionForm),
     AddNote(AddNoteForm),
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum EndStep {
-    Notes,
-    Focus,
-}
-
-struct EndSessionForm {
-    notes: String,
-    step: EndStep,
-}
 struct AddNoteForm {
     input: String,
 }
@@ -216,6 +222,8 @@ impl App {
             title_press: None,
             reaction: None,
             caption_seed: fresh_seed(),
+            rating: None,
+            undo: None,
         };
 
         if let Some(path) = &app.layout_path {
@@ -302,16 +310,30 @@ impl App {
         self.previous_notes = notes;
     }
 
-    /// Closes the currently active session, if any. Returns true on success
-    /// (or when there was nothing to close) and clears the error line; on
-    /// failure restores the session, records the error, and returns false so
-    /// the caller can abort (e.g. not start a replacement session).
+    /// Closes the currently active session, if any, starting a session
+    /// change for `u` to undo and, for a session that asks for focus, the
+    /// rating window. Every session change starts here. Returns true on
+    /// success (or when there was nothing to close) and clears the error
+    /// line; on failure restores the session, records the error, and returns
+    /// false so the caller can abort (e.g. not start a replacement session).
     fn close_active_session(&mut self) -> bool {
         match self.active_session.take() {
-            None => true,
+            None => {
+                self.undo = Some(Undo::default());
+                true
+            }
             Some(session) => match self.db.complete_session(session.id, None) {
                 Ok(()) => {
                     self.clear_error();
+                    self.undo = Some(Undo {
+                        ended: Some(session.id),
+                        started: None,
+                    });
+                    // Starting from nothing keeps an open window (say, a
+                    // break right after `e`); ending another session
+                    // replaces it.
+                    self.rating = session::asks_focus(&session.activity)
+                        .then(|| (session.id, Instant::now()));
                     true
                 }
                 Err(e) => {
@@ -332,25 +354,65 @@ impl App {
         {
             Ok(session) => {
                 self.clear_error();
+                self.undo.get_or_insert_default().started = Some(session.id);
                 self.active_session = Some(session);
             }
             Err(e) => self.set_error(e),
         }
     }
 
-    /// Ends the active session with the given focus rating (if any) and
-    /// refreshes the main screen lists. On failure restores the session and
-    /// records the error. No-op if there is no active session.
-    fn complete_active(&mut self, focus: Option<i32>) {
-        if let Some(session) = self.active_session.take() {
-            if let Err(e) = self.db.complete_session(session.id, focus) {
-                self.set_error(e);
-                self.active_session = Some(session);
-            } else {
+    /// Whether `1`–`3` still rate the session that just ended.
+    fn rating_open(&self) -> bool {
+        self.rating
+            .is_some_and(|(_, ended)| ended.elapsed() < RATING_WINDOW)
+    }
+
+    /// Rates the session that just ended, while the rating window is open.
+    fn rate(&mut self, focus: i32) {
+        let Some((id, _)) = self.rating.filter(|_| self.rating_open()) else {
+            return;
+        };
+        match self.db.set_focus(id, focus) {
+            Err(e) => self.set_error(e),
+            Ok(()) => {
                 self.clear_error();
+                self.rating = None;
+                self.react(Reaction::Rated(focus));
+                match self.db.sessions_for_today() {
+                    Ok(sessions) => self.today_sessions = sessions,
+                    Err(e) => self.set_error(e),
+                }
             }
-            self.refresh_after_session_change();
         }
+    }
+
+    /// Undoes the last session change: deletes the session it started and
+    /// reopens the one it ended, so ending by mistake (or to add a last
+    /// note) costs one key. Only the last change can be undone.
+    fn undo(&mut self) {
+        let Some(change) = self.undo.take() else {
+            return;
+        };
+        if let Some(id) = change.started
+            && let Err(e) = self.db.delete_session(id)
+        {
+            self.set_error(e);
+            return;
+        }
+        if let Some(id) = change.ended
+            && let Err(e) = self.db.reopen_session(id)
+        {
+            self.set_error(e);
+            return;
+        }
+        self.clear_error();
+        self.rating = None;
+        self.reaction = None;
+        match self.db.get_active_session() {
+            Ok(session) => self.active_session = session,
+            Err(e) => self.set_error(e),
+        }
+        self.refresh_after_session_change();
     }
 
     /// Appends a note to the active session (db plus in-memory mirror). No-op
@@ -391,7 +453,6 @@ impl App {
             Screen::Main => return self.handle_main(key),
             Screen::Help => self.screen = Screen::Main, // any key closes it
             Screen::StartSession(_) => self.handle_start_session(key),
-            Screen::EndSession(_) => self.handle_end_session(key),
             Screen::AddNote(_) => self.handle_add_note(key),
         }
         false
@@ -509,11 +570,12 @@ impl App {
                 }
             }
             KeyCode::Char('e') if self.active_session.is_some() => {
-                self.screen = Screen::EndSession(EndSessionForm {
-                    notes: String::new(),
-                    step: EndStep::Notes,
-                });
+                if self.close_active_session() {
+                    self.refresh_after_session_change();
+                }
             }
+            KeyCode::Char(c @ '1'..='3') => self.rate(c as i32 - '0' as i32),
+            KeyCode::Char('u') => self.undo(),
             _ => {}
         };
         false
@@ -626,81 +688,6 @@ impl App {
         self.screen = Screen::Main;
     }
 
-    /// Handles keys while ending a session (notes, then focus rating). Esc
-    /// at either step cancels and leaves the session running.
-    fn handle_end_session(&mut self, key: KeyCode) {
-        if key == KeyCode::Esc {
-            self.screen = Screen::Main;
-            return;
-        }
-
-        // Read the step by copy so the borrow of self.screen drops before the
-        // per-step handler takes &mut self.
-        let step = match &self.screen {
-            Screen::EndSession(form) => form.step,
-            _ => return,
-        };
-        match step {
-            EndStep::Notes => self.end_notes_key(key),
-            EndStep::Focus => self.end_focus_key(key),
-        }
-    }
-
-    fn end_notes_key(&mut self, key: KeyCode) {
-        // Read before borrowing the form.
-        let asks_focus = self.ending_asks_focus();
-        let Screen::EndSession(form) = &mut self.screen else {
-            return;
-        };
-        match key {
-            KeyCode::Char(c) => {
-                form.notes.push(c);
-            }
-            KeyCode::Backspace => {
-                form.notes.pop();
-            }
-            KeyCode::Enter if asks_focus => form.step = EndStep::Focus,
-            KeyCode::Enter => self.finish_ending(None),
-            _ => {}
-        }
-    }
-
-    /// Whether ending the active session asks for a focus rating (not for
-    /// breaks and disruptions; see `session::asks_focus`).
-    fn ending_asks_focus(&self) -> bool {
-        self.active_session
-            .as_ref()
-            .is_none_or(|s| session::asks_focus(&s.activity))
-    }
-
-    fn end_focus_key(&mut self, key: KeyCode) {
-        let focus = match key {
-            KeyCode::Char(c) if ('1'..='3').contains(&c) => Some(c as i32 - '0' as i32),
-            KeyCode::Enter => None,
-            _ => return,
-        };
-        self.finish_ending(focus);
-    }
-
-    /// Ends the active session with the end form's notes and `focus`, and
-    /// returns to the main screen. Notes are only saved here, once the
-    /// session actually ends, so cancelling the form leaves it untouched.
-    fn finish_ending(&mut self, focus: Option<i32>) {
-        let Screen::EndSession(form) = &mut self.screen else {
-            return;
-        };
-        // Copy the notes out of `form` before calling into self.
-        let notes = std::mem::take(&mut form.notes);
-        if !notes.is_empty() {
-            self.append_active_note(&notes);
-        }
-        self.complete_active(focus);
-        if let Some(focus) = focus {
-            self.react(Reaction::Rated(focus));
-        }
-        self.screen = Screen::Main;
-    }
-
     /// Handles keys while adding a note to the active session.
     fn handle_add_note(&mut self, key: KeyCode) {
         let Screen::AddNote(form) = &mut self.screen else {
@@ -743,7 +730,6 @@ impl App {
             Screen::Main => self.draw_main(frame, content),
             Screen::Help => draw_help(frame, content),
             Screen::StartSession(form) => self.draw_start_session(frame, content, form, input),
-            Screen::EndSession(form) => self.draw_end_session(frame, content, form, input),
             Screen::AddNote(_) => self.draw_add_note(frame, content, input),
         }
 
@@ -751,7 +737,7 @@ impl App {
     }
 
     /// Terminal cursor position for the current screen: `Some` on input lines
-    /// (start form's project/task steps, end form's notes step, add-note),
+    /// (start form's project/task steps, add-note),
     /// right after the typed text. Pure function of the terminal size and form
     /// state — `Terminal::draw` discards closure return values, so main.rs
     /// calls this after drawing to show or hide the cursor.
@@ -775,9 +761,6 @@ impl App {
                 Step::Project => Some((&form.project.input, "type or pick a project (optional)")),
                 Step::Task => Some((&form.task.input, "type or pick a task (optional)")),
             },
-            Screen::EndSession(form) if form.step == EndStep::Notes => {
-                Some((&form.notes, "what got done? (optional)"))
-            }
             Screen::AddNote(form) => Some((&form.input, "type a note")),
             _ => None,
         }
@@ -880,21 +863,20 @@ impl App {
             },
             Screen::Help => &[("any key", "close")],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
-            Screen::EndSession(form) => match form.step {
-                EndStep::Notes if self.ending_asks_focus() => {
-                    &[("Enter", "continue"), ("Esc", "cancel")]
-                }
-                EndStep::Notes => &[("Enter", "end"), ("Esc", "cancel")],
-                EndStep::Focus => &[
-                    ("1", "bad"),
-                    ("2", "ok"),
-                    ("3", "good"),
-                    ("Enter", "skip"),
-                    ("Esc", "cancel"),
-                ],
-            },
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
         };
+        // Right after a session ends, rating it and undoing come first,
+        // with the seconds left to rate.
+        let countdown;
+        let mut hints = hints.to_vec();
+        if matches!(self.screen, Screen::Main)
+            && let Some((_, ended)) = self.rating.filter(|_| self.rating_open())
+        {
+            let left = RATING_WINDOW.saturating_sub(ended.elapsed()).as_secs_f32();
+            countdown = format!("rate bad/ok/good {}s", left.ceil() as u32);
+            hints.splice(0..0, [("1/2/3", countdown.as_str()), ("u", "undo")]);
+        }
+        let hints = &hints[..];
         // Hints are shown in order while they fit, keeping room for
         // `HELP_HINT` (always shown, wherever it sits in the list). Once a
         // hint doesn't fit, the remaining optional ones are dropped too, so
@@ -1624,54 +1606,6 @@ impl App {
         }
     }
 
-    /// End form: small centered modal with a Notes·Focus `Tabs` row; the notes
-    /// step is an input line (cursor placed by main.rs), the focus step a
-    /// colored `[1] Bad [2] OK [3] Good` line.
-    fn draw_end_session(
-        &self,
-        frame: &mut Frame,
-        area: ratatui::layout::Rect,
-        form: &EndSessionForm,
-        input: Option<&WrappedInput>,
-    ) {
-        let rows = input.map_or(1, WrappedInput::height);
-        let (modal, tabs_area, body_area) = small_modal_layout(area, rows);
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title(Line::from(Span::styled(" End session ", theme::TITLE)));
-        frame.render_widget(block, modal);
-
-        let step_index = match form.step {
-            EndStep::Notes => 0,
-            EndStep::Focus => 1,
-        };
-        // No Focus tab when this session won't ask for a rating.
-        let tabs: &[&str] = if self.ending_asks_focus() {
-            &["Notes", "Focus"]
-        } else {
-            &["Notes"]
-        };
-        frame.render_widget(
-            Tabs::new(tabs.to_vec())
-                .select(step_index)
-                .highlight_style(Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
-            tabs_area,
-        );
-
-        match (form.step, input) {
-            (EndStep::Notes, Some(input)) => frame.render_widget(input.paragraph(), body_area),
-            (EndStep::Notes, None) => {}
-            (EndStep::Focus, _) => {
-                let line = Line::from(vec![
-                    Span::styled("[1] Bad  ", Style::new().fg(theme::BAD)),
-                    Span::styled("[2] OK  ", Style::new().fg(theme::OK)),
-                    Span::styled("[3] Good", Style::new().fg(theme::GOOD)),
-                ]);
-                frame.render_widget(Paragraph::new(line), body_area);
-            }
-        }
-    }
-
     /// Add-note form: small centered modal with a dimmed project·task·activity
     /// context line (the full note history stays on the main screen) and a
     /// note input (cursor placed by main.rs).
@@ -2086,6 +2020,8 @@ fn draw_help(frame: &mut Frame, content: Rect) {
             ("b", "start a break"),
             ("m", "start a meeting"),
             ("r", "resume after d, b or m"),
+            ("1 / 2 / 3", "rate focus, just after"),
+            ("u", "undo the last start/end"),
             ("q / Ctrl+C", "quit"),
         ],
     )];
@@ -2650,29 +2586,22 @@ mod tests {
     }
 
     #[test]
-    fn status_line_shows_end_notes_hints() {
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: String::new(),
-            step: EndStep::Notes,
-        }));
+    fn status_line_leads_with_rating_and_undo_while_the_window_is_open() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.key(KeyCode::Char('e'));
         let buf = render(&t.app);
-        assert_eq!(
-            line(&buf, RENDER_HEIGHT - 1),
-            "[Enter] continue  [Esc] cancel"
+        assert!(
+            line(&buf, RENDER_HEIGHT - 1)
+                .starts_with("[1/2/3] rate bad/ok/good 5s  [u] undo  [s] start"),
+            "{}",
+            line(&buf, RENDER_HEIGHT - 1)
         );
-    }
 
-    #[test]
-    fn status_line_shows_end_focus_hints() {
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: String::new(),
-            step: EndStep::Focus,
-        }));
+        // Once it closes, the usual hints are back.
+        t.app.rating = Some((1, Instant::now() - RATING_WINDOW));
         let buf = render(&t.app);
-        assert_eq!(
-            line(&buf, RENDER_HEIGHT - 1),
-            "[1] bad  [2] ok  [3] good  [Enter] skip  [Esc] cancel"
-        );
+        assert!(line(&buf, RENDER_HEIGHT - 1).starts_with("[s] start"));
     }
 
     #[test]
@@ -2763,7 +2692,7 @@ mod tests {
         start(&mut t);
         t.app.append_active_note("first");
         t.app.append_active_note("second");
-        t.app.complete_active(None);
+        t.app.close_active_session();
         start(&mut t);
 
         let buf = render(&t.app);
@@ -2909,7 +2838,7 @@ mod tests {
     fn activities_are_suggested_most_recent_first() {
         let mut t = TestApp::new();
         t.app.start_session("Reading", None, None);
-        t.app.complete_active(None);
+        t.app.close_active_session();
         t.app.start_session("Writing", None, None);
         t.app.refresh_suggestions();
         // One Tab repeats the most recent activity.
@@ -2966,48 +2895,9 @@ mod tests {
     }
 
     #[test]
-    fn end_modal_notes_step_shows_tab_and_input() {
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: "did stuff".into(),
-            step: EndStep::Notes,
-        }));
-        let buf = render(&t.app);
-        assert_eq!(buf[(20, 9)].symbol(), "╭");
-        assert_eq!(buf[(20, 9)].fg, Color::Reset);
-        assert!(line_from(&buf, 9, 20).starts_with("╭ End session "));
-        // Notes tab selected, Focus plain.
-        assert!(line_from(&buf, 10, 22).starts_with(" Notes │ Focus"));
-        assert_eq!(buf[(23, 10)].fg, Color::Cyan);
-        assert!(buf[(23, 10)].modifier.contains(Modifier::BOLD));
-        assert_eq!(buf[(31, 10)].fg, Color::Reset);
-        // Input row: prompt + typed text.
-        assert!(line_from(&buf, 11, 22).starts_with("› did stuff"));
-        assert_eq!(buf[(22, 11)].fg, Color::Cyan);
-        assert_eq!(buf[(24, 11)].fg, Color::Reset);
-    }
-
-    #[test]
-    fn end_modal_focus_step_shows_colored_ratings() {
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: String::new(),
-            step: EndStep::Focus,
-        }));
-        let buf = render(&t.app);
-        // Focus tab selected, Notes plain.
-        assert_eq!(buf[(31, 10)].fg, Color::Cyan);
-        assert!(buf[(31, 10)].modifier.contains(Modifier::BOLD));
-        assert_eq!(buf[(23, 10)].fg, Color::Reset);
-        // Colored rating line.
-        assert!(line_from(&buf, 11, 22).starts_with("[1] Bad  [2] OK  [3] Good"));
-        assert_eq!(buf[(col_of(&buf, 11, "Bad"), 11)].fg, Color::Red);
-        assert_eq!(buf[(col_of(&buf, 11, "OK"), 11)].fg, Color::Yellow);
-        assert_eq!(buf[(col_of(&buf, 11, "Good"), 11)].fg, Color::Green);
-    }
-
-    #[test]
     fn cursor_position_tracks_input_lines() {
-        // 80×24 terminal: the start modal's input row is y=8, the end/note
-        // modals' is y=11; values start at column 24, after "› ".
+        // 80×24 terminal: the start modal's input row is y=8, the note
+        // modal's is y=11; values start at column 24, after "› ".
         let t = TestApp::new().on_project_step(vec![], "");
         assert_eq!(t.app.cursor_position((80, 24)), Some((24, 8)));
 
@@ -3019,18 +2909,6 @@ mod tests {
 
         let t = TestApp::new().on_screen(TestApp::start_form_at(Step::Activity));
         assert_eq!(t.app.cursor_position((80, 24)), Some((24, 8)));
-
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: "hi".into(),
-            step: EndStep::Notes,
-        }));
-        assert_eq!(t.app.cursor_position((80, 24)), Some((26, 11)));
-
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: String::new(),
-            step: EndStep::Focus,
-        }));
-        assert_eq!(t.app.cursor_position((80, 24)), None); // rating line, no input
 
         let t = TestApp::new().on_screen(Screen::AddNote(AddNoteForm { input: "hi".into() }));
         assert_eq!(t.app.cursor_position((80, 24)), Some((26, 11))); // "› hi"
@@ -3632,10 +3510,6 @@ mod tests {
                 Screen::Main,
                 Screen::Help,
                 TestApp::start_form_at(Step::Activity),
-                Screen::EndSession(EndSessionForm {
-                    notes: "x".repeat(200),
-                    step: EndStep::Notes,
-                }),
                 Screen::AddNote(AddNoteForm {
                     input: "word ".repeat(50),
                 }),
@@ -3734,11 +3608,10 @@ mod tests {
     }
 
     #[test]
-    fn long_notes_wrap_and_grow_the_end_modal() {
+    fn long_notes_wrap_and_grow_the_note_modal() {
         let notes = "fixed the wrapping bug and wrote tests for every input";
-        let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
-            notes: notes.into(),
-            step: EndStep::Notes,
+        let t = TestApp::new().on_screen(Screen::AddNote(AddNoteForm {
+            input: notes.into(),
         }));
         let buf = render(&t.app);
 
@@ -3802,41 +3675,114 @@ mod tests {
         }
     }
 
-    #[test]
-    fn end_session_saves_notes_and_focus() {
-        let mut t = TestApp::new();
-        t.app.start_session("Reading", None, None);
-        for code in [
-            KeyCode::Char('e'),
-            KeyCode::Char('o'),
-            KeyCode::Char('k'),
-            KeyCode::Enter,
-            KeyCode::Char('3'),
-        ] {
-            t.app.handle_key(press(code));
-        }
-        assert!(t.app.active_session.is_none());
-        let ended = &t.app.today_sessions[0];
-        assert_eq!(ended.notes.as_deref(), Some("ok\n"));
-        assert_eq!(ended.focus, Some(3));
+    /// The session `e` just ended (today's list is newest first).
+    fn last_ended(t: &TestApp) -> &Session {
+        &t.app.today_sessions[0]
     }
 
     #[test]
-    fn end_session_esc_cancels_at_either_step() {
+    fn e_ends_at_once_and_a_digit_rates_it_within_the_window() {
         let mut t = TestApp::new();
         t.app.start_session("Reading", None, None);
-        for steps in [&[][..], &[KeyCode::Enter][..]] {
-            t.app.handle_key(press(KeyCode::Char('e')));
-            t.app.handle_key(press(KeyCode::Char('x')));
-            for &code in steps {
-                t.app.handle_key(press(code));
-            }
-            t.app.handle_key(press(KeyCode::Esc));
-            assert!(matches!(t.app.screen, Screen::Main));
-            let active = t.app.active_session.as_ref().unwrap();
-            assert!(active.ended_at.is_none());
-            assert!(active.notes.is_none(), "cancelled notes must not be saved");
+        t.key(KeyCode::Char('e'));
+        assert!(t.app.active_session.is_none());
+        assert!(matches!(t.app.screen, Screen::Main));
+        assert!(last_ended(&t).ended_at.is_some());
+        assert_eq!(last_ended(&t).focus, None);
+
+        t.key(KeyCode::Char('3'));
+        assert_eq!(last_ended(&t).focus, Some(3));
+        assert!(matches!(
+            t.app.current_reaction(),
+            Some((Reaction::Rated(3), _))
+        ));
+        // One rating per window.
+        t.key(KeyCode::Char('1'));
+        assert_eq!(last_ended(&t).focus, Some(3));
+    }
+
+    #[test]
+    fn digits_do_nothing_once_the_window_closes() {
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('2')); // nothing has ended
+        t.app.start_session("Reading", None, None);
+        t.key(KeyCode::Char('e'));
+        let (id, _) = t.app.rating.unwrap();
+        t.app.rating = Some((id, Instant::now() - RATING_WINDOW));
+        t.key(KeyCode::Char('2'));
+        assert_eq!(last_ended(&t).focus, None);
+        assert!(t.app.current_reaction().is_none());
+    }
+
+    #[test]
+    fn breaks_and_disruptions_end_without_a_window_but_meetings_get_one() {
+        for kind in [BREAK, DISRUPTION] {
+            let mut t = TestApp::new();
+            t.app.start_session(kind, None, None);
+            t.key(KeyCode::Char('e'));
+            assert!(t.app.active_session.is_none(), "{kind}");
+            assert!(!t.app.rating_open(), "{kind}");
         }
+        let mut t = TestApp::new();
+        t.app.start_session(MEETING, None, None);
+        t.key(KeyCode::Char('e'));
+        assert!(t.app.rating_open());
+    }
+
+    #[test]
+    fn switching_away_from_work_opens_the_window_too() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.key(KeyCode::Char('m'));
+        t.key(KeyCode::Char('2')); // rates the reading, not the meeting
+        assert_eq!(activity(&t), Some(MEETING));
+        assert_eq!(t.app.today_sessions[1].focus, Some(2));
+
+        // Starting from nothing keeps the window from `e` open.
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        t.key(KeyCode::Char('e'));
+        t.key(KeyCode::Char('b'));
+        t.key(KeyCode::Char('1'));
+        assert_eq!(t.app.today_sessions[1].focus, Some(1));
+
+        // Ending a break doesn't replace it with nothing to rate.
+        t.key(KeyCode::Char('d'));
+        assert!(!t.app.rating_open());
+    }
+
+    #[test]
+    fn undo_reopens_what_e_ended_even_once_rated() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        let id = t.app.active_session.as_ref().unwrap().id;
+        t.key(KeyCode::Char('e'));
+        t.key(KeyCode::Char('3'));
+        t.key(KeyCode::Char('u'));
+        let active = t.app.active_session.as_ref().unwrap();
+        assert_eq!(active.id, id);
+        assert_eq!((active.ended_at, active.focus), (None, None));
+        assert!(!t.app.rating_open());
+        // Only the last change: a second `u` does nothing.
+        t.key(KeyCode::Char('u'));
+        assert_eq!(t.app.active_session.as_ref().unwrap().id, id);
+    }
+
+    #[test]
+    fn undo_takes_back_a_switch_or_a_start() {
+        let mut t = TestApp::new();
+        t.app
+            .start_session("Reading", Some("alpha".into()), Some("beta".into()));
+        t.key(KeyCode::Char('d'));
+        t.key(KeyCode::Char('u'));
+        assert_eq!(activity(&t), Some("Reading"));
+        assert_eq!(t.app.today_sessions.len(), 1, "the disruption is gone");
+
+        let mut t = TestApp::new();
+        t.key(KeyCode::Char('b'));
+        t.key(KeyCode::Char('u'));
+        assert!(t.app.active_session.is_none());
+        assert!(t.app.today_sessions.is_empty());
     }
 
     fn activity(t: &TestApp) -> Option<&str> {
@@ -3908,7 +3854,7 @@ mod tests {
         t.key(KeyCode::Char('r')); // nothing to go back to: keeps meeting
         assert_eq!(activity(&t), Some(MEETING));
 
-        t.app.complete_active(None);
+        t.app.close_active_session();
         t.app.start_session("Writing", Some("p".into()), None);
         t.key(KeyCode::Char('m'));
         t.key(KeyCode::Char('b')); // a break straight after the meeting
@@ -3925,38 +3871,6 @@ mod tests {
         assert!(t.app.active_session.is_none());
         t.key(KeyCode::Char('b')); // e.g. right after ending a session
         assert_eq!(activity(&t), Some(BREAK));
-    }
-
-    #[test]
-    fn ending_a_break_or_disruption_keeps_notes_but_skips_focus() {
-        for kind in [BREAK, DISRUPTION] {
-            let mut t = TestApp::new();
-            t.app.start_session(kind, None, None);
-            t.key(KeyCode::Char('e'));
-            let buf = render(&t.app);
-            assert!(line_from(&buf, 10, 22).starts_with(" Notes "));
-            assert!(!line(&buf, 10).contains("Focus"));
-            assert_eq!(line(&buf, RENDER_HEIGHT - 1), "[Enter] end  [Esc] cancel");
-
-            t.typed("lunch");
-            t.key(KeyCode::Enter); // ends straight away
-            assert!(t.app.active_session.is_none(), "{kind}");
-            assert!(matches!(t.app.screen, Screen::Main));
-            let ended = &t.app.today_sessions[0];
-            assert_eq!(ended.notes.as_deref(), Some("lunch\n"));
-            assert_eq!(ended.focus, None);
-            assert!(t.app.current_reaction().is_none());
-        }
-
-        // A meeting still asks.
-        let mut t = TestApp::new();
-        t.app.start_session(MEETING, None, None);
-        t.key(KeyCode::Char('e'));
-        t.key(KeyCode::Enter);
-        assert!(matches!(
-            &t.app.screen,
-            Screen::EndSession(form) if form.step == EndStep::Focus
-        ));
     }
 
     #[test]

@@ -143,6 +143,39 @@ impl Db {
         Ok(())
     }
 
+    /// Rates an ended session after the fact (the rating window after it
+    /// ends).
+    pub fn set_focus(&self, id: i64, focus: i32) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE sessions SET focus = ?1 WHERE id = ?2 AND ended_at IS NOT NULL",
+                params![focus, id],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// Makes an ended session active again, as if it never ended: its end
+    /// and focus rating are cleared. Undoes `complete_session`; the caller
+    /// makes sure no other session is active.
+    pub fn reopen_session(&self, id: i64) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE sessions SET ended_at = NULL, focus = NULL WHERE id = ?1",
+                params![id],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// Removes a session outright. Undoes `create_session`.
+    pub fn delete_session(&self, id: i64) -> Result<(), DbError> {
+        self.conn
+            .execute("DELETE FROM sessions WHERE id = ?1", params![id])
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
     pub fn sessions_for_today(&self) -> Result<Vec<Session>, DbError> {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let mut stmt = self

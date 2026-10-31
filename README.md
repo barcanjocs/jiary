@@ -30,7 +30,9 @@ On first run, a database is created at:
 | Key | Action |
 |-----|--------|
 | `s` | Start a new session |
-| `e` | End the active session (notes + focus rating) |
+| `e` | End the active session |
+| `1` `2` `3` | Rate your focus, within 5 seconds of a session ending |
+| `u` | Undo the last start or end |
 | `n` | Add a note to the active session |
 | `i` | Increment interruption counter |
 | `d` | Stop current session, start a Disruption session (no-op during one) |
@@ -88,7 +90,7 @@ Tab (or ↓) picks the best suggestion; further Tabs cycle through them, ↑/↓
 
 Press `n` at any time during an active session to append a note. Notes are saved immediately and persist even if the app exits before the session ends.
 
-You can also add a note when ending a session (press `e`).
+To add a last note to a session you just ended, press `u` to reopen it, `n` to add the note, and `e` again.
 
 ### Detours: disruptions, breaks, meetings & resume
 
@@ -106,13 +108,17 @@ Meetings you start with `s` (activity "Meeting") are detours too, so `r` never r
 
 ### Focus rating
 
-When ending a session (`e`), after the notes prompt you'll be asked to rate your focus (except for breaks and disruptions, which end right after the notes, since they aren't focused work):
+`e` ends a session right away, with no prompts. For the next 5 seconds the status line counts down, and you can rate your focus with a single key:
 
 - `1` — bad (fragmented, many context switches)
 - `2` — ok
 - `3` — good (deep flow)
 
-Press Enter to skip rating. Esc at either step cancels: the session keeps running and the typed notes are discarded. The rating is shown in the daily history as `F1`–`F3`, or `F-` if not rated.
+Or ignore it and carry on: starting the next thing is fine, and the session simply stays unrated. The window is short on purpose, since the rating you give right away is the honest one. It also opens when you switch straight to something else (`s`, `d`, `b`, `m`), so ratings don't depend on whether you pressed `e` first. Breaks and disruptions aren't focused work, so ending one doesn't open it.
+
+Ended by mistake? `u` undoes the last start or end: the session you ended is running again (its rating cleared), and any session that replaced it is removed.
+
+The rating is shown in the daily history as `F1`–`F3`, or `F-` if not rated.
 
 ### Interruptions
 
