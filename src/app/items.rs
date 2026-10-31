@@ -1,7 +1,7 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use super::focus_color;
+use super::graphs::focus_color;
 use super::text::{fmt_hms, plural, wrap_text};
 use crate::summary::DaySummary;
 use crate::theme;

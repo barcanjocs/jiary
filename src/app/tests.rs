@@ -1,3 +1,7 @@
+use super::graphs::{
+    focus_grid, focus_legend, focus_row, half_cells, hour_labels, item_width, share_row,
+    start_of_hour, timeline_row, year_focus_grid,
+};
 use super::text::{fmt_time, wrap_text};
 use super::*;
 use crate::db::Db;
