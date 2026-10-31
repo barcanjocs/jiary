@@ -54,7 +54,6 @@ enum EndStep {
 struct EndSessionForm {
     notes: String,
     step: EndStep,
-    focus: Option<i32>,
 }
 struct AddNoteForm {
     input: String,
@@ -341,7 +340,6 @@ impl App {
                 self.screen = Screen::EndSession(EndSessionForm {
                     notes: String::new(),
                     step: EndStep::Notes,
-                    focus: None,
                 });
             }
             _ => {}
@@ -515,8 +513,14 @@ impl App {
         }
     }
 
-    /// Handles keys while ending a session (notes, then focus rating).
+    /// Handles keys while ending a session (notes, then focus rating). Esc
+    /// at either step cancels and leaves the session running.
     fn handle_end_session(&mut self, key: KeyCode) {
+        if key == KeyCode::Esc {
+            self.screen = Screen::Main;
+            return;
+        }
+
         // Read the step by copy so the borrow of self.screen drops before the
         // per-step handler takes &mut self.
         let step = match &self.screen {
@@ -540,22 +544,7 @@ impl App {
             KeyCode::Backspace => {
                 form.notes.pop();
             }
-            KeyCode::Enter | KeyCode::Esc => {
-                // Clone notes out of `form` before calling into self.
-                let notes = form.notes.clone();
-                if key != KeyCode::Esc {
-                    form.step = EndStep::Focus;
-                }
-
-                if !notes.is_empty() {
-                    self.append_active_note(&notes);
-                }
-
-                if key == KeyCode::Esc {
-                    self.complete_active(None);
-                    self.screen = Screen::Main;
-                }
-            }
+            KeyCode::Enter => form.step = EndStep::Focus,
             _ => {}
         }
     }
@@ -564,22 +553,20 @@ impl App {
         let Screen::EndSession(form) = &mut self.screen else {
             return;
         };
-        match key {
-            KeyCode::Char(c) if ('1'..='3').contains(&c) => {
-                form.focus = Some(c as i32 - '0' as i32);
-                // Copy out of `form` before calling into self.
-                let focus = form.focus;
-                self.complete_active(focus);
-                self.screen = Screen::Main;
-            }
-            KeyCode::Enter | KeyCode::Esc => {
-                // Copy out of `form` before calling into self.
-                let focus = form.focus;
-                self.complete_active(focus);
-                self.screen = Screen::Main;
-            }
-            _ => {}
+        let focus = match key {
+            KeyCode::Char(c) if ('1'..='3').contains(&c) => Some(c as i32 - '0' as i32),
+            KeyCode::Enter => None,
+            _ => return,
+        };
+        // Notes are only saved once the session actually ends, so cancelling
+        // at either step leaves the session untouched. Copy them out of
+        // `form` before calling into self.
+        let notes = std::mem::take(&mut form.notes);
+        if !notes.is_empty() {
+            self.append_active_note(&notes);
         }
+        self.complete_active(focus);
+        self.screen = Screen::Main;
     }
 
     /// Handles keys while adding a note to the active session.
@@ -724,8 +711,14 @@ impl App {
             ],
             Screen::StartSession(_) => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
             Screen::EndSession(form) => match form.step {
-                EndStep::Notes => &[("Enter", "continue"), ("Esc", "skip")],
-                EndStep::Focus => &[("1", "bad"), ("2", "ok"), ("3", "good"), ("Enter", "skip")],
+                EndStep::Notes => &[("Enter", "continue"), ("Esc", "cancel")],
+                EndStep::Focus => &[
+                    ("1", "bad"),
+                    ("2", "ok"),
+                    ("3", "good"),
+                    ("Enter", "skip"),
+                    ("Esc", "cancel"),
+                ],
             },
             Screen::AddNote(_) => &[("Enter", "save"), ("Esc", "cancel")],
         };
@@ -1562,12 +1555,11 @@ mod tests {
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: String::new(),
             step: EndStep::Notes,
-            focus: None,
         }));
         let buf = render(&t.app);
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
-            "[Enter] continue  [Esc] skip"
+            "[Enter] continue  [Esc] cancel"
         );
     }
 
@@ -1576,12 +1568,11 @@ mod tests {
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: String::new(),
             step: EndStep::Focus,
-            focus: None,
         }));
         let buf = render(&t.app);
         assert_eq!(
             line(&buf, RENDER_HEIGHT - 1),
-            "[1] bad  [2] ok  [3] good  [Enter] skip"
+            "[1] bad  [2] ok  [3] good  [Enter] skip  [Esc] cancel"
         );
     }
 
@@ -1775,7 +1766,6 @@ mod tests {
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: "did stuff".into(),
             step: EndStep::Notes,
-            focus: None,
         }));
         let buf = render(&t.app);
         assert_eq!(buf[(20, 9)].symbol(), "╭");
@@ -1797,7 +1787,6 @@ mod tests {
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: String::new(),
             step: EndStep::Focus,
-            focus: None,
         }));
         let buf = render(&t.app);
         // Focus tab selected, Notes plain.
@@ -1830,14 +1819,12 @@ mod tests {
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: "hi".into(),
             step: EndStep::Notes,
-            focus: None,
         }));
         assert_eq!(t.app.cursor_position((80, 24)), Some((31, 11)));
 
         let t = TestApp::new().on_screen(Screen::EndSession(EndSessionForm {
             notes: String::new(),
             step: EndStep::Focus,
-            focus: None,
         }));
         assert_eq!(t.app.cursor_position((80, 24)), None); // rating line, no input
 
@@ -1866,6 +1853,43 @@ mod tests {
             assert!(matches!(t.app.screen, Screen::Main));
             let notes = t.app.active_session.as_ref().unwrap().notes.as_deref();
             assert_eq!(notes, expected);
+        }
+    }
+
+    #[test]
+    fn end_session_saves_notes_and_focus() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        for code in [
+            KeyCode::Char('e'),
+            KeyCode::Char('o'),
+            KeyCode::Char('k'),
+            KeyCode::Enter,
+            KeyCode::Char('3'),
+        ] {
+            t.app.handle_key(press(code));
+        }
+        assert!(t.app.active_session.is_none());
+        let ended = &t.app.today_sessions[0];
+        assert_eq!(ended.notes.as_deref(), Some("ok\n"));
+        assert_eq!(ended.focus, Some(3));
+    }
+
+    #[test]
+    fn end_session_esc_cancels_at_either_step() {
+        let mut t = TestApp::new();
+        t.app.start_session("Reading", None, None);
+        for steps in [&[][..], &[KeyCode::Enter][..]] {
+            t.app.handle_key(press(KeyCode::Char('e')));
+            t.app.handle_key(press(KeyCode::Char('x')));
+            for &code in steps {
+                t.app.handle_key(press(code));
+            }
+            t.app.handle_key(press(KeyCode::Esc));
+            assert!(matches!(t.app.screen, Screen::Main));
+            let active = t.app.active_session.as_ref().unwrap();
+            assert!(active.ended_at.is_none());
+            assert!(active.notes.is_none(), "cancelled notes must not be saved");
         }
     }
 

@@ -71,7 +71,7 @@ When ending a session (`e`), after the notes prompt you'll be asked to rate your
 - `2` — ok
 - `3` — good (deep flow)
 
-Press Enter to skip. The rating is shown in the daily history as `(F:N)` or `(F:-)` if not rated.
+Press Enter to skip rating. Esc at either step cancels: the session keeps running and the typed notes are discarded. The rating is shown in the daily history as `(F:N)` or `(F:-)` if not rated.
 
 ### Interruptions
 
