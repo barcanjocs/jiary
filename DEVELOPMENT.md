@@ -95,8 +95,9 @@ from its scope note alone, without re-deriving context.
   operations call `clear_error`. The ERROR line at the bottom reflects the
   most recent db operation. Only an unopenable database exits at startup; all
   startup loads are attempted so partial data still shows.
-- **Timestamps:** stored as RFC 3339 UTC with explicit `+00:00`, never `Z`
-  (SQLite date functions parse the former and silently ignore the latter).
+- **Timestamps:** stored as RFC 3339 UTC with explicit `+00:00`. Older rows
+  end in `Z`; SQLite's date functions parse both (covered by db tests), so
+  no migration is needed.
   "Today" means local-time start date (`date(started_at, 'localtime')`).
 - **Single active session:** enforced by a db trigger (a UNIQUE index can't —
   SQLite ignores NULLs in UNIQUE constraints). `get_active_session`

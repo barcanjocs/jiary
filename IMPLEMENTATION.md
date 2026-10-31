@@ -93,9 +93,10 @@ would allow unlimited active rows). Consequences:
 
 ### Timestamps
 
-Stored as RFC 3339 UTC **with an explicit `+00:00` offset, never `Z`**:
-SQLite's date functions parse the former but silently ignore the latter (a
-`Z`-suffixed value makes `date(started_at, 'localtime')` return NULL).
+Stored as RFC 3339 UTC with an explicit `+00:00` offset. Rows written by
+older versions end in `Z` instead; SQLite's date functions parse both, so
+`date(started_at, 'localtime')` places either on the right local day (pinned
+by `legacy_z_suffixed_timestamps_still_count_as_today`).
 "Today" is always the *local-time* start date:
 `date(started_at, 'localtime') = ?`. Display converts to local time in the UI
 (`fmt_time`), never in SQL.

@@ -90,8 +90,8 @@ impl Db {
         project: Option<&str>,
         task: Option<&str>,
     ) -> Result<Session, DbError> {
-        // Explicit '+00:00' offset rather than 'Z': SQLite's date functions
-        // parse the former but silently ignore the latter.
+        // Explicit '+00:00' offset by convention. Older rows use 'Z', which
+        // SQLite's date functions parse just as well (see tests).
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
         self.conn
             .execute(
@@ -452,6 +452,52 @@ mod tests {
             .unwrap();
         let (activity, _, _) = tmp.db.latest_non_disruption().unwrap().unwrap();
         assert_eq!(activity, "Writing");
+    }
+
+    /// Inserts a completed session starting at `started_at` (stored as is).
+    fn insert_started_at(db: &Db, started_at: &str) {
+        db.conn
+            .execute(
+                "INSERT INTO sessions (started_at, ended_at, activity)
+                 VALUES (?1, ?1, 'Reading')",
+                params![started_at],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn sessions_for_today_compares_local_dates() {
+        // Yesterday and today in local time, stored as UTC. In any non-UTC
+        // zone at least one of these falls on a different UTC date, which
+        // a comparison of UTC dates would get wrong.
+        let tmp = TmpDb::new();
+        let now = chrono::Local::now();
+        let midnight = now
+            .date_naive()
+            .and_hms_opt(0, 0, 30)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .unwrap();
+        let utc = |t: chrono::DateTime<chrono::Local>| {
+            t.with_timezone(&Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+        };
+        insert_started_at(&tmp.db, &utc(midnight - chrono::Duration::minutes(1)));
+        insert_started_at(&tmp.db, &utc(midnight));
+        let sessions = tmp.db.sessions_for_today().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].started_at, midnight.with_timezone(&Utc));
+    }
+
+    #[test]
+    fn legacy_z_suffixed_timestamps_still_count_as_today() {
+        // Rows written before the '+00:00' convention end in 'Z'; SQLite's
+        // date functions must still place them on the right local day.
+        let tmp = TmpDb::new();
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        assert!(now.ends_with('Z'));
+        insert_started_at(&tmp.db, &now);
+        assert_eq!(tmp.db.sessions_for_today().unwrap().len(), 1);
     }
 
     #[test]
