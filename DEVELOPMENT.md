@@ -21,29 +21,47 @@ truth for state — this file plus `git log` is all that is needed to resume.
 
 ## Now
 
-- State: fix pass on branch `fix/input-and-resume` (2026-10-31), one commit
-  per fix: terminal restored on error/panic; key presses only + Ctrl+C;
-  add-note Esc discards; end-session Esc cancels (session keeps running);
-  `r` keeps the disruption when there is nothing to resume, `d` is a no-op
-  during one; shared `Autocomplete` (input line = what Enter submits);
-  two nits done (swallowed errors, `create_session` returns the stored
-  session); shared row mapper; same-second `id` tiebreak; corrected the
-  "SQLite ignores `Z`" claim (it parses it; legacy rows are fine); multi-line
-  previous notes. README and IMPLEMENTATION.md synced. Tree green, 51 tests.
-  Then on main: text inputs wrap inside their modal; backlog C done
-  (free-text activities, requested by a user). Tree green, 61 tests.
-  Then on branch `three-section-layout`: the main screen is three sections
-  (active / today, scrollable / day summary), today and summary collapsible,
-  all resizable by keyboard (+/-/=) and mouse (drag borders), focus via Tab,
-  `?` help screen, layout saved to `layout.conf`. New modules `layout.rs`
-  (geometry + file) and `summary.rs`. Tree green, 89 tests.
-- Next: H (merge labels) is deferred until I (`/` commands) exists, since
-  it will be one of them.
-- Blockers / open questions: none.
+- State (2026-10-31): **v1.0.0 released**
+  (https://github.com/barcanjocs/jiary/releases/tag/v1.0.0). Tree green,
+  171 tests, worktree clean, everything pushed. Since the October notes,
+  on main: one-key `e` with a 5 s rating bar and `u` undo; recent picks in
+  the start form; `[`/`]` move the start; away/idle detection (`idle.rs`);
+  accentuated main screen with activity and project colors (16-color
+  256-color project palette, distinct within a view); day summary graphs
+  (timeline with a focus line, activity and project share bars); `/`
+  command palette; `/weekly`, `/monthly`, `/yearly` (`period.rs`) with a
+  GitHub-style focus grid; length-weighted focus averages; `--version` /
+  `--help`; single-instance lock (`lock.rs`, backlog E); release workflow
+  (`.github/workflows/release.yml`) and `install.sh` (curl one-liner in the
+  README).
+- Next, in order:
+  1. **README revamp** (docs). It has grown feature by feature: restructure
+     around install → first session → daily loop (s/e/rating/n/i/detours)
+     → reviewing (summary, palette, week/month/year) → data & backup, with
+     the key tables in one place. Keep the Install section's curl command
+     and the `cargo install --git` fallback; the dev quick start (build,
+     `./check`, releasing) moves to its own section or to this file.
+  2. **Docs drift.** IMPLEMENTATION.md has grown long paragraphs; tighten
+     it to match the code (module map, screens, lifecycle, rendering).
+  3. **Split `src/app.rs`** (~6,000 lines): into an `app/` module with one
+     file per screen (main, start/note forms, palette, period views) plus
+     the shared summary pieces and graph helpers (`half_cells`,
+     `timeline_row`, `share_row`, `focus_grid`, ...). Mostly moving code;
+     the render tests make it safe. Keep `./check` green per step.
+  4. Then backlog H (rename labels, as a `/` command) and A (browse past
+     days, likely `/day` with ←→ like the period views).
+- Releasing: bump `version` in Cargo.toml, commit, then tag and push the
+  tag (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`); the workflow
+  builds and publishes. Tag pushes are done by the maintainer, not an
+  agent. Runner images age out: macOS builds moved to `macos-15` after
+  `macos-14` was retired (Nov 2026).
+- Blockers / open questions: the Intel macOS and Linux builds are built
+  and tested in CI but not yet run by hand on real machines.
 
 ## Backlog
 
-Ranked by value-per-effort as of 2026-09-23. Each item should be startable
+Ranked by value-per-effort as of 2026-09-23 (done items kept for
+context; the order of what's left is in *Now*). Each item should be startable
 from its scope note alone, without re-deriving context.
 
 - [x] **G. TUI beautification** — done 2026-09-25: theme module, header/
@@ -62,27 +80,31 @@ from its scope note alone, without re-deriving context.
       project or task to another value (`UPDATE sessions SET activity = ?new
       WHERE activity = ?old`, same for project/task), which removes the old
       label from suggestions while keeping history truthful. Decided
-      2026-10-31: exposed as a `/` command (needs I first). Open: command
-      syntax, and confirming the rename before writing.
-- [ ] **I. `/` commands** (medium). Typing `/` opens a command line for
-      less frequent actions that don't deserve a single-key binding; label
-      cleanup (H) is the first planned command. Open: where it is reachable
-      from (main screen only?), completion of command names and arguments
-      (reuse `Autocomplete`), and how results/errors are reported (status
-      line).
-- [ ] **B. Weekly summary** (small-medium). A key (e.g. `w`) showing the last
-      7 days: total time per activity and per project, average focus rating,
-      interruption/disruption counts. Pure SQL aggregation plus one new screen;
-      no schema change.
-- [ ] **A. History view** (medium). A key (e.g. `h`) to browse past days:
-      navigate day by day with sessions rendered like the main screen, plus
-      fuzzy search over notes/projects/tasks across all time. Read-only; needs
-      a "sessions for local date" db query — `sessions_for_today` is the
-      pattern.
+      2026-10-31: exposed as a `/` command (I is done, but palette commands
+      take no arguments yet). Open: how the old and new label are picked
+      (e.g. `/rename` then two `Autocomplete` steps, like the start form),
+      and confirming the rename before writing. Renaming a project also
+      moves its color (colors go by first use).
+- [x] **I. `/` commands** — done 2026-10-31: `/` opens a palette of
+      `COMMANDS` (fuzzy filter, Tab completes, Enter runs). A command's
+      `Action` is a main-screen key or a view. Commands take no arguments
+      yet; H will need them (e.g. `/rename` then a second input step).
+- [x] **B. Weekly summary** — done 2026-10-31, grown into `/weekly`,
+      `/monthly` and `/yearly` (calendar periods, ←→ to page): a row per
+      day (or month), totals, activity/project bars, focus grid.
+- [ ] **A. History view** (medium). Browse past days: navigate day by day
+      with sessions rendered like the main screen, plus fuzzy search over
+      notes/projects/tasks across all time. Read-only. The pieces exist:
+      `db.sessions_between(day, day)`, `summarize` over any sessions, and
+      the period views' ←→ paging; likely a `/day` command (or Enter on a
+      day row in a week/month).
 - [ ] **D. Stale-session handling** (small). If the app exits mid-session, the
       next launch shows a "live" timer that actually started before today.
       Detect `started_at` before local midnight and mark it clearly (e.g.
-      "since yesterday"); make sure `e` still ends it sensibly.
+      "since yesterday"); make sure `e` still ends it sensibly. Partly
+      covered: while jiary runs, the away check (`observe_idle`) catches
+      idle time and sleep; a session left running with jiary closed is
+      still unhandled at startup.
 - [x] **E. Single-instance lock** — done 2026-10-31: `lock.rs` takes an
       exclusive `flock` (std `File::try_lock`, no dependency) on
       `jiary.lock` in the data dir before the db opens, writing our pid;
