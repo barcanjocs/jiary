@@ -380,7 +380,9 @@ Three stacked sections, split by `LayoutPrefs::resolve` (`layout.rs`):
   the height, with a scrollbar on the right border beside them when they
   don't fit. Right: the cat, a gap row and its caption rows
   (`CAT_BLOCK_HEIGHT`), pinned, top-aligned, one column in from the border
-  (`split_for_cat`). The section is as tall as the taller column (info +
+  (`split_for_cat`). Each caption row is centred under the cat's own
+  columns for the mood (`Mood::columns`), not the canvas, since the scenes
+  sit off-centre (`caption_lines`). The section is as tall as the taller column (info +
   notes, or the cat block whenever the cat fits the width, even with no
   session), so notes follow the info with no gap. Never collapses. The cat
   is left out when the section is shorter than the sprite or the text

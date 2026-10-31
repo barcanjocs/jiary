@@ -510,6 +510,17 @@ const CONTENT: Animation = &[(750, &CONTENT_A), (750, &CONTENT_B)];
 const DOWNCAST: Animation = &[(1500, &SAD)];
 
 impl Mood {
+    /// The canvas columns the cat itself spans in this mood (both cats in a
+    /// meeting), leaving out props and its tail, so a caption can centre
+    /// under the cat rather than the whole scene.
+    pub fn columns(self) -> (u16, u16) {
+        match self {
+            Mood::Sleeping => (6, 20),
+            Mood::Meeting => (0, WIDTH - 1),
+            _ => (10, 20),
+        }
+    }
+
     fn animation(self) -> Animation {
         match self {
             Mood::Idle => IDLE_LOOP,

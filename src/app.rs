@@ -1218,9 +1218,7 @@ impl App {
         }
         if let (Some(area), Some(caption)) = (caption_area, self.caption()) {
             frame.render_widget(
-                Paragraph::new(Span::styled(caption, theme::CAPTION))
-                    .alignment(ratatui::layout::Alignment::Center)
-                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                Paragraph::new(caption_lines(caption, self.mood(), area.width)),
                 area,
             );
         }
@@ -1851,6 +1849,27 @@ fn split_for_cat(inner: Rect) -> (Rect, Option<Rect>, Option<Rect>) {
         ..cat
     });
     (text, Some(cat), caption)
+}
+
+/// The caption wrapped to the cat's canvas `width`, each row centred under
+/// the cat's own columns in `mood` (the scenes aren't centred on the canvas:
+/// a laptop or a curled tail would pull it to one side), or as close as the
+/// canvas allows for rows too wide to centre there.
+fn caption_lines(caption: &str, mood: Mood, width: u16) -> Vec<Line<'static>> {
+    let (left, right) = mood.columns();
+    wrap_text(caption, width as usize)
+        .iter()
+        .map(|row| row.trim())
+        .filter(|row| !row.is_empty())
+        .map(|row| {
+            let len = row.chars().count() as u16;
+            let start = ((left + right + 1).saturating_sub(len) / 2).min(width.saturating_sub(len));
+            Line::from(vec![
+                Span::raw(" ".repeat(start as usize)),
+                Span::styled(row.to_string(), theme::CAPTION),
+            ])
+        })
+        .collect()
 }
 
 /// A seed for picking captions: the clock's nanoseconds, plenty random for
@@ -3074,6 +3093,7 @@ mod tests {
     fn a_caption_shows_under_the_cat_in_faded_italic() {
         let mut t = TestApp::new();
         t.app.active_session = Some(running_session(chrono::Duration::minutes(1), 0));
+        t.app.caption_seed = 0; // "working on world domination..."
         let buf = render(&t.app);
         let rows = caption_rows(&buf);
         // Wrapped to the cat's width.
@@ -3089,10 +3109,34 @@ mod tests {
     }
 
     #[test]
-    fn moods_without_sentences_show_no_caption() {
-        // Nothing has been written for idling yet.
-        let t = TestApp::new();
-        assert_eq!(caption_rows(&render(&t.app)), ["", ""]);
+    fn the_caption_centres_under_the_cat_not_the_canvas() {
+        // Working: the laptop is on the left of the canvas and the cat's
+        // body on columns 10–20, so each row centres on column 54 + 15.
+        let mut t = TestApp::new();
+        t.app.active_session = Some(running_session(chrono::Duration::minutes(1), 0));
+        t.app.caption_seed = 0; // "working on world domination..."
+        let buf = render(&t.app);
+        for y in 8..10 {
+            let row: String = line_from(&buf, y, 54).chars().take(24).collect();
+            let first = row.chars().position(|c| c != ' ').unwrap();
+            let last = row.chars().count() - 1 - row.chars().rev().position(|c| c != ' ').unwrap();
+            assert!((29..=31).contains(&(first + last)), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn caption_rows_too_wide_to_centre_stay_on_the_canvas() {
+        let lines = caption_lines("don't be evil, don't be evil", Mood::Idle, 24);
+        let widths: Vec<usize> = lines.iter().map(Line::width).collect();
+        assert!(widths.iter().all(|&w| w <= 24), "{widths:?}");
+        assert_eq!(widths[0], 24, "pushed back to the canvas's left edge");
+    }
+
+    #[test]
+    fn idling_shows_its_caption_on_one_row() {
+        let mut t = TestApp::new();
+        t.app.caption_seed = 0;
+        assert_eq!(caption_rows(&render(&t.app)), ["what's next, boss?", ""]);
     }
 
     #[test]
