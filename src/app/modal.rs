@@ -1,8 +1,13 @@
-use super::text::wrap_text;
-use crate::theme;
+//! What the modals share: their geometry, the wrapped text input and the
+//! picker list.
+
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, HighlightSpacing, List, ListItem, Paragraph};
+
+use crate::theme;
+
+use super::text::wrap_text;
 
 /// Fixed size of the modals; centered in the content area and shrunk to fit
 /// on tiny terminals (see `centered_rect`). The start form needs room for the

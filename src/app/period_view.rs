@@ -1,3 +1,19 @@
+//! The longer views (`/weekly`, `/monthly`, `/yearly`): a period's days
+//! or months as rows, its totals and its focus grid, paged with ←→.
+
+use chrono::Utc;
+use crossterm::event::KeyCode;
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Paragraph};
+
+use crate::period::Period;
+use crate::session::Session;
+use crate::summary::summarize;
+use crate::theme;
+
 use super::chrome::chrome_layout;
 use super::graphs::{
     activity_bar, centered, focus_grid, focus_legend, hour_labels, item_width, project_bar,
@@ -10,17 +26,6 @@ use super::items::{
 use super::sections::draw_scrollbar;
 use super::text::{fmt_hms, plural};
 use super::{App, Screen};
-use crate::period::Period;
-use crate::session::Session;
-use crate::summary::summarize;
-use crate::theme;
-use chrono::Utc;
-use crossterm::event::KeyCode;
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph};
 
 /// A week or a month on screen: which one (`offset` periods from the
 /// current one), its days, its sessions as loaded when it opened (draw

@@ -1,9 +1,14 @@
-use super::items::{Item, ProjectColors};
-use crate::summary::DaySummary;
-use crate::theme;
+//! The summary's graphs: the timeline and focus line, the share bars and
+//! the focus grids, drawn with half-cell blocks.
+
 use chrono::Utc;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+
+use crate::summary::DaySummary;
+use crate::theme;
+
+use super::items::{Item, ProjectColors};
 
 /// Narrower than this, the summary's graphs are left out.
 pub(super) const MIN_GRAPH_WIDTH: usize = 10;

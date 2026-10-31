@@ -1,3 +1,20 @@
+//! The main screen: its keys (`handle_main`) and its three sections, the
+//! active session with its notes, today's sessions and the day summary.
+
+use chrono::Utc;
+use crossterm::event::KeyCode;
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Paragraph};
+
+use crate::layout::Section;
+use crate::mascot::Reaction;
+use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
+use crate::summary::{DaySummary, summarize};
+use crate::theme;
+
 use super::cat::{CAT_COLUMNS, caption_lines, cat_fits, split_for_cat};
 use super::forms::{AddNoteForm, Autocomplete, RECENT_PICKS, StartSessionForm, Step};
 use super::graphs::{
@@ -11,18 +28,6 @@ use super::palette::PaletteForm;
 use super::sections::draw_scrollbar;
 use super::text::{fmt_duration, fmt_hms, fmt_time, wrap_text};
 use super::{App, RATING_WINDOW, Screen};
-use crate::layout::Section;
-use crate::mascot::Reaction;
-use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
-use crate::summary::{DaySummary, summarize};
-use crate::theme;
-use chrono::Utc;
-use crossterm::event::KeyCode;
-use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph};
 
 /// How far `[` and `]` move the active session's start.
 pub(super) const START_STEP: chrono::TimeDelta = chrono::TimeDelta::minutes(5);

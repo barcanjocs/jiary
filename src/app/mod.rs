@@ -1,19 +1,23 @@
+//! All of the UI: `App`, the state the screens share, and the session
+//! lifecycle every screen goes through (start, close, rate, undo, notes).
+//! `handle_key` and `draw` dispatch on `Screen` to the per-screen files.
+
 use std::path::PathBuf;
 use std::time::Instant;
 
 use chrono::Utc;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
 
 use crate::db::Db;
 use crate::layout::{LayoutPrefs, Section};
 use crate::mascot::Reaction;
 use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
+
 use cat::fresh_seed;
 use chrome::chrome_layout;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use forms::{AddNoteForm, StartSessionForm};
 use help::draw_help;
-use modal::{picker_list, start_modal_layout};
 use palette::{PaletteForm, draw_palette};
 use period_view::PeriodView;
 

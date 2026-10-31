@@ -1,3 +1,14 @@
+//! The frame around every screen: the header row, the status row with its
+//! key hints (or the last error), and where the terminal cursor goes.
+
+use chrono::Utc;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+
+use crate::layout::Section;
+use crate::theme;
+
 use super::forms::Step;
 use super::modal::{
     SMALL_MODAL_HEIGHT, START_MODAL_HEIGHT, WrappedInput, modal_inner_width, small_modal_layout,
@@ -5,12 +16,6 @@ use super::modal::{
 };
 use super::text::fmt_hms;
 use super::{App, Screen};
-use crate::layout::Section;
-use crate::theme;
-use chrono::Utc;
-use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 
 /// The status-line hint for the help screen; the main screen always shows it.
 const HELP_HINT: (&str, &str) = ("?", "help");

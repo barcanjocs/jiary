@@ -1,6 +1,6 @@
 //! The longer views' periods: calendar weeks (Monday first), months and
 //! years, counted back from the current one. Pure date arithmetic; the view
-//! itself lives in app.rs.
+//! itself lives in app/period_view.rs.
 
 use chrono::{Datelike, Duration, Months, NaiveDate};
 

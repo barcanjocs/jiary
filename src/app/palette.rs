@@ -1,8 +1,6 @@
-use super::modal::WrappedInput;
-use super::text::plural;
-use super::{App, Screen, picker_list, start_modal_layout};
-use crate::period::Period;
-use crate::theme;
+//! The command palette (`/`): the commands it offers, its fuzzy matching,
+//! its keys and its modal.
+
 use crossterm::event::KeyCode;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -11,6 +9,14 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, ListItem, ListState, Paragraph};
+
+use crate::period::Period;
+use crate::theme;
+
+use super::modal::WrappedInput;
+use super::modal::{picker_list, start_modal_layout};
+use super::text::plural;
+use super::{App, Screen};
 
 /// The command palette's state: what was typed (always starting with the
 /// `/` that opened it) and the highlighted match.

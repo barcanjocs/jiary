@@ -1,9 +1,6 @@
-use super::modal::{WrappedInput, picker_list, small_modal_layout, start_modal_layout};
-use super::{App, Screen};
-use crate::db::SessionCombo;
-use crate::layout::Section;
-use crate::mascot::Reaction;
-use crate::theme;
+//! The start form (activity, project and task, each an `Autocomplete`) and
+//! the note form.
+
 use crossterm::event::KeyCode;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -12,6 +9,14 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, ListItem, ListState, Paragraph, Tabs};
+
+use crate::db::SessionCombo;
+use crate::layout::Section;
+use crate::mascot::Reaction;
+use crate::theme;
+
+use super::modal::{WrappedInput, picker_list, small_modal_layout, start_modal_layout};
+use super::{App, Screen};
 
 /// How many recent activity/project/task picks the start form offers.
 pub(super) const RECENT_PICKS: usize = 5;

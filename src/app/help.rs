@@ -1,10 +1,14 @@
-use super::modal::modal_layout;
-use crate::theme;
+//! The help screen: every key, in two columns.
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
+
+use crate::theme;
+
+use super::modal::modal_layout;
 
 /// The help screen: every key, in groups with an accent heading and a rule
 /// under it. Two columns (sessions; sections and mouse) keep it short

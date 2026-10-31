@@ -1,3 +1,15 @@
+//! Main-screen geometry: how the three sections share the height, their
+//! scrolling, resizing and collapsing, and the mouse that drives them.
+
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+
+use crate::layout::{Areas, ContentHeights, Section};
+use crate::theme;
+
 use super::cat::{CAT_BLOCK_HEIGHT, cat_fits};
 use super::chrome::chrome_layout;
 use super::graphs::{GRAPH_ROWS, MIN_GRAPH_WIDTH};
@@ -5,13 +17,6 @@ use super::items::SUMMARY_LABEL_WIDTH;
 use super::main_screen::text_width;
 use super::text::{fmt_hms, plural};
 use super::{App, Screen};
-use crate::layout::{Areas, ContentHeights, Section};
-use crate::theme;
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 /// A scrollbar in `track` (a border column) when `total` rows don't fit in
 /// `visible`; nothing otherwise.

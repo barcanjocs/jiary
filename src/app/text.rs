@@ -1,3 +1,5 @@
+//! Plain text helpers: wrapping, plurals, times and durations.
+
 /// Splits `text` into rows of at most `width` chars, breaking after the last
 /// space that fits, or mid-word when a word is longer than a row. Every char
 /// is kept, so the rows concatenate back to `text`. A trailing empty row is

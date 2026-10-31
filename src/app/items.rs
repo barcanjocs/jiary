@@ -1,10 +1,15 @@
+//! The summary's styled items (activities, projects, focus, time split)
+//! and how they wrap beside their labels. Shared by the main screen's
+//! summary and the longer views.
+
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use super::graphs::focus_color;
-use super::text::{fmt_hms, plural, wrap_text};
 use crate::summary::DaySummary;
 use crate::theme;
+
+use super::graphs::focus_color;
+use super::text::{fmt_hms, plural, wrap_text};
 
 /// `label` beside the first row (as `theme::kv` draws it), the other rows
 /// indented to line up under the first row's value.

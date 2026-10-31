@@ -1,3 +1,24 @@
+//! The UI's tests: key handling against a throwaway db, and rendering into
+//! a `TestBackend` buffer.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use chrono::TimeZone;
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::text::Line;
+
+use crate::db::Db;
+use crate::idle;
+use crate::mascot::Mood;
+use crate::period::Period;
+use crate::summary::summarize;
+use crate::theme;
+
 use super::cat::{DROWSY_AFTER_MINUTES, caption_lines, fresh_seed};
 use super::chrome::chrome_layout;
 use super::forms::{AddNoteForm, Autocomplete, StartSessionForm, Step, fuzzy_filter};
@@ -11,21 +32,6 @@ use super::palette::{COMMANDS, PaletteForm, palette_matches};
 use super::period_view::PeriodView;
 use super::text::{fmt_time, wrap_text};
 use super::*;
-use crate::db::Db;
-use crate::idle;
-use crate::mascot::Mood;
-use crate::period::Period;
-use crate::summary::summarize;
-use crate::theme;
-use chrono::TimeZone;
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
-use ratatui::style::Color;
-use ratatui::style::Modifier;
-use ratatui::text::Line;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 

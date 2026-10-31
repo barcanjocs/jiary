@@ -1,8 +1,6 @@
-use super::modal::small_modal_layout;
-use super::text::{fmt_duration, fmt_time};
-use super::{App, Screen};
-use crate::session::{self, BREAK, DISRUPTION};
-use crate::theme;
+//! Coming back after an absence during a work session: noticing it
+//! (`observe_idle`) and asking what that time was.
+
 use chrono::Utc;
 use crossterm::event::KeyCode;
 use ratatui::Frame;
@@ -10,6 +8,13 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
+
+use crate::session::{self, BREAK, DISRUPTION};
+use crate::theme;
+
+use super::modal::small_modal_layout;
+use super::text::{fmt_duration, fmt_time};
+use super::{App, Screen};
 
 /// How long nobody has to touch the computer during a work session before
 /// coming back asks what that time was.

@@ -1,13 +1,19 @@
-use super::App;
-use super::text::wrap_text;
+//! The cat beside the active session: its mood, its short reactions to
+//! what was just done, and the caption under it.
+
+use std::time::Instant;
+
+use chrono::Utc;
+use ratatui::layout::Rect;
+use ratatui::text::{Line, Span};
+
 use crate::captions;
 use crate::mascot::{self, Mood, Reaction};
 use crate::session::{BREAK, DISRUPTION, MEETING};
 use crate::theme;
-use chrono::Utc;
-use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use std::time::Instant;
+
+use super::App;
+use super::text::wrap_text;
 
 /// After this long in a work session the cat gets drowsy, a nudge to take a
 /// break. (A candidate for a user setting.)
