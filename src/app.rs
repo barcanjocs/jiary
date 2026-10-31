@@ -240,27 +240,16 @@ impl App {
         }
     }
 
-    /// Creates a new session in the db and mirrors it in memory as the active
-    /// session. On failure records the error and leaves the active session
-    /// unchanged.
+    /// Creates a new session in the db and makes it the active session. On
+    /// failure records the error and leaves the active session unchanged.
     fn start_session(&mut self, activity: &str, project: Option<String>, task: Option<String>) {
         match self
             .db
             .create_session(activity, project.as_deref(), task.as_deref())
         {
-            Ok(id) => {
+            Ok(session) => {
                 self.clear_error();
-                self.active_session = Some(Session {
-                    id,
-                    started_at: Utc::now(),
-                    ended_at: None,
-                    project,
-                    task,
-                    activity: activity.to_string(),
-                    notes: None,
-                    focus: None,
-                    interruptions: None,
-                });
+                self.active_session = Some(session);
             }
             Err(e) => self.set_error(e),
         }

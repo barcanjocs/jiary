@@ -82,12 +82,14 @@ impl Db {
         Ok(Self { conn })
     }
 
+    /// Inserts a new active session and returns it as stored, so callers
+    /// mirror the db's own `started_at` rather than a second clock reading.
     pub fn create_session(
         &self,
         activity: &str,
         project: Option<&str>,
         task: Option<&str>,
-    ) -> Result<i64, DbError> {
+    ) -> Result<Session, DbError> {
         // Explicit '+00:00' offset rather than 'Z': SQLite's date functions
         // parse the former but silently ignore the latter.
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
@@ -98,7 +100,17 @@ impl Db {
                 params![now, project, task, activity],
             )
             .map_err(DbError::Sqlite)?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(Session {
+            id: self.conn.last_insert_rowid(),
+            started_at: parse_timestamp(now)?,
+            ended_at: None,
+            project: project.map(str::to_string),
+            task: task.map(str::to_string),
+            activity: activity.to_string(),
+            notes: None,
+            focus: None,
+            interruptions: None,
+        })
     }
 
     pub fn get_active_session(&self) -> Result<Option<Session>, DbError> {
@@ -345,10 +357,11 @@ mod tests {
     #[test]
     fn new_sessions_are_stored_with_explicit_utc_offset() {
         let tmp = TmpDb::new();
-        let id = tmp
+        let session = tmp
             .db
             .create_session("Programming", Some("proj"), None)
             .unwrap();
+        let id = session.id;
         let started_at: String = tmp
             .db
             .conn
@@ -359,6 +372,12 @@ mod tests {
         assert!(
             started_at.ends_with("+00:00"),
             "expected '+00:00' suffix, got {started_at}"
+        );
+        // The returned session mirrors the stored row exactly.
+        assert_eq!(session.started_at, parse_timestamp(started_at).unwrap());
+        assert_eq!(
+            tmp.db.get_active_session().unwrap().unwrap().started_at,
+            session.started_at
         );
     }
 
