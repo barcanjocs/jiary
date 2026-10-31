@@ -14,6 +14,7 @@ use crate::idle;
 use crate::mascot::Mood;
 use crate::period::Period;
 use chrono::TimeZone;
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;

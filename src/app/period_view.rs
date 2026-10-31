@@ -6,8 +6,9 @@ use super::items::{
     DAY_TOTAL_WIDTH, SUMMARY_LABEL_WIDTH, activity_items, day_total, focus_items, hanging_lines,
     project_items, time_split_items, wrap_items,
 };
+use super::sections::draw_scrollbar;
 use super::text::{fmt_hms, plural};
-use super::{App, Screen, chrome_layout, draw_scrollbar};
+use super::{App, Screen, chrome_layout};
 use crate::period::Period;
 use crate::session::Session;
 use crate::summary::summarize;
