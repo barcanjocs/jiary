@@ -2503,7 +2503,7 @@ fn yearly_has_a_row_per_month_then_its_totals_then_the_focus_grid() {
         "{}",
         text(&lines[focus + 2])
     );
-    for (row, weekday) in ["Mon", "Wed", "Fri", "Sun"].iter().enumerate() {
+    for (row, weekday) in ["Mo Tu", "We Th", "Fr Sa", "Su"].iter().enumerate() {
         assert!(
             text(&lines[focus + 3 + row])
                 .trim_start()
@@ -2558,7 +2558,13 @@ fn the_year_grid_stacks_two_days_per_cell() {
     ];
     let grid = year_focus_grid(&days, day(1, 1), day(12, 31), day(1, 5));
     assert_eq!(grid.len(), 5, "month names, then four weekday-pair rows");
-    assert!(grid[0][0].content.starts_with("    Jan"));
+    assert!(grid[0][0].content.starts_with("      Jan"));
+    // Each row names both its days, top then bottom.
+    let labels = grid[1..]
+        .iter()
+        .map(|row| row[0].content.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["Mo Tu ", "We Th ", "Fr Sa ", "Su    "]);
     let cell = |row: usize, week: usize| &grid[row][1 + week];
     let colors = |row, week| {
         (

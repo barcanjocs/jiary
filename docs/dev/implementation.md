@@ -352,7 +352,8 @@ them doesn't move things around:
    `focus_grid` (week, month) has a row per weekday and a column per week,
    a `██` per day; `year_focus_grid` fits 53 weeks in 80 columns with the
    month names over it and two days per character row (`▀`: the upper day
-   as foreground, the lower as background). See [Colors](#colors).
+   as foreground, the lower as background), each row labelled with both
+   days (`Mo Tu`, `We Th`, `Fr Sa`, `Su`). See [Colors](#colors).
 
 The running session counts through its in-memory copy. `draw_period`
 frames the view in an accent box titled with the period, with a scrollbar

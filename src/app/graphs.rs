@@ -223,8 +223,9 @@ pub(super) fn focus_grid(
 
 /// A year's focus grid, compact enough for 53 weeks in 80 columns: a
 /// column per week, the month names over them, and the weekdays two to a
-/// row, each day half a row tall (`▀`: the top day in front, the bottom one
-/// behind), so the squares stay square without gaps. Colors as in
+/// row, labelled with both ("Mo Tu"), each day half a row tall (`▀`: the
+/// top day in front, the bottom one behind), so the squares stay square
+/// without gaps. Colors as in
 /// `focus_grid`, with `theme::EMPTY_DAY` where nothing was tracked.
 pub(super) fn year_focus_grid(
     days: &[(chrono::NaiveDate, DaySummary)],
@@ -233,7 +234,7 @@ pub(super) fn year_focus_grid(
     today: chrono::NaiveDate,
 ) -> Vec<Item> {
     use chrono::Datelike;
-    const WEEKDAY: usize = 4; // "Mon "
+    const WEEKDAY: usize = 6; // "Mo Tu "
     let monday = first - chrono::Duration::days(first.weekday().num_days_from_monday() as i64);
     let weeks = ((last - monday).num_days() / 7 + 1) as usize;
     let date = |week: usize, weekday: u32| {
@@ -275,8 +276,13 @@ pub(super) fn year_focus_grid(
         })
     };
     for top in [0, 2, 4, 6] {
-        let name = date(0, top).format("%a ").to_string();
-        let mut row = vec![Span::styled(name, theme::DIMMED)];
+        // Both days the row holds, top then bottom: "Mo Tu", …, "Su".
+        let short = |weekday| date(0, weekday).format("%a").to_string()[..2].to_string();
+        let name = match top {
+            6 => short(top),
+            _ => format!("{} {}", short(top), short(top + 1)),
+        };
+        let mut row = vec![Span::styled(format!("{name:WEEKDAY$}"), theme::DIMMED)];
         for week in 0..weeks {
             let upper = color(date(week, top));
             let lower = if top < 6 {
