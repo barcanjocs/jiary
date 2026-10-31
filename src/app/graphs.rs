@@ -224,7 +224,8 @@ pub(super) fn focus_grid(
 /// A year's focus grid, compact enough for 80 columns: a column per week
 /// of each month, the weeks split where a month ends (so each month is a
 /// block of its own and the week it shares with the next shows its days
-/// in both, blank where the other month's are), the month names over their
+/// in both, blank where the other month's are; a blank column after a
+/// month that ends on a Sunday), the month names over their
 /// blocks, and the weekdays two to a row, labelled with both ("Mo Tu"),
 /// each day half a row tall (`▀`: the top day in front, the bottom one
 /// behind), so the squares stay square without gaps. Colors as in
@@ -267,6 +268,17 @@ pub(super) fn year_focus_grid(
             }));
             monday += chrono::Duration::weeks(1);
         }
+        // A month ending on a Sunday has no split week to set it apart from
+        // the next one, so a blank column does.
+        if columns.last().is_some_and(|week| week[6].is_some()) {
+            columns.push([None; 7]);
+        }
+    }
+    if columns
+        .last()
+        .is_some_and(|week| week.iter().all(Option::is_none))
+    {
+        columns.pop();
     }
     header.resize(WEEKDAY + columns.len(), ' ');
     let header = header

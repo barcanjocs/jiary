@@ -352,7 +352,8 @@ them doesn't move things around:
    `focus_grid` (week, month) has a row per weekday and a column per week,
    a `██` per day; `year_focus_grid` has a column per week of each month,
    splitting the week a month ends in so each month is its own block under
-   its name (67–70 columns for any year), and two days per character row
+   its name, with a blank column after a month that ends on a Sunday
+   (which has no split week; 70–71 columns for any year), and two days per character row
    (`▀`: the upper day as foreground, the lower as background), each row
    labelled with both days (`Mo Tu`, `We Th`, `Fr Sa`, `Su`). See
    [Colors](#colors).

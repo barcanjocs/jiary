@@ -2603,6 +2603,15 @@ fn the_year_grid_stacks_two_days_per_cell() {
     assert_eq!(colors(4, 5), ("▀", Some(theme::FOCUS_RAMP[8]), None));
     // So each month's name sits over its own block.
     assert!(grid[0][0].content.starts_with("      Jan  Feb"));
+    // May 2026 ends on a Sunday: no split week sets it apart from June, so
+    // a blank column does (May's five weeks, the gap, then June).
+    let header = grid[0][0].content.as_ref();
+    let may = header.find("May").unwrap();
+    assert_eq!(header.find("Jun").unwrap(), may + 6, "{header}");
+    let gap = may - 6 + 5;
+    for row in &grid[1..] {
+        assert_eq!(row[1 + gap].content, " ");
+    }
     // 53 weeks fit in 80 columns.
     assert!(item_width(&grid[1]) <= 78);
 }
