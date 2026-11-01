@@ -374,3 +374,14 @@ fn the_wheel_scrolls_a_month() {
     assert!(max > 0);
     assert_eq!(period_view(&t).scroll, max, "not past the bottom");
 }
+
+#[test]
+fn j_and_k_scroll_a_month() {
+    let mut t = TestApp::new();
+    open(&mut t, "monthly");
+    t.key(KeyCode::Char('j'));
+    t.key(KeyCode::Char('j'));
+    assert_eq!(period_view(&t).scroll, 2);
+    t.key(KeyCode::Char('k'));
+    assert_eq!(period_view(&t).scroll, 1);
+}
