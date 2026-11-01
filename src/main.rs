@@ -7,6 +7,7 @@ mod lock;
 mod mascot;
 mod period;
 mod session;
+mod settings;
 mod summary;
 mod theme;
 
@@ -99,9 +100,11 @@ fn main() {
     // select text with Shift held while it is on.
     let _ = execute!(io::stdout(), EnableMouseCapture);
 
-    // Db::open created the data dir, so the layout file can live beside it.
+    // Db::open created the data dir, so the layout and settings files can
+    // live beside it.
     let layout_path = db::data_dir().map(|dir| dir.join("layout.conf"));
-    let result = run(&mut terminal, app::App::new(db, layout_path));
+    let settings_path = db::data_dir().map(|dir| dir.join("settings.conf"));
+    let result = run(&mut terminal, app::App::new(db, layout_path, settings_path));
     let _ = terminal.show_cursor();
     let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();

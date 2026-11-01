@@ -44,6 +44,10 @@ enum Action {
     View(Period),
     /// The rename form, which has no key either.
     Rename,
+    /// Today's sleep and mood.
+    Mood,
+    /// Turns sleep and mood on or off.
+    MoodOn(bool),
 }
 
 const fn command(
@@ -80,6 +84,13 @@ pub(super) const COMMANDS: &[Command] = &[
     view("monthly", "this month, by day", Period::Month),
     view("yearly", "this year's focus", Period::Year),
     screen("rename", "rename or merge a label", Action::Rename),
+    screen("mood", "today's sleep and mood", Action::Mood),
+    screen(
+        "mood-off",
+        "stop asking sleep and mood",
+        Action::MoodOn(false),
+    ),
+    screen("mood-on", "ask sleep and mood again", Action::MoodOn(true)),
     command("start", "start a session", 's', "s"),
     command("end", "end the session", 'e', "e"),
     command("note", "add a note", 'n', "n"),
@@ -208,6 +219,8 @@ impl App {
                         Action::Key(key) => return self.handle_main(key),
                         Action::View(period) => self.open_period(period, 0),
                         Action::Rename => self.open_rename(),
+                        Action::Mood => self.ask_mood(),
+                        Action::MoodOn(on) => self.set_sleep_and_mood(on),
                     }
                 }
             }

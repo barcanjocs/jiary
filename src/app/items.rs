@@ -148,6 +148,56 @@ pub(super) fn focus_items(summary: &DaySummary) -> Vec<Item> {
     ]
 }
 
+/// Fewer days than this with an answer and its focus average isn't shown:
+/// over so few days it says more about chance than about sleep or mood.
+pub(super) const MIN_DAYS: usize = 5;
+
+/// The focus of days grouped by their answer to one question (sleep or
+/// mood), best answer first: per answer, the average of its days' focus
+/// averages with the day count, or "not enough data yet" under
+/// `MIN_DAYS`. `days` holds each rated day's answer and focus average;
+/// `phrase` says what an answer means ("after good sleep").
+pub(super) fn grouped_focus_items(
+    days: &[(Option<i32>, f64)],
+    phrase: &dyn Fn(i32) -> String,
+) -> Vec<Item> {
+    let items = (1..=3)
+        .rev()
+        .filter_map(|answer| {
+            let focus = days
+                .iter()
+                .filter(|(a, _)| *a == Some(answer))
+                .map(|(_, focus)| focus)
+                .collect::<Vec<_>>();
+            let n = focus.len();
+            Some(match n {
+                0 => return None,
+                n if n < MIN_DAYS => vec![Span::styled(
+                    format!(
+                        "{}: not enough data yet ({})",
+                        phrase(answer),
+                        plural(n, "day")
+                    ),
+                    theme::DIMMED,
+                )],
+                n => {
+                    let avg = focus.into_iter().sum::<f64>() / n as f64;
+                    vec![
+                        Span::raw("focus "),
+                        Span::styled(format!("{avg:.1}"), theme::VALUE.fg(focus_color(avg))),
+                        Span::raw(format!(" {}", phrase(answer))),
+                        Span::styled(format!(" ({})", plural(n, "day")), theme::DIMMED),
+                    ]
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    match items.is_empty() {
+        true => vec![vec![Span::styled("no rated days to compare", theme::NONE)]],
+        false => items,
+    }
+}
+
 /// A day's (or month's) tracked time and focus average, at the end of its
 /// row in the longer views (`DAY_TOTAL_WIDTH` columns).
 pub(super) fn day_total(summary: &DaySummary) -> Item {

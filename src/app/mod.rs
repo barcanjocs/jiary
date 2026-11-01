@@ -13,11 +13,13 @@ use crate::db::Db;
 use crate::layout::{LayoutPrefs, Section};
 use crate::mascot::Reaction;
 use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
+use crate::settings::Settings;
 
 use cat::fresh_seed;
 use chrome::chrome_layout;
 use forms::{AddNoteForm, StartSessionForm};
 use help::draw_help;
+use mood::MoodForm;
 use palette::{PaletteForm, draw_palette};
 use period_view::PeriodView;
 use rename::RenameForm;
@@ -31,6 +33,7 @@ mod help;
 mod items;
 mod main_screen;
 mod modal;
+mod mood;
 mod palette;
 mod period_view;
 mod rename;
@@ -80,6 +83,12 @@ pub struct App {
     /// (when set) whenever they change.
     layout: LayoutPrefs,
     layout_path: Option<PathBuf>,
+    /// Settings, saved to `settings_path` (when set) whenever they change.
+    settings: Settings,
+    settings_path: Option<PathBuf>,
+    /// A short message for the status line and when it was given; it shows
+    /// for `NOTICE_TIME` (say, after turning sleep and mood off).
+    notice: Option<(String, Instant)>,
     /// The main-screen section that Space and +/- act on.
     focus: Section,
     /// First visible row of today's sessions.
@@ -120,6 +129,9 @@ pub struct App {
 /// a rating given right away is the honest one.
 const RATING_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How long a notice stays in the status line.
+const NOTICE_TIME: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// A session change, as the session it ended and those it created (either
 /// may be missing: `e` only ends one, starting from nothing only creates
 /// one; counting an absence as a break creates the break and the resumed
@@ -142,15 +154,18 @@ enum Screen {
     Period(PeriodView),
     /// Renaming or merging a label (`/rename`); boxed like the start form.
     Rename(Box<RenameForm>),
+    /// Today's sleep and mood: before the day's first session, or `/mood`.
+    Mood(MoodForm),
     /// Back after `AWAY_AFTER` or more without touching the computer,
     /// during a work session: what was that time?
     Away(chrono::DateTime<Utc>),
 }
 
 impl App {
-    /// `layout_path` is where the main-screen layout is loaded from and saved
-    /// to; `None` keeps it in memory only (tests).
-    pub fn new(db: Db, layout_path: Option<PathBuf>) -> Self {
+    /// `layout_path` and `settings_path` are where the main-screen layout
+    /// and the settings are loaded from and saved to; `None` keeps them in
+    /// memory only (tests).
+    pub fn new(db: Db, layout_path: Option<PathBuf>, settings_path: Option<PathBuf>) -> Self {
         let mut app = Self {
             db,
             active_session: None,
@@ -164,6 +179,9 @@ impl App {
             error: None,
             layout: LayoutPrefs::default(),
             layout_path,
+            settings: Settings::default(),
+            settings_path,
+            notice: None,
             focus: Section::Active,
             today_scroll: 0,
             notes_scroll: 0,
@@ -182,6 +200,12 @@ impl App {
             match LayoutPrefs::load(path) {
                 Ok(layout) => app.layout = layout,
                 Err(e) => app.set_error(format!("Could not read layout: {e}")),
+            }
+        }
+        if let Some(path) = &app.settings_path {
+            match Settings::load(path) {
+                Ok(settings) => app.settings = settings,
+                Err(e) => app.set_error(format!("Could not read settings: {e}")),
             }
         }
 
@@ -421,6 +445,7 @@ impl App {
             Screen::Palette(_) => return self.handle_palette(key),
             Screen::Period(_) => self.handle_period(key),
             Screen::Rename(_) => self.handle_rename(key),
+            Screen::Mood(_) => self.handle_mood(key),
             Screen::Away(since) => {
                 let since = *since;
                 self.handle_away(key, since);
@@ -455,6 +480,7 @@ impl App {
             Screen::Palette(form) => draw_palette(frame, content, form, input),
             Screen::Period(view) => self.draw_period(frame, view),
             Screen::Rename(form) => self.draw_rename(frame, content, form, input),
+            Screen::Mood(form) => self.draw_mood(frame, content, form),
             Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 

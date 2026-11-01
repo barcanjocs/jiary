@@ -12,7 +12,7 @@ use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 
-use crate::db::Db;
+use crate::db::{Day, Db};
 use crate::idle;
 use crate::mascot::Mood;
 use crate::period::Period;
@@ -23,12 +23,13 @@ use super::cat::{DROWSY_AFTER_MINUTES, caption_lines, fresh_seed};
 use super::chrome::chrome_layout;
 use super::forms::{AddNoteForm, Autocomplete, StartSessionForm, Step, fuzzy_filter};
 use super::graphs::{
-    focus_grid, focus_legend, focus_row, half_cells, hour_labels, item_width, share_row,
-    start_of_hour, timeline_row, year_focus_grid,
+    DayCell, focus_cell, focus_grid, focus_legend, focus_row, half_cells, hour_labels, item_width,
+    share_row, start_of_hour, timeline_row, year_focus_grid,
 };
 use super::items::{DAY_TOTAL_WIDTH, day_total};
 use super::main_screen::START_STEP;
 use super::modal::START_MODAL_HEIGHT;
+use super::mood::{MoodForm, MoodStep};
 use super::palette::{COMMANDS, PaletteForm, palette_matches};
 use super::period_view::PeriodView;
 use super::rename::RenameStep;
@@ -41,6 +42,7 @@ mod chrome;
 mod forms;
 mod graphs;
 mod main_screen;
+mod mood;
 mod palette;
 mod period_view;
 mod rename;
@@ -67,9 +69,18 @@ impl TestApp {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open_at(&dir.join("jiary.db")).unwrap();
-        let mut app = App::new(db, None);
+        let mut app = App::new(db, None, None);
         app.set_size((RENDER_WIDTH, RENDER_HEIGHT));
+        // Off, so `s` opens the start form at once; the sleep-and-mood
+        // tests turn it on (`asking_mood`).
+        app.settings.sleep_and_mood = false;
         Self { app, dir }
+    }
+
+    /// With sleep and mood on, as a fresh install has them.
+    fn asking_mood(mut self) -> Self {
+        self.app.settings.sleep_and_mood = true;
+        self
     }
 
     /// Puts the app on the Project step of the start-session form, with
@@ -348,6 +359,11 @@ fn every_screen_survives_tiny_terminals() {
                 first: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
                 last: chrono::NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
                 sessions: Vec::new(),
+                ratings: vec![Day {
+                    date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+                    sleep: Some(3),
+                    mood: None,
+                }],
                 scroll: 99,
             }),
             Screen::Rename(Box::new(RenameForm {
@@ -368,19 +384,31 @@ fn every_screen_survives_tiny_terminals() {
                 counts: (3, 4),
                 notice: Some("word ".repeat(30)),
             })),
+            Screen::Mood(MoodForm {
+                date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+                step: MoodStep::Mood,
+                sleep: Some(1),
+                mood: None,
+                then_start: true,
+            }),
             Screen::Period(PeriodView {
                 period: Period::Month,
                 offset: 0,
                 first: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
                 last: chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
                 sessions: Vec::new(),
+                ratings: vec![Day {
+                    date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+                    sleep: Some(3),
+                    mood: None,
+                }],
                 scroll: 99,
             }),
         ]
     };
     for (width, height) in [(0, 0), (1, 1), (5, 3), (12, 6), (30, 10)] {
         for screen in screens() {
-            let mut t = with_sessions(TestApp::new(), 5).on_screen(screen);
+            let mut t = with_sessions(TestApp::new().asking_mood(), 5).on_screen(screen);
             // With the rating bar's row too.
             t.app.rating = Some((0, Instant::now()));
             t.app.set_size((width, height));

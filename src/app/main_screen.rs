@@ -263,22 +263,7 @@ impl App {
             KeyCode::Char('d') => self.detour(DISRUPTION, true),
             KeyCode::Char('b') => self.detour(BREAK, false),
             KeyCode::Char('m') => self.detour(MEETING, false),
-            KeyCode::Char('s') => {
-                let recent = match self.db.recent_combos(RECENT_PICKS) {
-                    Ok(recent) => recent,
-                    Err(e) => {
-                        self.set_error(e);
-                        Vec::new()
-                    }
-                };
-                self.screen = Screen::StartSession(Box::new(StartSessionForm {
-                    step: Step::Activity,
-                    recent,
-                    activity: Autocomplete::new(self.activities.clone()),
-                    project: Autocomplete::new(self.projects.clone()),
-                    task: Autocomplete::new(Vec::new()),
-                }));
-            }
+            KeyCode::Char('s') => self.start_or_ask(),
             KeyCode::Char('n') => {
                 if self.active_session.is_some() {
                     self.screen = Screen::AddNote(AddNoteForm {
@@ -298,6 +283,24 @@ impl App {
             _ => {}
         };
         false
+    }
+
+    /// Opens the start form, with the recent picks loaded.
+    pub(super) fn open_start_form(&mut self) {
+        let recent = match self.db.recent_combos(RECENT_PICKS) {
+            Ok(recent) => recent,
+            Err(e) => {
+                self.set_error(e);
+                Vec::new()
+            }
+        };
+        self.screen = Screen::StartSession(Box::new(StartSessionForm {
+            step: Step::Activity,
+            recent,
+            activity: Autocomplete::new(self.activities.clone()),
+            project: Autocomplete::new(self.projects.clone()),
+            task: Autocomplete::new(Vec::new()),
+        }));
     }
 
     /// Ends the active session (if any) and starts a detour of `kind` with

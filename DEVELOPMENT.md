@@ -42,9 +42,10 @@ truth for state — this file plus `git log` is all that is needed to resume.
 - Pictures: `cargo test screenshot -- --ignored` regenerates
   `docs/images/`; `main.svg` changes on every run (it shows the time), so
   only commit it when the main screen changed.
-- Next, in order: backlog J (sleep and mood, with its limits), A (browse
-  past days, likely `/day` with ←→ like the period views) and K (soft
-  Pomodoro, with `/settings`).
+- 1.1.0 in progress (everything in the backlog goes in): J (sleep and
+  mood) done, not yet released.
+- Next, in order: backlog A (browse past days, likely `/day` with ←→ like
+  the period views) and K (soft Pomodoro, with `/settings`), then D and F.
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
   maintainer, not an agent. Runner images age out: macOS builds moved to
@@ -109,29 +110,18 @@ from its scope note alone, without re-deriving context.
       hotkey registration — Wayland forbids it and it breaks the
       no-system-deps property. Touches: E's lockfile format, one X11
       activation helper, user manual (`docs/user/`).
-- [ ] **J. Day context: sleep and mood** (medium; touches the db, the start
-      flow and the period views).
-      Two once-a-day ratings to set the day's work against. Discussed
-      2026-10-31; the limits are the point, so keep them:
-      - Exactly two, fixed: sleep and mood, on focus's 1–3 scale. No custom
-        fields or "add a metric": that road ends in a habit tracker, out of
-        scope. The README and the user manual already say Jiary is
-        not a habit tracker; keep it so.
-      - Asked once, cheaply: the day's first `s` opens a small prompt before
-        the start form (`sleep 1/2/3 · mood 1/2/3`, two keys); Esc skips and
-        it doesn't ask again that day. `/day` sets or changes them later.
-        No reminders, no nagging.
-      - Storage: a new table `days(date TEXT PRIMARY KEY, sleep INTEGER,
-        mood INTEGER)`, added with `CREATE TABLE IF NOT EXISTS`, so old dbs
-        just gain it. The first schema change after 1.0: note it in the
-        release.
-      - Showing the relation honestly (personal data is small and noisy):
-        grouped averages in the period totals, e.g. `focus 2.6 after good
-        sleep (12 days) · 1.9 after poor sleep (5 days)`, with the day
-        counts, and "not enough data yet" under ~5 days per group; and
-        sleep/mood as rows of squares beside the focus grid in the month
-        and year views. No correlation coefficients, trend lines or
-        predictions.
+- [x] **J. Sleep and mood** — done 2026-11-01 for 1.1.0: the day's first
+      `s` asks (`app/mood.rs`: sleep, then mood, 1–3, one key each; Esc
+      skips and is stored, so it isn't asked again that day); `/mood` sets
+      or changes today's; `/mood-off` / `/mood-on` turn it all off and on,
+      kept in `settings.conf` (`settings.rs`, on by default; turning it off
+      keeps the answers). Db: a `days(date, sleep, mood)` table, the first
+      schema change after 1.0 (note it in the release). The period views
+      add `Sleep` and `Mood` totals (focus averaged per answer, with day
+      counts, "not enough data yet" under 5 days) and grids beside (week,
+      month) or under (year) the focus grid, only when the period has
+      answers. Limits kept: two fixed questions, no reminders, no
+      correlations or trends.
 - [ ] **K. Soft Pomodoro** (small-medium). A target session length that
       Jiary shows you've reached, without ever interrupting you: you keep
       going while in flow, and when you glance at the screen it says "you
@@ -153,8 +143,9 @@ from its scope note alone, without re-deriving context.
       - `p` on the main screen turns it on or off (also `/pomodoro` in the
         palette, and in `?` help). Toggling mid-session just shows or
         hides the cue against the elapsed time.
-      - Storage: `settings.conf` next to `layout.conf`, read and written
-        like it (tolerating junk lines, see `layout.rs`). Nothing in the
+      - Storage: `settings.conf`, which J added (`settings.rs`); add the
+        Pomodoro keys there. `/settings` should list J's sleep-and-mood
+        switch too (as a row beside `/mood-on` / `/mood-off`). Nothing in the
         db: decided 2026-10-31 not to store the target per session. Hit
         counts mostly restate session length, and they pull toward a score
         or streak, which Jiary avoids (see J). Can be added later as a
@@ -223,6 +214,9 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/layout.rs` — main-screen section geometry (`LayoutPrefs::resolve`,
   resizing with clamping) and the `layout.conf` file. Pure; unit tests at
   the bottom.
+- `src/settings.rs` — `Settings` (sleep and mood on or off) and the
+  `settings.conf` file, read and written like `layout.conf`. Pure; unit
+  tests at the bottom.
 - `src/captions.rs` — sentences under the cat, per mood and per activity;
   add new ones here. Unit tests at the bottom.
 - `src/mascot.rs` — the cat: half-block pixel-art sprites and their
@@ -234,8 +228,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   widgets take their styles from here so the look is tweaked in one place.
 - `src/app/` — all UI, one `impl App` block per file: `mod.rs` (`App`
   state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
-  file per screen (`main_screen`, `forms`, `palette`, `period_view`,
-  `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
+  file per screen (`main_screen`, `forms`, `mood`, `palette`,
+  `period_view`, `rename`, `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
   `items`, `graphs`, `text`), `tests/` (a file per screen, the harness
   in `tests/mod.rs`), and `screenshot.rs` (the
   docs' pictures in `docs/images/`, ignored tests). See docs/dev/implementation.md.

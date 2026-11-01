@@ -9,6 +9,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 
+use crate::db::Day;
 use crate::period::Period;
 use crate::session::Session;
 use crate::summary::summarize;
@@ -16,26 +17,29 @@ use crate::theme;
 
 use super::chrome::chrome_layout;
 use super::graphs::{
-    activity_bar, centered, focus_grid, focus_legend, hour_labels, item_width, project_bar,
-    timeline_row, year_focus_grid,
+    DayCell, activity_bar, centered, focus_cell, focus_grid, focus_legend, hour_labels, item_width,
+    project_bar, timeline_row, year_focus_grid,
 };
 use super::items::{
-    DAY_TOTAL_WIDTH, SUMMARY_LABEL_WIDTH, activity_items, day_total, focus_items, hanging_lines,
-    project_items, time_split_items, wrap_items,
+    DAY_TOTAL_WIDTH, Item, SUMMARY_LABEL_WIDTH, activity_items, day_total, focus_items,
+    grouped_focus_items, hanging_lines, project_items, time_split_items, wrap_items,
 };
+use super::mood::{MOOD_WORDS, SLEEP_WORDS};
 use super::sections::draw_scrollbar;
 use super::text::{fmt_hms, plural};
 use super::{App, Screen};
 
 /// A week or a month on screen: which one (`offset` periods from the
-/// current one), its days, its sessions as loaded when it opened (draw
-/// never queries the db) and how far it is scrolled.
+/// current one), its days, its sessions and its days' sleep and mood as
+/// loaded when it opened (draw never queries the db) and how far it is
+/// scrolled.
 pub(super) struct PeriodView {
     pub(super) period: Period,
     pub(super) offset: i32,
     pub(super) first: chrono::NaiveDate,
     pub(super) last: chrono::NaiveDate,
     pub(super) sessions: Vec<Session>,
+    pub(super) ratings: Vec<Day>,
     pub(super) scroll: usize,
 }
 
@@ -45,14 +49,18 @@ impl App {
     pub(super) fn open_period(&mut self, period: Period, offset: i32) {
         let today = chrono::Local::now().date_naive();
         let (first, last) = period.days(offset, today);
-        let sessions = match self.db.sessions_between(first, last) {
-            Ok(sessions) => {
+        let loaded = self
+            .db
+            .sessions_between(first, last)
+            .and_then(|sessions| Ok((sessions, self.db.days_between(first, last)?)));
+        let (sessions, ratings) = match loaded {
+            Ok(loaded) => {
                 self.clear_error();
-                sessions
+                loaded
             }
             Err(e) => {
                 self.set_error(e);
-                Vec::new()
+                Default::default()
             }
         };
         self.screen = Screen::Period(PeriodView {
@@ -61,6 +69,7 @@ impl App {
             first,
             last,
             sessions,
+            ratings,
             scroll: 0,
         });
     }
@@ -322,8 +331,26 @@ impl App {
             ),
             Span::raw(" a day"),
         ]);
-        // Each group: graph rows before its items, and after them.
-        for (i, (label, before, items, after)) in [
+        // Sleep and mood, when on and the period has any.
+        let rated =
+            |answer: fn(&Day) -> Option<i32>| view.ratings.iter().any(|day| answer(day).is_some());
+        let ratings =
+            self.settings.sleep_and_mood && (rated(|day| day.sleep) || rated(|day| day.mood));
+        let answer = |date: chrono::NaiveDate, answer: fn(&Day) -> Option<i32>| {
+            view.ratings
+                .iter()
+                .find(|day| day.date == date)
+                .and_then(answer)
+        };
+        let grouped = |of: fn(&Day) -> Option<i32>, phrase: &dyn Fn(i32) -> String| {
+            let days = days
+                .iter()
+                .filter_map(|(date, s)| Some((answer(*date, of), s.average_focus?)))
+                .collect::<Vec<_>>();
+            grouped_focus_items(&days, phrase)
+        };
+        let word = |words: [&'static str; 3], answer: i32| words[(answer - 1).clamp(0, 2) as usize];
+        let mut groups = vec![
             ("Total   ", Vec::new(), totals, Vec::new()),
             (
                 "Activity",
@@ -338,10 +365,27 @@ impl App {
                 Vec::new(),
             ),
             ("Focus   ", Vec::new(), focus_items(&total), Vec::new()),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        ];
+        if ratings {
+            groups.push((
+                "Sleep   ",
+                Vec::new(),
+                grouped(|day| day.sleep, &|a| {
+                    format!("after {} sleep", word(SLEEP_WORDS, a))
+                }),
+                Vec::new(),
+            ));
+            groups.push((
+                "Mood    ",
+                Vec::new(),
+                grouped(|day| day.mood, &|a| {
+                    format!("with {} mood", word(MOOD_WORDS, a))
+                }),
+                Vec::new(),
+            ));
+        }
+        // Each group: graph rows before its items, and after them.
+        for (i, (label, before, items, after)) in groups.into_iter().enumerate() {
             if i > 0 {
                 lines.push(Line::default());
             }
@@ -350,10 +394,53 @@ impl App {
         }
 
         // Under the focus text, the focus grid, centered as a block, and
-        // a row further down its legend, centered on its own.
+        // a row further down its legend, centered on its own. With sleep
+        // and mood, their grids too, titled: beside it in a week or a
+        // month, under it in a year.
+        let focus = |date: chrono::NaiveDate| {
+            focus_cell(days.iter().find(|(d, _)| *d == date).map(|(_, s)| s))
+        };
+        let rating = |of: fn(&Day) -> Option<i32>| {
+            move |date: chrono::NaiveDate| match answer(date, of) {
+                Some(value) => DayCell::Rated(value as f64),
+                None => DayCell::Empty,
+            }
+        };
+        let (sleep, mood) = (rating(|day| day.sleep), rating(|day| day.mood));
+        let mut grids: Vec<(&str, &dyn Fn(chrono::NaiveDate) -> DayCell)> = vec![("Focus", &focus)];
+        if ratings {
+            grids.push(("Sleep", &sleep));
+            grids.push(("Mood", &mood));
+        }
         let grid = match view.period {
-            Period::Year => year_focus_grid(&days, view.first, view.last, today),
-            _ => focus_grid(&days, view.first, view.last, today),
+            Period::Year => {
+                let mut rows = Vec::new();
+                for (i, (title, cell)) in grids.iter().enumerate() {
+                    if i > 0 {
+                        rows.push(Vec::new());
+                    }
+                    let title = if ratings { title } else { "" };
+                    rows.extend(year_focus_grid(view.first, view.last, today, cell, title));
+                }
+                rows
+            }
+            _ if ratings => side_by_side(
+                grids
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (title, cell))| {
+                        // Titled over the squares, past the weekdays.
+                        let indent = if i == 0 { 4 } else { 0 };
+                        let title = vec![
+                            Span::raw(" ".repeat(indent)),
+                            Span::styled(title.to_string(), theme::DIMMED),
+                        ];
+                        let grid = focus_grid(view.first, view.last, today, cell, i == 0);
+                        [vec![title], grid].concat()
+                    })
+                    .collect(),
+            ),
+            _ => focus_grid(view.first, view.last, today, &focus, true),
         };
         let block_width = grid.iter().map(item_width).max().unwrap_or(0);
         lines.push(Line::default());
@@ -367,7 +454,33 @@ impl App {
         lines.push(centered(legend, legend_width, width));
         lines
     }
+}
 
+/// Blocks of rows (each as tall as the others) beside each other, three
+/// columns apart.
+fn side_by_side(blocks: Vec<Vec<Item>>) -> Vec<Item> {
+    let widths = blocks
+        .iter()
+        .map(|rows| rows.iter().map(item_width).max().unwrap_or(0))
+        .collect::<Vec<_>>();
+    let height = blocks.iter().map(Vec::len).max().unwrap_or(0);
+    (0..height)
+        .map(|r| {
+            let mut row = Vec::new();
+            for (b, rows) in blocks.iter().enumerate() {
+                let cells = rows.get(r).cloned().unwrap_or_default();
+                let pad = widths[b] - item_width(&cells);
+                row.extend(cells);
+                if b + 1 < blocks.len() {
+                    row.push(Span::raw(" ".repeat(pad + 3)));
+                }
+            }
+            row
+        })
+        .collect()
+}
+
+impl App {
     /// The week or month in a bordered box titled with its dates, scrolled
     /// to `scroll` (clamped), with a scrollbar when it doesn't all fit.
     pub(super) fn draw_period(&self, frame: &mut Frame, view: &PeriodView) {

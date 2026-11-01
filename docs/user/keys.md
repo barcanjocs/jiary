@@ -35,6 +35,20 @@ See [Recording your day](recording.md).
 
 See [The main screen](main-screen.md), which also covers the mouse.
 
+## Sleep and mood
+
+Asked by the day's first `s`, or by `/mood`.
+
+| Key | Action |
+|-----|--------|
+| `1` `2` `3` | Answer the question (sleep, then mood) |
+| `Enter` | Leave the answer as it is |
+| `Backspace` | Back to sleep |
+| `Esc` | Skip for today (or, from `/mood`, cancel) |
+
+`/mood-off` stops asking, and `/mood-on` starts again. See
+[Sleep and mood](recording.md#sleep-and-mood).
+
 ## The start form
 
 | Key | Action |

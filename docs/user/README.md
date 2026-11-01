@@ -3,7 +3,7 @@
 The [README](../../README.md) gets you started. This manual covers the rest.
 
 - [Recording your day](recording.md): starting and ending sessions,
-  rating focus, notes, interruptions, detours, undo, renaming names, and
+  rating focus, sleep and mood, notes, interruptions, detours, undo, renaming names, and
   fixing the times.
 - [The main screen](main-screen.md): its three sections, the cat, colors,
   resizing and the mouse.
@@ -32,6 +32,10 @@ A session has:
 Activities, projects and tasks are free text. Type a new name and it exists.
 Jiary suggests the names you've used before, but it doesn't manage them:
 nothing has a status, a deadline or an owner.
+
+Each day can also have a **sleep** and a **mood** answer, from 1 to 3,
+asked once before its first session. They're there to set the day's work
+against, and you can turn them off.
 
 Three activities are **detours**, things you step into from your work and
 come back from: **Disruption**, **Break** and **Meeting**. Each has its own

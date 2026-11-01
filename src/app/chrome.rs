@@ -14,9 +14,10 @@ use super::modal::{
     SMALL_MODAL_HEIGHT, START_MODAL_HEIGHT, WrappedInput, modal_inner_width, small_modal_layout,
     start_modal_layout,
 };
+use super::mood::MoodStep;
 use super::rename::RenameStep;
 use super::text::fmt_hms;
-use super::{App, Screen};
+use super::{App, NOTICE_TIME, Screen};
 
 /// The status-line hint for the help screen; the main screen always shows it.
 const HELP_HINT: (&str, &str) = ("?", "help");
@@ -117,12 +118,22 @@ impl App {
         total
     }
 
+    /// The notice still showing in the status line, on the main screen.
+    fn current_notice(&self) -> Option<&str> {
+        let (text, given) = self.notice.as_ref()?;
+        (matches!(self.screen, Screen::Main) && given.elapsed() < NOTICE_TIME)
+            .then_some(text.as_str())
+    }
+
     /// Bottom row: the red error when the last db operation failed, otherwise
     /// key hints for the current screen, as many as fit in `width`. The only
     /// place errors and key hints are rendered.
     pub(super) fn status_line(&self, width: u16) -> Line<'static> {
         if let Some(err) = &self.error {
             return Line::from(Span::styled(format!("✗ {err}"), theme::ERROR));
+        }
+        if let Some(notice) = self.current_notice() {
+            return Line::from(Span::styled(notice.to_string(), theme::PROMPT));
         }
         let hints: &[(&str, &str)] = match &self.screen {
             // Most useful first for the focused section. `[?] help` lists
@@ -180,6 +191,26 @@ impl App {
                 RenameStep::What => &[("↑↓", "select"), ("Enter", "next"), ("Esc", "cancel")],
                 RenameStep::Confirm => &[("Enter", "apply"), ("Esc", "cancel")],
                 _ => &[("Tab", "accept"), ("Enter", "next"), ("Esc", "cancel")],
+            },
+            Screen::Mood(form) => match (form.step, form.then_start) {
+                (MoodStep::Sleep, true) => {
+                    &[("1/2/3", "answer"), ("Enter", "keep"), ("Esc", "skip")]
+                }
+                (MoodStep::Sleep, false) => {
+                    &[("1/2/3", "answer"), ("Enter", "keep"), ("Esc", "cancel")]
+                }
+                (MoodStep::Mood, true) => &[
+                    ("1/2/3", "answer"),
+                    ("Enter", "keep"),
+                    ("Bksp", "back"),
+                    ("Esc", "skip"),
+                ],
+                (MoodStep::Mood, false) => &[
+                    ("1/2/3", "answer"),
+                    ("Enter", "keep"),
+                    ("Bksp", "back"),
+                    ("Esc", "cancel"),
+                ],
             },
             Screen::Away(_) => &[
                 ("k", "keep"),

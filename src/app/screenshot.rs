@@ -163,7 +163,7 @@ fn screenshot_of_the_main_screen() {
         }
     }
 
-    let mut app = App::new(db, None);
+    let mut app = App::new(db, None, None);
     app.caption_seed = 0;
     write_svg(&mut app, HEIGHT, "main");
     drop(app);
@@ -177,7 +177,7 @@ fn screenshots_of_the_longer_views() {
     drop(db);
     write_history(&dir.join("jiary.db"));
     let db = Db::open_at(&dir.join("jiary.db")).unwrap();
-    let mut app = App::new(db, None);
+    let mut app = App::new(db, None, None);
 
     // Complete periods look best: last week, last month and last year
     // (this year's grid would end at today).
@@ -270,10 +270,33 @@ fn write_history(path: &std::path::Path) {
     let mut conn = rusqlite::Connection::open(path).unwrap();
     let tx = conn.transaction().unwrap();
     let mut rng = Rng(0x5eed_1234_abcd_9876);
+    // Sleep and mood from a source of their own, so the sessions stay the
+    // same whether or not they are answered.
+    let mut answers = Rng(0x51ee_9a11_0dd5_2026);
     let today = Local::now().date_naive();
     let mut day = today - Duration::days(800);
     while day < today {
-        for s in work_day(&mut rng, day) {
+        let sessions = work_day(&mut rng, day);
+        // Most worked days answered, near the day's focus but not always.
+        let rated = sessions.iter().filter_map(|s| s.5).collect::<Vec<_>>();
+        if !rated.is_empty() && answers.chance(0.85) {
+            let focus = rated.iter().sum::<i32>() as f64 / rated.len() as f64;
+            let mut answer = || {
+                let nudge = if answers.chance(0.35) {
+                    answers.range(-1, 1)
+                } else {
+                    0
+                };
+                (focus.round() as i64 + nudge).clamp(1, 3)
+            };
+            let (sleep, mood) = (answer(), answer());
+            tx.execute(
+                "INSERT INTO days (date, sleep, mood) VALUES (?1, ?2, ?3)",
+                rusqlite::params![day.format("%Y-%m-%d").to_string(), sleep, mood],
+            )
+            .unwrap();
+        }
+        for s in sessions {
             tx.execute(
                 "INSERT INTO sessions (started_at, ended_at, project, task, activity, focus, interruptions)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",

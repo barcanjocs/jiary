@@ -75,6 +75,9 @@ next frame shows the result. No event bus, no async, no shared state:
   sections, `resize` / `set_*_height` move borders with clamping, and
   `parse` / `load` / `save` handle `layout.conf`. Pure geometry, no
   rendering.
+- **`settings.rs`**: `Settings` (for now `sleep_and_mood`), read and
+  written like the layout file, as `settings.conf`. See
+  [Settings file](#settings-file).
 - **`mascot.rs`**: the cat. Sprites are grids of palette characters, two
   pixel rows per terminal row; `mood_lines` / `reaction_lines` pick the
   frame for the time and render it to half-block lines. Colors come from
@@ -88,8 +91,8 @@ next frame shows the result. No event bus, no async, no shared state:
   - `mod.rs`: `App`, `Screen`, the session lifecycle, and the `handle_key` /
     `draw` dispatch on `Screen`.
   - One file per screen: `main_screen.rs`, `forms.rs` (start and note
-    forms, `Autocomplete`, `fuzzy_filter`), `rename.rs`, `palette.rs`,
-    `period_view.rs`, `away.rs`, `help.rs`.
+    forms, `Autocomplete`, `fuzzy_filter`), `mood.rs` (sleep and mood),
+    `rename.rs`, `palette.rs`, `period_view.rs`, `away.rs`, `help.rs`.
   - Shared pieces: `sections.rs` (main-screen geometry, scrolling, mouse),
     `chrome.rs` (header, status line, cursor), `cat.rs` (mood, reactions,
     caption), `modal.rs` (modal geometry, `WrappedInput`, picker list),
@@ -104,7 +107,7 @@ next frame shows the result. No event bus, no async, no shared state:
 
 ### Schema
 
-One table:
+Two tables. `sessions`, one row per session:
 
 ```sql
 CREATE TABLE sessions (
@@ -119,6 +122,21 @@ CREATE TABLE sessions (
     interruptions INTEGER       -- small-interruption count
 );
 ```
+
+`days`, one row per day asked about sleep and mood (1.1.0, the first
+schema change after 1.0):
+
+```sql
+CREATE TABLE days (
+    date TEXT PRIMARY KEY,      -- local date, YYYY-MM-DD
+    sleep INTEGER,              -- 1..3, NULL when skipped
+    mood INTEGER                -- 1..3, NULL when skipped
+);
+```
+
+A row means the day was asked, so a skip (both `NULL`) isn't asked again.
+`day`, `set_day` (an upsert) and `days_between` read and write it as
+`Day`s.
 
 No other tables, by design: projects, tasks and activities are free-text
 labels, not managed objects, and their "lists" are queries over history
@@ -164,8 +182,8 @@ timestamp string it stored, so memory never has its own clock reading.
 ### Data directory
 
 `dirs::data_dir()/jiary/` (`~/Library/Application Support/jiary` on macOS,
-`~/.local/share/jiary` on Linux) holds `jiary.db`, `layout.conf` and
-`jiary.lock`. `Db::open_at(path)` is the test seam: tests open a db in a
+`~/.local/share/jiary` on Linux) holds `jiary.db`, `layout.conf`,
+`settings.conf` and `jiary.lock`. `Db::open_at(path)` is the test seam: tests open a db in a
 temp dir and never touch the real one.
 
 ## App state
@@ -179,6 +197,8 @@ temp dir and never touch the real one.
 | `activities`, `projects`, `project_order`, `tasks`, `previous_notes` | suggestions, project color order, and the active project/task's earlier notes, cached |
 | `screen` | which screen is up, with its form state |
 | `error` | the last db failure, shown in one place |
+| `notice` | a short message for the status line and when it was given (`NOTICE_TIME`, 4 s) |
+| `settings`, `settings_path` | the settings and where they are saved |
 | `layout`, `layout_path`, `focus`, `today_scroll`, `notes_scroll`, `size`, `drag`, `title_press` | the main screen's geometry, focus, scrolling and mouse state |
 | `reaction`, `caption_seed` | the cat's current reaction and the seed that picks its caption |
 | `rating`, `undo` | the open rating window and the last change, for `u` |
@@ -203,7 +223,7 @@ in one place.
 out exactly as it was drawn.
 
 **Startup.** `App::new` attempts every load (active session, today,
-suggestions, layout) and records failures with `set_error` rather than
+suggestions, layout, settings) and records failures with `set_error` rather than
 stopping, so a partly readable db still shows what it can. Only an
 unopenable db exits, in `main.rs`, before `App::new`.
 
@@ -218,6 +238,7 @@ enum Screen {
     Palette(PaletteForm),
     Period(PeriodView),
     Rename(Box<RenameForm>),             // boxed too
+    Mood(MoodForm),                      // sleep and mood
     Away(DateTime<Utc>),                 // back from an absence: since when
 }
 ```
@@ -319,7 +340,10 @@ name, a description and its `Action`:
   returns to Main and calls `handle_main` with that key, so a command can't
   drift from its key, and one can quit.
 - `Action::View`: a view with no key of its own (`/weekly`, `/monthly`,
-  `/yearly`), listed first; `Action::Rename` opens the rename form.
+  `/yearly`), listed first; `Action::Rename` opens the rename form,
+  `Action::Mood` the sleep-and-mood prompt, and `Action::MoodOn(on)` turns
+  sleep and mood on or off (`/mood-on`, `/mood-off`). Names stay short: the
+  longest one sets the column every description starts in.
 
 `palette_matches` filters by fuzzy score on the name (everything, in order,
 for an empty query; ties keep the order). The modal reuses the start form's
@@ -330,7 +354,8 @@ as `name  description  key`.
 
 `Screen::Period(PeriodView)` holds the period, its offset, its first and
 last day, its sessions as `open_period` loaded them
-(`db.sessions_between`), and its scroll. `handle_period`: ←→ / `h` `l`
+(`db.sessions_between`), its days' sleep and mood (`db.days_between`,
+as `ratings`), and its scroll. `handle_period`: ←→ / `h` `l`
 reopen the period before or after (never past the current one), `w` `m`
 `y` switch to this week, month or year, the scroll keys scroll, Esc / `q`
 go back.
@@ -348,7 +373,12 @@ them doesn't move things around:
    scaled to the busiest month, and its `day_total`.
 2. **Totals** over the period, from the same pieces as today's summary
    (`time_split_items` plus the days tracked and the average per day, the
-   activity and project bars and items, `focus_items`).
+   activity and project bars and items, `focus_items`). With sleep and mood
+   on and any answers in the period, `Sleep` and `Mood` groups follow:
+   `grouped_focus_items` averages the days' focus averages per answer,
+   with the day count, and says "not enough data yet" under `MIN_DAYS` (5).
+   Plain grouped averages only: no correlations or trends, since the data
+   is small and noisy.
 3. **The focus grid** and its legend (`focus_legend`), centered.
    `focus_grid` (week, month) has a row per weekday and a column per week,
    a `██` per day; `year_focus_grid` has a column per week of each month,
@@ -357,11 +387,36 @@ them doesn't move things around:
    (which has no split week; 70–71 columns for any year), and two days per character row
    (`▀`: the upper day as foreground, the lower as background), each row
    labelled with both days (`Mo Tu`, `We Th`, `Fr Sa`, `Su`). See
-   [Colors](#colors).
+   [Colors](#colors). Both take a `cell` function giving each day's
+   `DayCell` (`Rated(value)`, `Unrated`, `Empty`; `focus_cell` makes the
+   focus one), so sleep and mood draw with the same code. When those show,
+   their grids follow, titled: beside the focus grid in a week or a month
+   (`side_by_side`, the weekdays only on the first), stacked under it in a
+   year (the title in the header row, over the weekdays).
 
 The running session counts through its in-memory copy. `draw_period`
 frames the view in an accent box titled with the period, with a scrollbar
 on the border.
+
+### Sleep and mood
+
+`s` goes through `start_or_ask` (`mood.rs`): with `settings.sleep_and_mood`
+on and no `days` row for today, it opens `Screen::Mood(MoodForm)` with
+`then_start`, and the start form (`open_start_form`) follows; otherwise the
+start form opens at once. `/mood` opens the same form on today's stored
+answers, without `then_start`.
+
+`MoodForm` holds the date (fixed when it opens), the step (`Sleep`,
+`Mood`), both answers and `then_start`. `1`–`3` answer and move on, Enter
+keeps the answer, Backspace goes back to sleep, and the answer to mood
+saves the day (`set_day`). Esc saves a skip (both `NULL`) under
+`then_start`, and otherwise cancels without writing. Answers are colored
+like focus ratings (`answer_color`).
+
+`/mood-off` and `/mood-on` (`set_sleep_and_mood`) save `settings.conf` at
+once and leave a `notice` in the status line. Off, `s` never asks, `/mood`
+only says it's off, and the longer views leave sleep and mood out; the
+`days` rows stay.
 
 ### Away
 
@@ -553,6 +608,13 @@ a stale or hand-edited file never blocks startup. It's saved on every
 collapse, resize, reset and drag release, through a temp file and a rename;
 failures go to the error line and the in-memory layout carries on.
 
+### Settings file
+
+`settings.conf`, beside `layout.conf` and handled the same way: `key=value`
+lines (`sleep_and_mood`), lenient parsing, saved through a temp file and a
+rename whenever a setting changes. A missing file means the defaults (sleep
+and mood on).
+
 ### Modals and inputs
 
 The start form, the note form, the rename form, the palette and the away
@@ -735,7 +797,10 @@ regenerates them.
   failure lands on the red status line and the app carries on with what it
   has.
 - **No managed objects.** Projects, tasks and activities are strings, and
-  history is their only list, which keeps the schema to one table.
+  history is their only list, which keeps the sessions to one table.
+- **Sleep and mood stay two fixed questions.** No custom fields: that leads
+  to a habit tracker, which Jiary isn't. They're asked once a day, never
+  with a reminder, and can be turned off.
 - **Named colors first.** The UI follows the terminal's theme; 256-color
   hues only where 16 aren't enough, no truecolor.
 - **No system dependencies.** Bundled SQLite. Idle time comes from a

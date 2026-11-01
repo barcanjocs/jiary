@@ -158,24 +158,46 @@ pub(super) fn share_row(shares: &[(Color, chrono::Duration)], width: usize) -> I
     half_cells(&colors)
 }
 
+/// What a day's square in a grid shows: a value on the 1–3 ramp (the
+/// day's focus average, or its sleep or mood), something that could have
+/// been rated but wasn't, or nothing at all.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum DayCell {
+    Rated(f64),
+    Unrated,
+    Empty,
+}
+
+/// A day's focus cell: its average, unrated when it was tracked without a
+/// rating, empty when nothing was tracked.
+pub(super) fn focus_cell(summary: Option<&DaySummary>) -> DayCell {
+    match summary {
+        Some(s) if s.average_focus.is_some() => DayCell::Rated(s.average_focus.unwrap_or(2.0)),
+        Some(s) if !s.tracked.is_zero() => DayCell::Unrated,
+        _ => DayCell::Empty,
+    }
+}
+
 /// The period's days as a grid of squares, GitHub style: a row per
-/// weekday, a column per week (headed by its Monday's date), each day
-/// colored by its average focus on `theme::FOCUS_RAMP`; dark gray when
-/// tracked but unrated, a faint texture when nothing was tracked, blank
-/// outside the period and after `today`. Its legend is `focus_legend`.
+/// weekday (labelled when `weekdays`), a column per week (headed by its
+/// Monday's date), each day as `cell` says: colored on
+/// `theme::FOCUS_RAMP` when rated, dark gray when unrated, a faint texture
+/// when empty, blank outside the period and after `today`. Its legend is
+/// `focus_legend`.
 pub(super) fn focus_grid(
-    days: &[(chrono::NaiveDate, DaySummary)],
     first: chrono::NaiveDate,
     last: chrono::NaiveDate,
     today: chrono::NaiveDate,
+    cell: &dyn Fn(chrono::NaiveDate) -> DayCell,
+    weekdays: bool,
 ) -> Vec<Item> {
     use chrono::Datelike;
-    const WEEKDAY: usize = 4; // "Mon "
+    let weekday_width = if weekdays { 4 } else { 0 }; // "Mon "
     let monday = first - chrono::Duration::days(first.weekday().num_days_from_monday() as i64);
     let weeks = ((last - monday).num_days() / 7 + 1) as usize;
     let week = |w: usize| monday + chrono::Duration::weeks(w as i64);
 
-    let mut header = vec![Span::raw(" ".repeat(WEEKDAY))];
+    let mut header = vec![Span::raw(" ".repeat(weekday_width))];
     // Spaced like the squares below: two columns, a space between.
     let dates = (0..weeks)
         .map(|w| format!("{:<2}", week(w).day()))
@@ -189,29 +211,26 @@ pub(super) fn focus_grid(
             .to_string();
         let today_row = today.weekday().num_days_from_monday() as i64 == weekday
             && (first..=last).contains(&today);
-        let mut row = vec![Span::styled(
-            name,
-            if today_row {
-                theme::TITLE
-            } else {
-                theme::DIMMED
-            },
-        )];
+        let style = if today_row {
+            theme::TITLE
+        } else {
+            theme::DIMMED
+        };
+        let mut row = match weekdays {
+            true => vec![Span::styled(name, style)],
+            false => Vec::new(),
+        };
         for w in 0..weeks {
             let day = week(w) + chrono::Duration::days(weekday);
-            let summary = days.iter().find(|(d, _)| *d == day).map(|(_, s)| s);
-            let cell = match summary {
+            let square = match cell(day) {
                 _ if day < first || day > last || day > today => Span::raw("  "),
-                Some(s) if s.average_focus.is_some() => Span::styled(
-                    "██",
-                    Style::new().fg(theme::focus_gradient(s.average_focus.unwrap_or(2.0))),
-                ),
-                Some(s) if !s.tracked.is_zero() => {
-                    Span::styled("██", Style::new().fg(theme::UNRATED))
+                DayCell::Rated(value) => {
+                    Span::styled("██", Style::new().fg(theme::focus_gradient(value)))
                 }
-                _ => Span::styled("░░", Style::new().fg(theme::UNRATED)),
+                DayCell::Unrated => Span::styled("██", Style::new().fg(theme::UNRATED)),
+                DayCell::Empty => Span::styled("░░", Style::new().fg(theme::UNRATED)),
             };
-            row.push(cell);
+            row.push(square);
             if w + 1 < weeks {
                 row.push(Span::raw(" "));
             }
@@ -229,12 +248,14 @@ pub(super) fn focus_grid(
 /// blocks, and the weekdays two to a row, labelled with both ("Mo Tu"),
 /// each day half a row tall (`▀`: the top day in front, the bottom one
 /// behind), so the squares stay square without gaps. Colors as in
-/// `focus_grid`, with `theme::EMPTY_DAY` where nothing was tracked.
+/// `focus_grid`, with `theme::EMPTY_DAY` for an empty day. `title` goes
+/// in the header row, over the weekdays.
 pub(super) fn year_focus_grid(
-    days: &[(chrono::NaiveDate, DaySummary)],
     first: chrono::NaiveDate,
     last: chrono::NaiveDate,
     today: chrono::NaiveDate,
+    cell: &dyn Fn(chrono::NaiveDate) -> DayCell,
+    title: &str,
 ) -> Vec<Item> {
     use chrono::Datelike;
     const WEEKDAY: usize = 6; // "Mo Tu "
@@ -281,6 +302,9 @@ pub(super) fn year_focus_grid(
     }
     // Each name centered over its block (blocks are at least 4 wide).
     let mut header = vec![' '; WEEKDAY + columns.len()];
+    for (at, c) in header.iter_mut().zip(title.chars().take(WEEKDAY - 1)) {
+        *at = c;
+    }
     for (name, start, width) in labels {
         let at = WEEKDAY + start + width.saturating_sub(name.len()) / 2;
         for (cell, c) in header.iter_mut().skip(at).zip(name.chars()) {
@@ -292,11 +316,10 @@ pub(super) fn year_focus_grid(
 
     let color = |day: Option<chrono::NaiveDate>| -> Option<Color> {
         let day = day.filter(|day| *day <= today)?;
-        let summary = days.iter().find(|(d, _)| *d == day).map(|(_, s)| s)?;
-        Some(match summary.average_focus {
-            Some(avg) => theme::focus_gradient(avg),
-            None if !summary.tracked.is_zero() => theme::UNRATED,
-            None => theme::EMPTY_DAY,
+        Some(match cell(day) {
+            DayCell::Rated(value) => theme::focus_gradient(value),
+            DayCell::Unrated => theme::UNRATED,
+            DayCell::Empty => theme::EMPTY_DAY,
         })
     };
     for top in [0, 2, 4, 6] {

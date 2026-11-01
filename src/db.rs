@@ -36,6 +36,15 @@ impl Label {
     }
 }
 
+/// A day's sleep and mood, each on focus's 1–3 scale. A row with neither
+/// means the day was asked about and skipped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Day {
+    pub date: chrono::NaiveDate,
+    pub sleep: Option<i32>,
+    pub mood: Option<i32>,
+}
+
 pub struct Db {
     conn: Connection,
 }
@@ -89,6 +98,13 @@ WHEN NEW.ended_at IS NULL
 BEGIN
     SELECT RAISE(ABORT, 'another session is already active');
 END;
+
+-- Added in 1.1.0; older databases gain it on their next open.
+CREATE TABLE IF NOT EXISTS days (
+    date TEXT PRIMARY KEY,
+    sleep INTEGER,
+    mood INTEGER
+);
 ";
 
 /// Columns read into a [`SessionRow`], in the order [`read_session_row`]
@@ -306,9 +322,8 @@ impl Db {
                  ORDER BY started_at, id"
             ))
             .map_err(DbError::Sqlite)?;
-        let day = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
         let rows = stmt
-            .query_map(params![day(first), day(last)], read_session_row)
+            .query_map(params![day_key(first), day_key(last)], read_session_row)
             .map_err(DbError::Sqlite)?;
         let rows = rows
             .collect::<Result<Vec<_>, _>>()
@@ -527,6 +542,60 @@ impl Db {
             Err(e) => Err(DbError::Sqlite(e)),
         }
     }
+
+    /// The day's sleep and mood, if it was asked about (a skipped day has
+    /// a row with neither).
+    pub fn day(&self, date: chrono::NaiveDate) -> Result<Option<Day>, DbError> {
+        Ok(self.days_between(date, date)?.pop())
+    }
+
+    /// Sets the day's sleep and mood (`None`s for a skipped day),
+    /// replacing what was there.
+    pub fn set_day(&self, day: Day) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "INSERT INTO days (date, sleep, mood) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (date) DO UPDATE SET sleep = ?2, mood = ?3",
+                params![day_key(day.date), day.sleep, day.mood],
+            )
+            .map_err(DbError::Sqlite)?;
+        Ok(())
+    }
+
+    /// The days from `first` to `last`, both included, that were asked
+    /// about, earliest first.
+    pub fn days_between(
+        &self,
+        first: chrono::NaiveDate,
+        last: chrono::NaiveDate,
+    ) -> Result<Vec<Day>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT date, sleep, mood FROM days
+                 WHERE date BETWEEN ?1 AND ?2 ORDER BY date",
+            )
+            .map_err(DbError::Sqlite)?;
+        let rows = stmt
+            .query_map(params![day_key(first), day_key(last)], |row| {
+                Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(DbError::Sqlite)?;
+        let mut days = Vec::new();
+        for row in rows {
+            let (date, sleep, mood) = row.map_err(DbError::Sqlite)?;
+            // Only Jiary writes this table; a date it can't read is skipped.
+            if let Ok(date) = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d") {
+                days.push(Day { date, sleep, mood });
+            }
+        }
+        Ok(days)
+    }
+}
+
+/// A local date as stored: `YYYY-MM-DD`, as SQLite's `date()` gives it.
+fn day_key(date: chrono::NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
 }
 
 /// A timestamp as stored: RFC 3339 to the second with an explicit offset.
@@ -716,6 +785,27 @@ mod tests {
         );
         assert_eq!(t.db.tasks_in(Some("api")).unwrap(), ["api docs"]);
         assert_eq!(t.db.tasks_in(Some("website")).unwrap(), ["docs"]);
+    }
+
+    #[test]
+    fn days_are_set_replaced_and_read_back_by_range() {
+        let t = TmpDb::new();
+        let date = |d| chrono::NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+        let day = |d, sleep, mood| Day {
+            date: date(d),
+            sleep,
+            mood,
+        };
+        assert_eq!(t.db.day(date(26)).unwrap(), None, "never asked");
+        t.db.set_day(day(26, None, None)).unwrap();
+        assert_eq!(t.db.day(date(26)).unwrap(), Some(day(26, None, None)));
+        t.db.set_day(day(26, Some(3), Some(1))).unwrap();
+        t.db.set_day(day(28, Some(2), None)).unwrap();
+        t.db.set_day(day(30, Some(1), Some(1))).unwrap();
+        assert_eq!(
+            t.db.days_between(date(25), date(29)).unwrap(),
+            [day(26, Some(3), Some(1)), day(28, Some(2), None)]
+        );
     }
 
     #[test]

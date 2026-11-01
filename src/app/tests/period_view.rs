@@ -64,7 +64,7 @@ fn the_focus_grid_colors_each_day_by_its_focus() {
         day(29),
     );
     let summary_of = |sessions: Vec<Session>| summarize(&sessions, None, Utc::now());
-    let days = vec![
+    let days = [
         (
             day(26),
             summary_of(vec![finished_session(at(26, 9), at(26, 11), Some(3))]),
@@ -79,7 +79,8 @@ fn the_focus_grid_colors_each_day_by_its_focus() {
             summary_of(vec![finished_session(at(29, 9), at(29, 10), Some(1))]),
         ),
     ];
-    let grid = focus_grid(&days, first, last, today);
+    let cell = |date| focus_cell(days.iter().find(|(d, _)| *d == date).map(|(_, s)| s));
+    let grid = focus_grid(first, last, today, &cell, true);
     // A header (the week's Monday), then Mon–Sun.
     assert_eq!(grid.len(), 8);
     assert_eq!(grid[0][1].content, "26");
@@ -190,7 +191,7 @@ fn the_year_grid_stacks_two_days_per_cell() {
     let summary_of = |sessions: Vec<Session>| summarize(&sessions, None, Utc::now());
     // 2026 starts on a Thursday: its first week's column holds Thu 1
     // (bottom of the Wed/Thu row) to Sun 4.
-    let days = vec![
+    let days = [
         (
             day(1, 1),
             summary_of(vec![finished_session(at(1, 9), at(1, 10), Some(3))]),
@@ -219,7 +220,8 @@ fn the_year_grid_stacks_two_days_per_cell() {
             )]),
         ),
     ];
-    let grid = year_focus_grid(&days, day(1, 1), day(12, 31), day(2, 1));
+    let cell = |date| focus_cell(days.iter().find(|(d, _)| *d == date).map(|(_, s)| s));
+    let grid = year_focus_grid(day(1, 1), day(12, 31), day(2, 1), &cell, "");
     assert_eq!(grid.len(), 5, "month names, then four weekday-pair rows");
     assert!(grid[0][0].content.starts_with("       Jan"));
     // Each row names both its days, top then bottom.
@@ -243,11 +245,22 @@ fn the_year_grid_stacks_two_days_per_cell() {
         colors(3, 0),
         ("▀", Some(theme::UNRATED), Some(theme::EMPTY_DAY))
     );
-    // Week 1: Mon 5 (rated 1) over Tue 6 (nothing recorded).
-    assert_eq!(colors(1, 1), ("▀", Some(theme::FOCUS_RAMP[0]), None));
-    // January's last week, Mon 26 to Sat 31 (rated 2), is its fifth
-    // column; Sun Feb 1 (rated 3) starts February's block next to it.
-    assert_eq!(colors(3, 4), ("▄", Some(theme::focus_gradient(2.0)), None));
+    // Week 1: Mon 5 (rated 1) over Tue 6 (nothing tracked).
+    assert_eq!(
+        colors(1, 1),
+        ("▀", Some(theme::FOCUS_RAMP[0]), Some(theme::EMPTY_DAY))
+    );
+    // January's last week, Mon 26 to Sat 31 (rated 2, under an empty
+    // Fri 30), is its fifth column; Sun Feb 1 (rated 3) starts February's
+    // block next to it.
+    assert_eq!(
+        colors(3, 4),
+        (
+            "▀",
+            Some(theme::EMPTY_DAY),
+            Some(theme::focus_gradient(2.0))
+        )
+    );
     assert_eq!(colors(4, 4), (" ", None, None));
     assert_eq!(colors(4, 5), ("▀", Some(theme::FOCUS_RAMP[8]), None));
     // So each month's name sits centered over its own block: January's and

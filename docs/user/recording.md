@@ -57,6 +57,26 @@ disruptions aren't focused work, so ending one doesn't open it.
 Today's list shows each rating as a badge: `F1` (red) to `F3` (green), or
 `F-` when unrated.
 
+## Sleep and mood
+
+The day's first `s` asks two things before the start form opens: how you
+slept and how you feel, on the same 1–3 scale as focus.
+
+- **Sleep:** `1` poor, `2` ok, `3` good.
+- **Mood:** `1` low, `2` ok, `3` good.
+
+That's two keys, then the start form. `Enter` leaves a question as it is,
+and `Backspace` goes back to sleep. `Esc` skips the question, and Jiary
+doesn't ask again that day.
+
+`/mood` sets or changes today's answers later. The week, month and year
+views set your focus against them (see
+[Looking back](looking-back.md#sleep-and-mood)).
+
+It's only these two, and Jiary asks once a day, without reminders. If you
+don't want them at all, `/mood-off` stops the question and hides them from
+the views. Your answers so far are kept, and `/mood-on` brings it all back.
+
 ## Undo
 
 `u` undoes the last start or end. A session you ended runs again (its rating

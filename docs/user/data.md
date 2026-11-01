@@ -7,9 +7,11 @@ Everything is in one SQLite file, created on first run:
 - **macOS:** `~/Library/Application Support/jiary/jiary.db`
 - **Linux:** `~/.local/share/jiary/jiary.db`
 
-Next to it are two small files:
+Next to it are three small files:
 
 - `layout.conf`: the main screen's section sizes and collapsed sections;
+- `settings.conf`: whether Jiary asks about sleep and mood (`/mood-off`,
+  `/mood-on`);
 - `jiary.lock`: makes sure only one Jiary runs at a time, so two can't write
   to the diary at once. A second Jiary says the first is already running
   (with its process id) and exits. The lock is released however Jiary
@@ -21,7 +23,7 @@ Copy `jiary.db`. That's your whole diary.
 
 ## What's in it
 
-One table, one row per session:
+Two tables. `sessions` has one row per session:
 
 ```sql
 CREATE TABLE sessions (
@@ -34,6 +36,17 @@ CREATE TABLE sessions (
     notes TEXT,
     focus INTEGER,
     interruptions INTEGER
+);
+```
+
+`days` has a row for each day you were asked about sleep and mood (added in
+1.1.0; an older diary gains the table the first time 1.1.0 opens it):
+
+```sql
+CREATE TABLE days (
+    date TEXT PRIMARY KEY,      -- local date, YYYY-MM-DD
+    sleep INTEGER,              -- 1–3, NULL when skipped
+    mood INTEGER
 );
 ```
 

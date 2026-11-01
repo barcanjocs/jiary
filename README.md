@@ -42,7 +42,9 @@ A typical day:
 1. **`s` to start a session.** Type an activity (Programming, Reading, …),
    then optionally a project and a task. Suggestions come from what you've
    used before: `Tab` picks one, `Enter` moves on. Next time, the form lists
-   your recent combinations, so `1`–`5` starts one in a single key.
+   your recent combinations, so `1`–`5` starts one in a single key. The
+   day's first `s` also asks how you slept and how you feel, one key each
+   (`/mood-off` stops it).
 2. **`n` to add a note**, and **`i` to count an interruption** (a phone
    glance, a chat ping) while you work.
 3. **`d`, `b` or `m` when something else comes up**: a disruption, a break
@@ -58,8 +60,9 @@ the day. Press `/` for the command palette, where `/weekly`, `/monthly` and
 ## Long-term trends
 
 `/weekly`, `/monthly` and `/yearly` show where your time and focus went over
-longer stretches: a timeline per day, totals per activity and project, and a
-focus grid colored from red (1) to green (3). See
+longer stretches: a timeline per day, totals per activity and project, a
+focus grid colored from red (1) to green (3), and your focus set against
+your sleep and mood. See
 [Looking back](docs/user/looking-back.md).
 
 <table>
