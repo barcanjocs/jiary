@@ -164,9 +164,6 @@ from its scope note alone, without re-deriving context.
         setting); when off, nothing changes from today. Update the user
         manual (recording, main screen, keys) and the README's "Why I made
         this", which mentions the 25 minutes.
-- [ ] **Nits** (tiny, do whenever):
-  - `app/tests.rs` (~2,700 lines) is still one file; it could follow the
-    code into one test file per screen, with the harness in `tests/mod.rs`.
 
 ## Conventions (don't drift)
 
@@ -190,7 +187,7 @@ from its scope note alone, without re-deriving context.
   `form` before any `&mut self` call (call arguments keep their borrow alive
   across the call).
 - **Tests:** temp dirs need a unique prefix per module (`jiary-test-` in
-  db.rs, `jiary-app-test-` in app/tests.rs) plus pid and an atomic counter, with
+  db.rs, `jiary-app-test-` in app/tests/) plus pid and an atomic counter, with
   Drop cleanup — parallel tests share one process and would otherwise delete
   each other's live databases.
 - **Commits:** small, lowercase imperative, one concern each; keep the
@@ -239,5 +236,6 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
   file per screen (`main_screen`, `forms`, `palette`, `period_view`,
   `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
-  `items`, `graphs`, `text`), `tests.rs`, and `screenshot.rs` (the
+  `items`, `graphs`, `text`), `tests/` (a file per screen, the harness
+  in `tests/mod.rs`), and `screenshot.rs` (the
   docs' pictures in `docs/images/`, ignored tests). See docs/dev/implementation.md.

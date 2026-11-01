@@ -96,7 +96,8 @@ next frame shows the result. No event bus, no async, no shared state:
     `items.rs` (the summary's styled items and how they wrap), `graphs.rs`
     (timeline, focus line, share bars, focus grids), `text.rs` (wrapping,
     plurals, times).
-  - `tests.rs` (the UI's tests) and `screenshot.rs` (the docs' pictures);
+  - `tests/` (the UI's tests: the harness and shared helpers in `mod.rs`,
+    then a file per screen or area) and `screenshot.rs` (the docs' pictures);
     see [Testing](#testing).
 
 ## Data layer
@@ -670,13 +671,16 @@ Its invariant: **the input line shows exactly what Enter submits.**
 
 ## Testing
 
-Unit tests at the bottom of each module, and the UI's in `app/tests.rs`.
+Unit tests at the bottom of each module, and the UI's in `app/tests/`:
+the harness in `mod.rs`, then a file per screen or area (`forms.rs`,
+`main_screen.rs`, `period_view.rs`, …), each starting with `use super::*;`.
+A helper used by more than one file lives in `mod.rs`.
 No integration-test directory and no shared fixture: each test opens its
 own throwaway db.
 
 **Temp dirs.** Tests run in parallel in one process, so each module's temp
 dirs have their own prefix (`jiary-test-` in `db.rs`, `jiary-app-test-` in
-`app/tests.rs`) plus the pid and an atomic counter, removed on `Drop`.
+`app/tests/`) plus the pid and an atomic counter, removed on `Drop`.
 Shared dirs would let one test delete another's live db. In `TestApp`,
 `app` is declared before `dir` so the connection drops before the dir is
 removed.
@@ -690,7 +694,7 @@ removed.
   pure logic: section heights for every collapsed and resized combination
   and tiny areas, the layout file's round trip and junk tolerance, summary
   totals and focus figures, frame schedules, date ranges.
-- *`app/tests.rs`, behavior*: keys against a `TestApp` (a real db): key
+- *`app/tests/`, behavior*: keys against a `TestApp` (a real db): key
   filtering, autocomplete, the forms, detours and resume, rating and undo,
   moving the start, the away question, the palette, the longer views'
   paging, section focus, collapse, resize and scroll, the mouse (`mouse`,
@@ -700,7 +704,7 @@ removed.
   on a screen. Pushing sessions into `today_sessions` (or
   `with_sessions(t, n)`) is the right level for what `draw` reads from
   memory.
-- *`app/tests.rs`, rendering*: a `TestBackend` at a fixed 80×24
+- *`app/tests/`, rendering*: a `TestBackend` at a fixed 80×24
   (`RENDER_WIDTH` × `RENDER_HEIGHT`, also `TestApp`'s size, so handlers see
   the same geometry), drawn by `render(&app)`, read with char-based
   helpers (`line`, `line_from`, `col_of`, `row_with`), since rows hold
