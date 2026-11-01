@@ -53,7 +53,9 @@ before now, and all of it has to fall on today's date.
 
 ## Releasing
 
-1. Bump `version` in `Cargo.toml` and commit.
+1. Bump `version` in `Cargo.toml`, write the release notes in
+   `docs/releases/vX.Y.Z.md` (what's new, from the user's side, and anything
+   to know when upgrading, such as a schema change), and commit.
 2. Tag the commit and push the tag:
 
    ```sh
@@ -63,7 +65,8 @@ before now, and all of it has to fall on today's date.
 
 The release workflow (`.github/workflows/release.yml`) builds Jiary for macOS
 and Linux, x86_64 and ARM, and publishes the archives with their SHA-256
-checksums as a GitHub release. `install.sh` downloads from the latest
+checksums as a GitHub release, with `docs/releases/vX.Y.Z.md` as its notes
+(GitHub's generated notes when there's no such file). `install.sh` downloads from the latest
 release, so it picks the new one up straight away.
 
 Runner images age out: if a build job fails to start, check that its

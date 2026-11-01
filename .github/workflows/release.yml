@@ -56,6 +56,10 @@ jobs:
     needs: build
     runs-on: ubuntu-22.04
     steps:
+      # Only for the release notes, beside the archives (not over them).
+      - uses: actions/checkout@v4
+        with:
+          path: repo
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -63,8 +67,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The version's notes when docs/releases has them, else GitHub's.
+          notes="repo/docs/releases/${{ github.ref_name }}.md"
+          if [ -f "$notes" ]; then
+            set -- --notes-file "$notes"
+          else
+            set -- --generate-notes
+          fi
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
-            --generate-notes \
+            "$@" \
             jiary-*.tar.gz*

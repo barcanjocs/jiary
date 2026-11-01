@@ -42,10 +42,13 @@ truth for state — this file plus `git log` is all that is needed to resume.
 - Pictures: `cargo test screenshot -- --ignored` regenerates
   `docs/images/`; `main.svg` changes on every run (it shows the time), so
   only commit it when the main screen changed.
-- 1.1.0 in progress (everything in the backlog goes in): J (sleep and
-  mood), K (soft Pomodoro, `/settings`), A (`/rewind`) and D (sessions
-  left running while closed) done, not yet released.
-- Next: backlog F (relaunch as focus), the last item before 1.1.0.
+- 1.1.0 prepared (2026-11-01): J (sleep and mood), K (soft Pomodoro,
+  `/settings`), A (`/rewind`) and D (sessions left running while closed);
+  F dropped. Version bumped, notes in `docs/releases/v1.1.0.md`, which the
+  release workflow now publishes as the release's notes. Waiting on the
+  maintainer's tag push; then check the run and `install.sh`.
+- Next: nothing left in the backlog. Ideas: Enter on a week or month day
+  row to open it in `/rewind`'s day view.
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
   maintainer, not an agent. Runner images age out: macOS builds moved to
@@ -104,17 +107,12 @@ from its scope note alone, without re-deriving context.
       exclusive `flock` (std `File::try_lock`, no dependency) on
       `jiary.lock` in the data dir before the db opens, writing our pid;
       a second jiary prints "already running (pid N)" and exits 1.
-- [ ] **F. Relaunch-as-focus** (small-medium, builds on E). Re-running
-      `jiary` while an instance is live should focus its terminal window
-      instead of erroring: the first instance records pid + `$WINDOWID` in
-      the lockfile; the second reads it on lock failure and activates the
-      window (X11 only, e.g. `wmctrl -ia <id>`), then exits 0. No
-      `$WINDOWID` or non-X → fall back to E's "already running" message.
-      The global-key part stays in the user's environment (desktop
-      shortcut / terminal keybind that runs `jiary`); no in-process global
-      hotkey registration — Wayland forbids it and it breaks the
-      no-system-deps property. Touches: E's lockfile format, one X11
-      activation helper, user manual (`docs/user/`).
+- [-] **F. Relaunch-as-focus** — dropped 2026-11-01. A second `jiary`
+      already says "jiary is already running (pid N)" and exits (E), which
+      is all that was wanted; focusing the first one's window would only
+      work on X11 (`wmctrl`), not on macOS or Wayland. Kept as an idea:
+      the first instance would record `$WINDOWID` in the lockfile and the
+      second activate that window, falling back to E's message.
 - [x] **J. Sleep and mood** — done 2026-11-01 for 1.1.0: the day's first
       `s` asks (`app/mood.rs`: sleep, then mood, 1–3, one key each; Esc
       skips and is stored, so it isn't asked again that day); `/mood` sets
