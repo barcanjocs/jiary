@@ -1,5 +1,7 @@
 //! Coming back after an absence during a work session: noticing it
-//! (`observe_idle`) and asking what that time was.
+//! (`observe_idle`) and asking what that time was. Opening Jiary on a
+//! session left running while it was closed counts as one too, from when
+//! Jiary last ran (`heartbeat` notes it in `last_seen`).
 
 use chrono::Utc;
 use crossterm::event::KeyCode;
@@ -13,12 +15,23 @@ use crate::session::{self, BREAK, DISRUPTION};
 use crate::theme;
 
 use super::modal::small_modal_layout;
-use super::text::{fmt_duration, fmt_time};
+use super::text::{fmt_duration, fmt_when};
 use super::{App, Screen};
 
 /// How long nobody has to touch the computer during a work session before
 /// coming back asks what that time was.
 const AWAY_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
+
+/// How often `heartbeat` notes that Jiary is running.
+const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The away question: since when, and whether Jiary was closed all that
+/// time (rather than open with nobody at the computer).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Away {
+    pub(super) since: chrono::DateTime<Utc>,
+    pub(super) closed: bool,
+}
 
 impl App {
     /// Takes in the system idle time (`None` when the platform can't tell),
@@ -48,6 +61,47 @@ impl App {
         }
     }
 
+    /// Notes that Jiary is running at `now`, at most every `HEARTBEAT`
+    /// (`force`: now, say on quitting), so the next start knows when it
+    /// last ran. main calls it every loop.
+    pub fn heartbeat(&mut self, now: chrono::DateTime<Utc>, force: bool) {
+        let due = force || self.seen_written.is_none_or(|at| at.elapsed() >= HEARTBEAT);
+        let Some(path) = self.seen_path.as_ref().filter(|_| due) else {
+            return;
+        };
+        // Best effort: a missed note only means the question at the next
+        // start measures from an earlier one.
+        let _ = std::fs::write(path, format!("{}\n", now.to_rfc3339()));
+        self.seen_written = Some(std::time::Instant::now());
+    }
+
+    /// At startup: a session still running from before Jiary last ran,
+    /// closed for `AWAY_AFTER` or more since, asks what that time was,
+    /// from when Jiary last ran. Detours too (a break left running
+    /// overnight), with only keep and end.
+    pub(super) fn ask_if_left_running(&mut self, now: chrono::DateTime<Utc>) {
+        let Some(path) = &self.seen_path else {
+            return;
+        };
+        let Some(seen) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| chrono::DateTime::parse_from_rfc3339(text.trim()).ok())
+            .map(|at| at.with_timezone(&Utc))
+        else {
+            return;
+        };
+        let left_running = self
+            .active_session
+            .as_ref()
+            .is_some_and(|s| s.started_at < seen);
+        if left_running && now - seen >= AWAY_AFTER {
+            self.screen = Screen::Away(Away {
+                since: seen,
+                closed: true,
+            });
+        }
+    }
+
     /// Ends an absence: asks about it when a work session ran through it
     /// and the main screen is up (not to throw away a half-filled form).
     /// Returns whether it asked.
@@ -61,7 +115,10 @@ impl App {
                 .as_ref()
                 .is_some_and(|s| !session::is_detour(&s.activity) && s.started_at < since);
         if asks {
-            self.screen = Screen::Away(since);
+            self.screen = Screen::Away(Away {
+                since,
+                closed: false,
+            });
         }
         asks
     }
@@ -77,7 +134,12 @@ impl App {
             }
             KeyCode::Char(c @ ('b' | 'd')) => {
                 let detour = if c == 'b' { BREAK } else { DISRUPTION };
-                let Some(session) = self.active_session.as_ref() else {
+                // A detour left running can't turn into one.
+                let Some(session) = self
+                    .active_session
+                    .as_ref()
+                    .filter(|s| !session::is_detour(&s.activity))
+                else {
                     return;
                 };
                 let (activity, project, task) = (
@@ -120,10 +182,19 @@ impl App {
         closed
     }
 
+    /// Whether the away question offers `b` and `d`: not for a detour.
+    pub(super) fn away_offers_detours(&self) -> bool {
+        self.active_session
+            .as_ref()
+            .is_some_and(|s| !session::is_detour(&s.activity))
+    }
+
     /// The away question: a small modal saying since when, with the
     /// answers.
-    pub(super) fn draw_away(&self, frame: &mut Frame, area: Rect, since: chrono::DateTime<Utc>) {
-        let (modal, top_area, body_area) = small_modal_layout(area, 4);
+    pub(super) fn draw_away(&self, frame: &mut Frame, area: Rect, away: Away) {
+        let since = away.since;
+        let detours = self.away_offers_detours();
+        let (modal, top_area, body_area) = small_modal_layout(area, if detours { 4 } else { 2 });
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(Line::from(Span::styled(" Welcome back ", theme::TITLE)));
@@ -132,8 +203,9 @@ impl App {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 format!(
-                    "Away since {} ({})",
-                    fmt_time(&since),
+                    "{} since {} ({})",
+                    if away.closed { "Closed" } else { "Away" },
+                    fmt_when(&since),
                     fmt_duration(&since, &Utc::now())
                 ),
                 theme::DIMMED,
@@ -147,15 +219,23 @@ impl App {
         let key =
             |k: &str| Span::styled(format!("[{k}] "), Style::new().add_modifier(Modifier::BOLD));
         frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(vec![key("k"), Span::raw(format!("count it as {activity}"))]),
-                Line::from(vec![key("b"), Span::raw("it was a break")]),
-                Line::from(vec![key("d"), Span::raw("it was a disruption")]),
-                Line::from(vec![
-                    key("e"),
-                    Span::raw(format!("end it at {}", fmt_time(&since))),
-                ]),
-            ]),
+            Paragraph::new(
+                [
+                    Some(Line::from(vec![
+                        key("k"),
+                        Span::raw(format!("count it as {activity}")),
+                    ])),
+                    detours.then(|| Line::from(vec![key("b"), Span::raw("it was a break")])),
+                    detours.then(|| Line::from(vec![key("d"), Span::raw("it was a disruption")])),
+                    Some(Line::from(vec![
+                        key("e"),
+                        Span::raw(format!("end it at {}", fmt_when(&since))),
+                    ])),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+            ),
             body_area,
         );
     }

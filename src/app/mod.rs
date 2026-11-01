@@ -15,6 +15,7 @@ use crate::mascot::Reaction;
 use crate::session::{self, BREAK, DISRUPTION, MEETING, Session};
 use crate::settings::Settings;
 
+use away::Away;
 use cat::fresh_seed;
 use chrome::chrome_layout;
 use forms::{AddNoteForm, StartSessionForm};
@@ -91,6 +92,9 @@ pub struct App {
     /// Settings, saved to `settings_path` (when set) whenever they change.
     settings: Settings,
     settings_path: Option<PathBuf>,
+    /// Where `heartbeat` notes that Jiary is running, and when it last did.
+    seen_path: Option<PathBuf>,
+    seen_written: Option<Instant>,
     /// A short message for the status line and when it was given; it shows
     /// for `NOTICE_TIME` (say, after turning sleep and mood off).
     notice: Option<(String, Instant)>,
@@ -130,6 +134,19 @@ pub struct App {
     last_observed: Option<chrono::DateTime<Utc>>,
 }
 
+/// Where the app keeps its files beside the db; `None` keeps that one in
+/// memory only (tests).
+#[derive(Clone, Debug, Default)]
+pub struct Files {
+    /// The main screen's layout (`layout.conf`).
+    pub layout: Option<PathBuf>,
+    /// The settings (`settings.conf`).
+    pub settings: Option<PathBuf>,
+    /// When Jiary was last running (`last_seen`), for a session left
+    /// running while it was closed.
+    pub seen: Option<PathBuf>,
+}
+
 /// How long after a session ends its focus can be rated. Short on purpose:
 /// a rating given right away is the honest one.
 const RATING_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
@@ -167,16 +184,16 @@ enum Screen {
     Rewind(Box<Rewind>),
     /// A day opened from `/rewind`, with the list to go back to.
     PastDay(PastDay),
-    /// Back after `AWAY_AFTER` or more without touching the computer,
-    /// during a work session: what was that time?
-    Away(chrono::DateTime<Utc>),
+    /// Back after `AWAY_AFTER` or more without touching the computer
+    /// during a work session, or opening Jiary on a session left running
+    /// while it was closed: what was that time?
+    Away(Away),
 }
 
 impl App {
-    /// `layout_path` and `settings_path` are where the main-screen layout
-    /// and the settings are loaded from and saved to; `None` keeps them in
-    /// memory only (tests).
-    pub fn new(db: Db, layout_path: Option<PathBuf>, settings_path: Option<PathBuf>) -> Self {
+    /// `files` says where the layout, the settings and when Jiary was last
+    /// running are loaded from and saved to.
+    pub fn new(db: Db, files: Files) -> Self {
         let mut app = Self {
             db,
             active_session: None,
@@ -189,9 +206,11 @@ impl App {
             previous_notes: Vec::new(),
             error: None,
             layout: LayoutPrefs::default(),
-            layout_path,
+            layout_path: files.layout,
             settings: Settings::default(),
-            settings_path,
+            settings_path: files.settings,
+            seen_path: files.seen,
+            seen_written: None,
             notice: None,
             focus: Section::Active,
             today_scroll: 0,
@@ -228,6 +247,7 @@ impl App {
         }
         app.refresh_after_session_change();
         app.refresh_suggestions();
+        app.ask_if_left_running(Utc::now());
 
         app
     }
@@ -477,8 +497,8 @@ impl App {
             Screen::Settings(_) => self.handle_settings(key),
             Screen::Rewind(_) => self.handle_rewind(key),
             Screen::PastDay(_) => self.handle_past_day(key),
-            Screen::Away(since) => {
-                let since = *since;
+            Screen::Away(away) => {
+                let since = away.since;
                 self.handle_away(key, since);
             }
         }
@@ -515,7 +535,7 @@ impl App {
             Screen::Settings(form) => self.draw_settings(frame, content, form),
             Screen::Rewind(view) => self.draw_rewind(frame, content, view),
             Screen::PastDay(day) => self.draw_past_day(frame, day),
-            Screen::Away(since) => self.draw_away(frame, content, *since),
+            Screen::Away(away) => self.draw_away(frame, content, *away),
         }
 
         frame.render_widget(self.status_line(status.width), status);

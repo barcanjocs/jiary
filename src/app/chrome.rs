@@ -227,6 +227,7 @@ impl App {
                 ("Esc", "clear/back"),
             ],
             Screen::PastDay(_) => &[("←→", "older/newer"), ("↑↓", "scroll"), ("Esc", "back")],
+            Screen::Away(_) if !self.away_offers_detours() => &[("k", "keep"), ("e", "end")],
             Screen::Away(_) => &[
                 ("k", "keep"),
                 ("b", "break"),

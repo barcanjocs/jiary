@@ -209,5 +209,13 @@ during a work session, Jiary asks what that time was:
 `u` undoes whichever you pick. Detours are never asked about, since being
 away from the computer is what they're for.
 
-Jiary only notices an absence while it's open. A session left running
-while Jiary was closed isn't caught yet.
+**Closed Jiary with a session running?** Jiary notes every minute that
+it's running. If you open it on a session that was still running when you
+closed it, and Jiary was closed for 15 minutes or more, it asks the same
+question about the time since you closed it. `e` ends the session then, not
+now, so a session left running overnight doesn't count the night. A break,
+disruption or meeting left running is asked about too, with only `k` and
+`e`.
+
+A session that began on an earlier day shows it beside its timer: "since
+yesterday 17:42", or the weekday or date.

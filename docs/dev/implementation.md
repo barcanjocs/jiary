@@ -515,6 +515,21 @@ notices also calls `came_back`, and only brings the question up.
 
 Detours never ask: being away from the computer is what they're for.
 
+**Left running while closed.** `heartbeat(now, force)`, called every loop
+by `main` (and forced once on exit), writes the time to `last_seen` at
+most every `HEARTBEAT` (a minute). `App::new` reads it before the first
+heartbeat overwrites it (`ask_if_left_running`): a running session that
+began before then, with Jiary closed for `AWAY_AFTER` or more, opens
+`Screen::Away(Away { since: last_seen, closed: true })`, which reads
+"Closed since …". This one asks for detours too, offering only `k` and
+`e` (`away_offers_detours`). No `last_seen` (the first run of 1.1.0, or
+tests) asks nothing. Files beside the db reach `App::new` as `Files`
+(layout, settings, last seen; `None` keeps one in memory).
+
+`fmt_when` writes a time with its day when it isn't today ("yesterday
+17:42", "Fri 17:42", "23 Oct 17:42"): the timer's "since" and the away
+question use it.
+
 ### Help
 
 `draw_help` lists every key in two columns of groups (sessions; sections

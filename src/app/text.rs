@@ -33,6 +33,20 @@ pub(super) fn plural(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
+/// A time with its day when that isn't today: "17:42", "yesterday 17:42",
+/// "Fri 17:42" within the week, "23 Oct 17:42" before.
+pub(super) fn fmt_when(dt: &chrono::DateTime<chrono::Utc>) -> String {
+    let local = dt.with_timezone(&chrono::Local);
+    let days = (chrono::Local::now().date_naive() - local.date_naive()).num_days();
+    let time = local.format("%H:%M");
+    match days {
+        ..=0 => time.to_string(),
+        1 => format!("yesterday {time}"),
+        2..=6 => format!("{} {time}", local.format("%a")),
+        _ => format!("{} {time}", local.format("%-d %b")),
+    }
+}
+
 pub(super) fn fmt_time(dt: &chrono::DateTime<chrono::Utc>) -> String {
     dt.with_timezone(&chrono::Local).format("%H:%M").to_string()
 }

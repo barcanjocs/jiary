@@ -23,7 +23,7 @@ use crate::db::Db;
 use crate::period::Period;
 use crate::session::{BREAK, DISRUPTION, MEETING};
 
-use super::{App, Screen};
+use super::{App, Files, Screen};
 
 const WIDTH: u16 = 100;
 const HEIGHT: u16 = 40;
@@ -163,7 +163,7 @@ fn screenshot_of_the_main_screen() {
         }
     }
 
-    let mut app = App::new(db, None, None);
+    let mut app = App::new(db, Files::default());
     app.caption_seed = 0;
     write_svg(&mut app, HEIGHT, "main");
     drop(app);
@@ -177,7 +177,7 @@ fn screenshots_of_the_longer_views() {
     drop(db);
     write_history(&dir.join("jiary.db"));
     let db = Db::open_at(&dir.join("jiary.db")).unwrap();
-    let mut app = App::new(db, None, None);
+    let mut app = App::new(db, Files::default());
 
     // Complete periods look best: last week, last month and last year
     // (this year's grid would end at today).
@@ -208,7 +208,7 @@ fn screenshots_of_rewind() {
     drop(db);
     write_history(&dir.join("jiary.db"));
     let db = Db::open_at(&dir.join("jiary.db")).unwrap();
-    let mut app = App::new(db, None, None);
+    let mut app = App::new(db, Files::default());
     app.set_size((WIDTH, HEIGHT));
     app.open_rewind();
     // A search: the api project's days, with the notes about limits.

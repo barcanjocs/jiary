@@ -26,7 +26,7 @@ use super::items::{
 };
 use super::palette::PaletteForm;
 use super::sections::draw_scrollbar;
-use super::text::{fmt_duration, fmt_hms, fmt_time, wrap_text};
+use super::text::{fmt_duration, fmt_hms, fmt_time, fmt_when, wrap_text};
 use super::{App, RATING_WINDOW, Screen};
 
 /// How far `[` and `]` move the active session's start.
@@ -581,8 +581,10 @@ impl App {
 
         let mut lines = vec![Line::from(vec![
             Span::styled(format!("{h:02}:{m:02}:{s:02}"), self.timer_style()),
+            // With its day when it began before today (left running
+            // overnight, say).
             Span::styled(
-                format!("  since {}", fmt_time(&session.started_at)),
+                format!("  since {}", fmt_when(&session.started_at)),
                 theme::DIMMED,
             ),
         ])];

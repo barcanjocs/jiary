@@ -89,7 +89,7 @@ fn mood_off_stops_asking_and_is_saved() {
     let t = TestApp::new();
     let path = t.dir.join("settings.conf");
     let db = || Db::open_at(&t.dir.join("jiary.db")).unwrap();
-    let mut app = App::new(db(), None, Some(path.clone()));
+    let mut app = App::new(db(), settings_at(&path));
     assert!(app.settings.sleep_and_mood, "on by default");
     for c in "/mood-off".chars() {
         app.handle_key(press(KeyCode::Char(c)));
@@ -102,7 +102,7 @@ fn mood_off_stops_asking_and_is_saved() {
     assert!(matches!(app.screen, Screen::StartSession(_)));
     drop(app);
 
-    let mut app = App::new(db(), None, Some(path));
+    let mut app = App::new(db(), settings_at(&path));
     assert!(!app.settings.sleep_and_mood, "read back at start");
     for c in "/mood".chars() {
         app.handle_key(press(KeyCode::Char(c)));

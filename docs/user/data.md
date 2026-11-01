@@ -7,11 +7,13 @@ Everything is in one SQLite file, created on first run:
 - **macOS:** `~/Library/Application Support/jiary/jiary.db`
 - **Linux:** `~/.local/share/jiary/jiary.db`
 
-Next to it are three small files:
+Next to it are four small files:
 
 - `layout.conf`: the main screen's section sizes and collapsed sections;
 - `settings.conf`: your [settings](recording.md#settings): the Pomodoro,
   its target, and whether Jiary asks about sleep and mood;
+- `last_seen`: when Jiary last ran, noted every minute, so it can ask about
+  a session left running while it was closed;
 - `jiary.lock`: makes sure only one Jiary runs at a time, so two can't write
   to the diary at once. A second Jiary says the first is already running
   (with its process id) and exits. The lock is released however Jiary

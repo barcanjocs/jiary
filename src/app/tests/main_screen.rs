@@ -395,7 +395,13 @@ fn layout_is_saved_on_change_and_restored_on_start() {
     let path = t.dir.join("layout.conf");
     let open = |t: &TestApp| {
         let db = Db::open_at(&t.dir.join("jiary.db")).unwrap();
-        let mut app = App::new(db, Some(path.clone()), None);
+        let mut app = App::new(
+            db,
+            Files {
+                layout: Some(path.clone()),
+                ..Default::default()
+            },
+        );
         app.set_size((RENDER_WIDTH, RENDER_HEIGHT));
         app
     };

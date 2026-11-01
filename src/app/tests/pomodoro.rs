@@ -87,7 +87,7 @@ fn p_turns_it_on_and_off_and_is_saved() {
     let t = TestApp::new();
     let path = t.dir.join("settings.conf");
     let db = || Db::open_at(&t.dir.join("jiary.db")).unwrap();
-    let mut app = App::new(db(), None, Some(path.clone()));
+    let mut app = App::new(db(), settings_at(&path));
     assert_eq!(app.settings.pomodoro, PomodoroMode::Off, "off by default");
     app.handle_key(press(KeyCode::Char('p')));
     assert_eq!(app.settings.pomodoro, PomodoroMode::Soft);
@@ -95,7 +95,7 @@ fn p_turns_it_on_and_off_and_is_saved() {
     assert!(line(&buf, RENDER_HEIGHT - 1).starts_with("Pomodoro on (soft): 25m target"));
     drop(app);
 
-    let mut app = App::new(db(), None, Some(path));
+    let mut app = App::new(db(), settings_at(&path));
     assert_eq!(app.settings.pomodoro, PomodoroMode::Soft, "read back");
     app.handle_key(press(KeyCode::Char('p')));
     assert_eq!(app.settings.pomodoro, PomodoroMode::Off);

@@ -72,7 +72,7 @@ impl TestApp {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open_at(&dir.join("jiary.db")).unwrap();
-        let mut app = App::new(db, None, None);
+        let mut app = App::new(db, Files::default());
         app.set_size((RENDER_WIDTH, RENDER_HEIGHT));
         // Off, so `s` opens the start form at once; the sleep-and-mood
         // tests turn it on (`asking_mood`).
@@ -153,6 +153,14 @@ impl TestApp {
 impl Drop for TestApp {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Files with only the settings kept, at `path`.
+fn settings_at(path: &std::path::Path) -> Files {
+    Files {
+        settings: Some(path.to_path_buf()),
+        ..Default::default()
     }
 }
 

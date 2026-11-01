@@ -99,14 +99,14 @@ Asked by the day's first `s`, or by `/mood`.
 
 See [Renaming and merging names](recording.md#renaming-and-merging-names).
 
-## Back from an absence
+## Back from an absence (or Jiary closed)
 
 | Key | Action |
 |-----|--------|
 | `k` / `Esc` | Keep the time away as part of the session |
-| `b` | Count it as a break, then carry on |
-| `d` | Count it as a disruption, then carry on |
-| `e` | End the session when you left |
+| `b` | Count it as a break, then carry on (not for a detour) |
+| `d` | Count it as a disruption, then carry on (not for a detour) |
+| `e` | End the session when you left (or closed Jiary) |
 
 ## The longer views
 

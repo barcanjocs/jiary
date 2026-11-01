@@ -43,9 +43,9 @@ truth for state — this file plus `git log` is all that is needed to resume.
   `docs/images/`; `main.svg` changes on every run (it shows the time), so
   only commit it when the main screen changed.
 - 1.1.0 in progress (everything in the backlog goes in): J (sleep and
-  mood), K (soft Pomodoro, `/settings`) and A (`/rewind`) done, not yet
-  released.
-- Next, in order: backlog D (stale sessions), then F (relaunch as focus).
+  mood), K (soft Pomodoro, `/settings`), A (`/rewind`) and D (sessions
+  left running while closed) done, not yet released.
+- Next: backlog F (relaunch as focus), the last item before 1.1.0.
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
   maintainer, not an agent. Runner images age out: macOS builds moved to
@@ -93,13 +93,13 @@ from its scope note alone, without re-deriving context.
       with the query kept. All sessions loaded once (`db.all_sessions`).
       Not done: Enter on a day row in `/weekly` / `/monthly` to open it.
 
-- [ ] **D. Stale-session handling** (small). If the app exits mid-session, the
-      next launch shows a "live" timer that actually started before today.
-      Detect `started_at` before local midnight and mark it clearly (e.g.
-      "since yesterday"); make sure `e` still ends it sensibly. Partly
-      covered: while jiary runs, the away check (`observe_idle`) catches
-      idle time and sleep; a session left running with jiary closed is
-      still unhandled at startup.
+- [x] **D. Stale-session handling** — done 2026-11-01 for 1.1.0: Jiary
+      writes `last_seen` every minute (and on exit); opening it on a session
+      that ran while it was closed for 15+ minutes asks the away question
+      from then ("Closed since …"; `e` ends the session at that time).
+      Detours left running are asked too, with only keep and end. The
+      timer shows the day when a session began before today ("since
+      yesterday 17:42", `fmt_when`).
 - [x] **E. Single-instance lock** — done 2026-10-31: `lock.rs` takes an
       exclusive `flock` (std `File::try_lock`, no dependency) on
       `jiary.lock` in the data dir before the db opens, writing our pid;

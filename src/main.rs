@@ -103,9 +103,16 @@ fn main() {
 
     // Db::open created the data dir, so the layout and settings files can
     // live beside it.
-    let layout_path = db::data_dir().map(|dir| dir.join("layout.conf"));
-    let settings_path = db::data_dir().map(|dir| dir.join("settings.conf"));
-    let result = run(&mut terminal, app::App::new(db, layout_path, settings_path));
+    let file = |name: &str| db::data_dir().map(|dir| dir.join(name));
+    let files = app::Files {
+        layout: file("layout.conf"),
+        settings: file("settings.conf"),
+        seen: file("last_seen"),
+    };
+    let mut app = app::App::new(db, files);
+    let result = run(&mut terminal, &mut app);
+    // When this run ended, for a session it leaves running.
+    app.heartbeat(chrono::Utc::now(), true);
     let _ = terminal.show_cursor();
     let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
@@ -116,7 +123,7 @@ fn main() {
     }
 }
 
-fn run(terminal: &mut DefaultTerminal, mut app: app::App) -> io::Result<()> {
+fn run(terminal: &mut DefaultTerminal, app: &mut app::App) -> io::Result<()> {
     // Hidden at startup; cursor_position() says where the cursor belongs each
     // frame (only the start form's input steps show it).
     terminal.hide_cursor()?;
@@ -134,6 +141,7 @@ fn run(terminal: &mut DefaultTerminal, mut app: app::App) -> io::Result<()> {
         while let Ok(idle) = idle_rx.try_recv() {
             app.observe_idle(idle, chrono::Utc::now());
         }
+        app.heartbeat(chrono::Utc::now(), false);
         let size = terminal.size()?;
         app.set_size((size.width, size.height));
         terminal.draw(|frame| app.draw(frame))?;
