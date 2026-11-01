@@ -357,3 +357,20 @@ fn a_months_total_keeps_its_focus_in_the_column() {
     let text: String = total.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(text, " 744h 59m 2.5");
 }
+
+#[test]
+fn the_wheel_scrolls_a_month() {
+    let mut t = TestApp::new();
+    open(&mut t, "monthly");
+    mouse(&mut t, MouseEventKind::ScrollDown, 10, 10);
+    assert_eq!(period_view(&t).scroll, 3);
+    mouse(&mut t, MouseEventKind::ScrollUp, 10, 10);
+    mouse(&mut t, MouseEventKind::ScrollUp, 10, 10);
+    assert_eq!(period_view(&t).scroll, 0, "not past the top");
+    for _ in 0..50 {
+        mouse(&mut t, MouseEventKind::ScrollDown, 10, 10);
+    }
+    let max = t.app.period_max_scroll(period_view(&t));
+    assert!(max > 0);
+    assert_eq!(period_view(&t).scroll, max, "not past the bottom");
+}

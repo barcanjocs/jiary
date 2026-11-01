@@ -90,5 +90,5 @@ answer shows the faint texture.
 |-----|--------|
 | `←` `→` / `h` `l` | The week, month or year before / after (never into the future) |
 | `w` `m` `y` | Switch to this week, month or year |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll (the mouse wheel does too) |
 | `Esc` / `q` | Back to the main screen |

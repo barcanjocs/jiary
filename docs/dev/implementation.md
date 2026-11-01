@@ -581,8 +581,9 @@ list and the longer views.
 
 ### Mouse
 
-`handle_mouse` acts on the main screen only, with the last frame's
-geometry (`main_areas`):
+`handle_mouse` acts on the main screen and, for the wheel only, the
+longer views (`scroll_period`, 3 rows a notch, clamped like the keys).
+On the main screen it uses the last frame's geometry (`main_areas`):
 
 - The line between two sections is two rows (one section's bottom border,
   the next one's top). A press on either starts a drag (`border_at`),

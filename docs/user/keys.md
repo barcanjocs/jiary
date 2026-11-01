@@ -85,7 +85,7 @@ See [Renaming and merging names](recording.md#renaming-and-merging-names).
 |-----|--------|
 | `←` `→` / `h` `l` | The period before / after |
 | `w` `m` `y` | This week, month or year |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll (or the mouse wheel) |
 | `Esc` / `q` | Back to the main screen |
 
 See [Looking back](looking-back.md).

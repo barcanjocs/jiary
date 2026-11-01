@@ -111,13 +111,25 @@ impl App {
         }
     }
 
+    /// Scrolls the week, month or year by `delta` rows (the mouse wheel),
+    /// clamped like the scroll keys.
+    pub(super) fn scroll_period(&mut self, delta: isize) {
+        let Screen::Period(view) = &self.screen else {
+            return;
+        };
+        let max_scroll = self.period_max_scroll(view);
+        if let Screen::Period(view) = &mut self.screen {
+            view.scroll = view.scroll.saturating_add_signed(delta).min(max_scroll);
+        }
+    }
+
     /// The period view's frame: (bordered area, its interior).
     fn period_areas(&self) -> (Rect, Rect) {
         let [_, content, _] = chrome_layout(Rect::new(0, 0, self.size.0, self.size.1));
         (content, Block::bordered().inner(content))
     }
 
-    fn period_max_scroll(&self, view: &PeriodView) -> usize {
+    pub(super) fn period_max_scroll(&self, view: &PeriodView) -> usize {
         let (_, inner) = self.period_areas();
         self.period_lines(view, inner.width)
             .len()
