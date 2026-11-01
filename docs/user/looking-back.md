@@ -66,7 +66,8 @@ days with nothing tracked show a faint texture.
 day's timeline, tracked time and focus. Above the list is the year's focus
 grid. Below it is a search box: start typing and only the matching days
 stay, each with the sessions that matched under it, plus the line of the
-note that matched.
+note that matched. What matched is underlined in the accent color, so a
+one-letter search shows which `k` it found.
 
 ![Rewind: the year's grid lit on the days that match "p:api limit", and the matching days with their sessions](../images/rewind.svg)
 

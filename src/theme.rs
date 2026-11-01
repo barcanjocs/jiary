@@ -200,6 +200,12 @@ pub const PROMPT: Style = Style::new().fg(ACCENT).add_modifier(Modifier::BOLD);
 /// Dimmed italic hint shown in an empty text input.
 pub const PLACEHOLDER: Style = Style::new().fg(MUTED).add_modifier(Modifier::ITALIC);
 /// Faded italic caption under the cat.
+/// Letters a search matched (`/rewind`).
+pub const MATCH: Style = Style::new()
+    .fg(ACCENT)
+    .add_modifier(Modifier::BOLD)
+    .add_modifier(Modifier::UNDERLINED);
+
 pub const CAPTION: Style = Style::new().fg(MUTED).add_modifier(Modifier::ITALIC);
 /// Highlight symbol for selected items in picker `List`s: a bold accent `>`.
 pub fn picker_symbol() -> Span<'static> {

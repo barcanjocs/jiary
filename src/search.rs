@@ -35,6 +35,15 @@ enum Field {
     Notes,
 }
 
+/// A part of a session, for `Query::highlights`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Activity,
+    Project,
+    Task,
+    Notes,
+}
+
 /// The days a date word allows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Dates {
@@ -138,6 +147,59 @@ impl Query {
         }
         Some(found)
     }
+}
+
+impl Query {
+    /// The characters of `text`, a session's `part`, that the query's
+    /// words match, as char indices in order: the letters a fuzzy word
+    /// picked out of a name, every place a note (or a phrase) has the
+    /// word. For showing why a session matched.
+    pub fn highlights(&self, part: Part, text: &str) -> Vec<usize> {
+        let mut marks = Vec::new();
+        for term in &self.terms {
+            let Term::Text {
+                field,
+                text: word,
+                phrase,
+            } = term
+            else {
+                continue;
+            };
+            let applies = match field {
+                Field::Any => true,
+                Field::Activity => part == Part::Activity,
+                Field::Project => part == Part::Project,
+                Field::Task => part == Part::Task,
+                Field::Notes => part == Part::Notes,
+            };
+            if !applies {
+                continue;
+            }
+            if *phrase || part == Part::Notes {
+                marks.extend(occurrences(text, word));
+            } else if let Some((_, indices)) = matcher().fuzzy_indices(text, word) {
+                marks.extend(indices);
+            }
+        }
+        marks.sort_unstable();
+        marks.dedup();
+        marks
+    }
+}
+
+/// The char indices of every occurrence of `word` (lowercase) in `text`,
+/// ignoring case.
+fn occurrences(text: &str, word: &str) -> Vec<usize> {
+    let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let text = text.chars().map(lower).collect::<Vec<_>>();
+    let word = word.chars().collect::<Vec<_>>();
+    if word.is_empty() || word.len() > text.len() {
+        return Vec::new();
+    }
+    (0..=text.len() - word.len())
+        .filter(|&i| text[i..i + word.len()] == word[..])
+        .flat_map(|i| i..i + word.len())
+        .collect()
 }
 
 /// The query's words: split on spaces, except inside quotes, which stay
@@ -330,6 +392,26 @@ mod tests {
         assert!(q("2026-10").match_session(&s).is_some());
         // Nonsense after d: is dropped.
         assert!(q("d:someday").is_empty());
+    }
+
+    #[test]
+    fn highlights_show_what_matched() {
+        let q = Query::parse("k p:jia n:work");
+        // `k` picks a letter out of any name; `p:` only the project's.
+        assert_eq!(q.highlights(Part::Task, "make the ui prettier"), [2]);
+        assert_eq!(q.highlights(Part::Project, "jiary"), [0, 1, 2]);
+        assert_eq!(
+            q.highlights(Part::Activity, "Programming"),
+            Vec::<usize>::new()
+        );
+        // Notes: every place the word is, ignoring case.
+        assert_eq!(
+            q.highlights(Part::Notes, "Work, more work"),
+            [0, 1, 2, 3, 11, 12, 13, 14]
+        );
+        // A phrase is exact in names too.
+        let q = Query::parse("\"the ui\"");
+        assert_eq!(q.highlights(Part::Task, "make the ui"), [5, 6, 7, 8, 9, 10]);
     }
 
     #[test]

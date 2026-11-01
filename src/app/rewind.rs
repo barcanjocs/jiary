@@ -17,7 +17,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 
-use crate::search::Query;
+use crate::search::{Part, Query};
 use crate::session::Session;
 use crate::summary::{DaySummary, summarize};
 use crate::theme;
@@ -107,6 +107,30 @@ fn rewind_areas(content: Rect) -> RewindAreas {
         list,
         input,
     }
+}
+
+/// `text` in `style`, with the chars at `marks` (indices, in order) in
+/// `theme::MATCH`, a span per run.
+fn marked(text: &str, style: Style, marks: &[usize]) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut run = String::new();
+    let mut run_marked = false;
+    for (i, c) in text.chars().enumerate() {
+        let is_marked = marks.binary_search(&i).is_ok();
+        if is_marked != run_marked && !run.is_empty() {
+            let style = if run_marked { theme::MATCH } else { style };
+            spans.push(Span::styled(std::mem::take(&mut run), style));
+        }
+        run_marked = is_marked;
+        run.push(c);
+    }
+    if !run.is_empty() {
+        spans.push(Span::styled(
+            run,
+            if run_marked { theme::MATCH } else { style },
+        ));
+    }
+    spans
 }
 
 /// UTC at `hour` o'clock (local) on `day`; hours past midnight run into
@@ -289,19 +313,24 @@ impl App {
                     format!("    {} – {end}  ", fmt_time(&session.started_at)),
                     theme::DIMMED,
                 )];
+                // Each part with the letters the query matched marked.
                 let parts = [
                     session
                         .project
                         .as_deref()
-                        .map(|p| project_span(Some(p), colors(Some(p)))),
-                    session.task.as_deref().map(|t| Span::raw(t.to_string())),
-                    Some(theme::activity(&session.activity)),
+                        .map(|p| (Part::Project, project_span(Some(p), colors(Some(p))))),
+                    session
+                        .task
+                        .as_deref()
+                        .map(|t| (Part::Task, Span::raw(t.to_string()))),
+                    Some((Part::Activity, theme::activity(&session.activity))),
                 ];
-                for (n, part) in parts.into_iter().flatten().enumerate() {
+                for (n, (part, span)) in parts.into_iter().flatten().enumerate() {
                     if n > 0 {
                         row.push(Span::styled(" · ", theme::DIMMED));
                     }
-                    row.push(part);
+                    let marks = view.query.highlights(part, &span.content);
+                    row.extend(marked(&span.content, span.style, &marks));
                 }
                 lines.push(Line::from(row));
                 if let Some(note) = note {
@@ -311,10 +340,10 @@ impl App {
                         text.pop();
                         text.push('…');
                     }
-                    lines.push(Line::from(Span::styled(
-                        format!("      • {text}"),
-                        theme::DIMMED,
-                    )));
+                    let marks = view.query.highlights(Part::Notes, note);
+                    let mut row = vec![Span::styled("      • ", theme::DIMMED)];
+                    row.extend(marked(&text, theme::DIMMED, &marks));
+                    lines.push(Line::from(row));
                 }
             }
         }

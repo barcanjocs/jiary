@@ -418,10 +418,11 @@
 <text x="59" y="199.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">08:37</text>
 <text x="113" y="199.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="199.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">09:44</text>
-<text x="194" y="199.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="199.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="199.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="199.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="199.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="199.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="199.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="199.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="199.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <rect x="905" y="185" width="9" height="19" fill="#56b6c2"/>
@@ -429,10 +430,11 @@
 <text x="59" y="218.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">10:24</text>
 <text x="113" y="218.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="218.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">12:09</text>
-<text x="194" y="218.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="218.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="218.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="218.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="218.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="218.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="218.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="218.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="218.06" textLength="126" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Administration</text>
 <rect x="905" y="204" width="9" height="19" fill="#56b6c2"/>
@@ -500,10 +502,11 @@
 <text x="59" y="256.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">13:51</text>
 <text x="113" y="256.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="256.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">14:41</text>
-<text x="194" y="256.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="256.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="256.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="256.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="256.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="256.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="256.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="256.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="256.06" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Reading</text>
 <path d="M909.5,251.5 L909.5,242 M909.5,251.5 L909.5,261" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -572,10 +575,11 @@
 <text x="59" y="294.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">10:47</text>
 <text x="113" y="294.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="294.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">12:24</text>
-<text x="194" y="294.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="294.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="294.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="294.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="294.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="294.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="294.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="294.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="294.06" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Writing</text>
 <path d="M909.5,289.5 L909.5,280 M909.5,289.5 L909.5,299" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -651,10 +655,11 @@
 <text x="59" y="332.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">14:20</text>
 <text x="113" y="332.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="332.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">15:37</text>
-<text x="194" y="332.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="332.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="332.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="332.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="332.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="332.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="332.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="332.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="332.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,327.5 L909.5,318 M909.5,327.5 L909.5,337" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -662,10 +667,11 @@
 <text x="59" y="351.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">16:32</text>
 <text x="113" y="351.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="351.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">18:14</text>
-<text x="194" y="351.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="351.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="351.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="351.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="351.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="351.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="351.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="351.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="351.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,346.5 L909.5,337 M909.5,346.5 L909.5,356" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -737,10 +743,11 @@
 <text x="59" y="389.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">09:40</text>
 <text x="113" y="389.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="389.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">10:45</text>
-<text x="194" y="389.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="389.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="389.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="389.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="389.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="389.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="389.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="389.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="389.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,384.5 L909.5,375 M909.5,384.5 L909.5,394" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -810,10 +817,11 @@
 <text x="59" y="427.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">16:30</text>
 <text x="113" y="427.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="427.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">17:56</text>
-<text x="194" y="427.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="427.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="427.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="427.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="427.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="427.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="427.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="427.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="427.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,422.5 L909.5,413 M909.5,422.5 L909.5,432" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -887,10 +895,11 @@
 <text x="59" y="465.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">15:42</text>
 <text x="113" y="465.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="465.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">17:21</text>
-<text x="194" y="465.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="465.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="465.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="465.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="465.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="465.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="465.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="465.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="465.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,460.5 L909.5,451 M909.5,460.5 L909.5,470" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -960,10 +969,11 @@
 <text x="59" y="503.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">13:39</text>
 <text x="113" y="503.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="503.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">15:10</text>
-<text x="194" y="503.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="503.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="503.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="503.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="503.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="503.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="503.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="503.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="503.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,498.5 L909.5,489 M909.5,498.5 L909.5,508" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -1039,10 +1049,11 @@
 <text x="59" y="541.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">10:00</text>
 <text x="113" y="541.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="541.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">10:46</text>
-<text x="194" y="541.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="541.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="541.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="541.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="541.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="541.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="541.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="541.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="541.06" textLength="126" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Administration</text>
 <path d="M909.5,536.5 L909.5,527 M909.5,536.5 L909.5,546" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -1110,10 +1121,11 @@
 <text x="59" y="579.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">11:22</text>
 <text x="113" y="579.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="579.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">11:55</text>
-<text x="194" y="579.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="579.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="579.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="579.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="579.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="579.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="579.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="579.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="579.06" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Reading</text>
 <path d="M909.5,574.5 L909.5,565 M909.5,574.5 L909.5,584" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -1121,10 +1133,11 @@
 <text x="59" y="598.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">16:31</text>
 <text x="113" y="598.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="598.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">17:19</text>
-<text x="194" y="598.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="598.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="598.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="598.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="598.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="598.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="598.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="598.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="598.06" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Writing</text>
 <path d="M909.5,593.5 L909.5,584 M909.5,593.5 L909.5,603" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -1184,10 +1197,11 @@
 <text x="59" y="636.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">13:28</text>
 <text x="113" y="636.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="636.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">14:08</text>
-<text x="194" y="636.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="636.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="636.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="636.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="636.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="636.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="636.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="636.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="636.06" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Writing</text>
 <path d="M909.5,631.5 L909.5,622 M909.5,631.5 L909.5,641" stroke="#56b6c2" stroke-width="1.2" fill="none"/>
@@ -1253,10 +1267,11 @@
 <text x="59" y="674.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">11:32</text>
 <text x="113" y="674.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">–</text>
 <text x="131" y="674.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">12:39</text>
-<text x="194" y="674.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#ff8700" font-weight="bold">api</text>
+<text x="194" y="674.06" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">api</text>
 <text x="230" y="674.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="248" y="674.06" textLength="36" lengthAdjust="spacingAndGlyphs">rate</text>
-<text x="293" y="674.06" textLength="54" lengthAdjust="spacingAndGlyphs">limits</text>
+<text x="293" y="674.06" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#56b6c2" font-weight="bold">limit</text>
+<text x="338" y="674.06" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
 <text x="356" y="674.06" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#abb2bf">·</text>
 <text x="374" y="674.06" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#7cc4ff" font-weight="bold">Programming</text>
 <path d="M909.5,669.5 L909.5,660 M909.5,669.5 L909.5,679" stroke="#56b6c2" stroke-width="1.2" fill="none"/>

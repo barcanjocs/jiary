@@ -226,3 +226,32 @@ fn the_pick_stays_in_view() {
     assert_eq!(rewind(&t).selection, 0);
     assert_eq!(rewind(&t).scroll, 0);
 }
+
+#[test]
+fn the_matched_letters_are_marked() {
+    let t = TestApp::new();
+    past(
+        &t,
+        1,
+        9,
+        "Programming",
+        Some("jiary"),
+        Some("make the ui prettier"),
+        None,
+    );
+    past(&t, 2, 9, "Writing", None, None, Some("it needs more work"));
+    let mut t = t;
+    open(&mut t, "rewind");
+    t.typed("k");
+    let buf = render(&t.app);
+    // The k in "make", and the k in the note's "work".
+    let task = row_with(&buf, "make the ui");
+    let x = col_of(&buf, task, "make") + 2;
+    assert_eq!(buf[(x, task)].symbol(), "k");
+    assert_eq!(buf[(x, task)].fg, theme::ACCENT);
+    assert!(buf[(x, task)].modifier.contains(Modifier::UNDERLINED));
+    assert!(!buf[(x - 1, task)].modifier.contains(Modifier::UNDERLINED));
+    let note = row_with(&buf, "• it needs more work");
+    let x = col_of(&buf, note, "work") + 3;
+    assert!(buf[(x, note)].modifier.contains(Modifier::UNDERLINED));
+}
