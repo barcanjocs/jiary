@@ -331,6 +331,23 @@ impl Db {
         rows.into_iter().map(row_to_session).collect()
     }
 
+    /// Every session, earliest first (`/rewind`).
+    pub fn all_sessions(&self) -> Result<Vec<Session>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions ORDER BY started_at, id"
+            ))
+            .map_err(DbError::Sqlite)?;
+        let rows = stmt
+            .query_map([], read_session_row)
+            .map_err(DbError::Sqlite)?;
+        let rows = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::Sqlite)?;
+        rows.into_iter().map(row_to_session).collect()
+    }
+
     pub fn recent_notes(&self, project: &str, task: &str) -> Result<Vec<String>, DbError> {
         let mut stmt = self
             .conn

@@ -11,7 +11,8 @@ what it does and its key.
 
 A command does exactly what its key does, so the palette is also a way to
 learn the keys. It's also how you open what has no key of its own: the
-longer views below, `/rename` (see
+longer views below, `/rewind` (see [below](#rewind-every-past-day-searchable)),
+`/rename` (see
 [Renaming and merging names](recording.md#renaming-and-merging-names)), and
 `/mood`, `/mood-off` and `/mood-on` (see
 [Sleep and mood](recording.md#sleep-and-mood)), and `/settings` (see
@@ -58,6 +59,49 @@ days with nothing tracked show a faint texture.
    `We Th`, `Fr Sa`, and `Su` on its own.
 
 ![The year view: a row per month, the year's totals, and the focus grid for the whole year](../images/yearly.svg)
+
+## Rewind: every past day, searchable
+
+`/rewind` lists every day you tracked, newest first, each row with the
+day's timeline, tracked time and focus. Above the list is the year's focus
+grid. Below it is a search box: start typing and only the matching days
+stay, each with the sessions that matched under it, plus the line of the
+note that matched.
+
+![Rewind: the year's grid lit on the days that match "p:api limit", and the matching days with their sessions](../images/rewind.svg)
+
+| Type | To find |
+|---|---|
+| `auth` | anything: activity, project, task or notes |
+| `a:writing` · `p:jiary` · `t:release` | only in the activity, project or task |
+| `n:limiter` | only in notes |
+| `"burst budget"` · `n:"burst budget"` | an exact phrase |
+| `2026-10-23` · `2026-10` · `2026` | days on that date, in that month or year |
+| `d:oct` · `d:october` | days in October, any year |
+
+- Every word must match, all in the same session: `p:api n:limiter` finds
+  the api sessions whose notes mention the limiter.
+- Activities, projects and tasks match loosely, like the start form's
+  suggestions (`prg` finds Programming). Notes match the exact text you
+  type, ignoring case.
+- Month names need `d:`, since "may" is also a word.
+
+The grid follows the day you pick: it shows that day's year, lit only on
+the days that match, so you can see when something happened at a glance.
+
+`↑`/`↓` pick a day (the wheel does too), `PgUp`/`PgDn` jump ten, `Home` and
+`End` go to the newest and the oldest. `Enter` opens the picked day. `Esc`
+clears the search, and a second `Esc` closes Rewind.
+
+### A past day
+
+An opened day reads like the main screen did that day: its summary with the
+graphs, then every session, earliest first, with all its notes. `←`/`→`
+go to the older or newer day in the list, so with a search you step through
+the matching days. `Esc` takes you back to the list, with your search and
+place kept. Past days are read-only.
+
+![A past day opened from Rewind: its summary and graphs, then its sessions with their notes](../images/rewind-day.svg)
 
 ## Sleep and mood
 

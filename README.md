@@ -55,14 +55,16 @@ A typical day:
 
 The main screen shows the running session, today's sessions and a summary of
 the day. Press `/` for the command palette, where `/weekly`, `/monthly` and
-`/yearly` look back further. Press `?` for every key, and `q` to quit.
+`/yearly` look back further, and `/rewind` browses and searches every past
+day. Press `?` for every key, and `q` to quit.
 
 ## Long-term trends
 
 `/weekly`, `/monthly` and `/yearly` show where your time and focus went over
 longer stretches: a timeline per day, totals per activity and project, a
 focus grid colored from red (1) to green (3), and your focus set against
-your sleep and mood. See
+your sleep and mood. `/rewind` goes back to any day, and finds the ones you
+want as you type: a project, a word from your notes, a month. See
 [Looking back](docs/user/looking-back.md).
 
 <table>

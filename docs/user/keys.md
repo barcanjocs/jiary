@@ -36,6 +36,23 @@ See [Recording your day](recording.md).
 
 See [The main screen](main-screen.md), which also covers the mouse.
 
+## Rewind (`/rewind`)
+
+| Key | Action |
+|-----|--------|
+| type | Search (see [Rewind](looking-back.md#rewind-every-past-day-searchable)) |
+| `↑` `↓` (or the wheel), `PgUp` `PgDn`, `Home` `End` | Pick a day |
+| `Enter` | Open the picked day |
+| `Esc` | Clear the search; on an empty search, close |
+
+In an opened day:
+
+| Key | Action |
+|-----|--------|
+| `←` `→` / `h` `l` | The older / newer day in the list |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll |
+| `Esc` / `q` | Back to the list |
+
 ## Settings (`/settings`)
 
 | Key | Action |

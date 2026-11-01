@@ -48,6 +48,7 @@ mod palette;
 mod period_view;
 mod pomodoro;
 mod rename;
+mod rewind;
 mod sessions;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -433,5 +434,22 @@ fn every_screen_survives_tiny_terminals() {
                 terminal.draw(|frame| t.app.draw(frame)).unwrap();
             }
         }
+        // `/rewind` and a day from it, searched, scrolled and paged.
+        let mut t = with_sessions(TestApp::new(), 5);
+        t.app.set_size((width, height));
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        t.app.open_rewind();
+        t.typed("p:");
+        for code in [KeyCode::Down, KeyCode::End, KeyCode::PageDown] {
+            t.key(code);
+        }
+        terminal.draw(|frame| t.app.draw(frame)).unwrap();
+        t.app.cursor_position((width, height));
+        t.key(KeyCode::Enter);
+        for code in [KeyCode::End, KeyCode::Left, KeyCode::PageDown] {
+            t.key(code);
+        }
+        mouse(&mut t, MouseEventKind::ScrollDown, 0, 0);
+        terminal.draw(|frame| t.app.draw(frame)).unwrap();
     }
 }

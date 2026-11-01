@@ -6,6 +6,7 @@ mod layout;
 mod lock;
 mod mascot;
 mod period;
+mod search;
 mod session;
 mod settings;
 mod summary;

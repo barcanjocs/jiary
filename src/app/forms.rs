@@ -1,11 +1,8 @@
 //! The start form (activity, project and task, each an `Autocomplete`) and
 //! the note form.
 
-use std::sync::LazyLock;
-
 use crossterm::event::KeyCode;
 use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -15,6 +12,7 @@ use ratatui::widgets::{Block, BorderType, ListItem, ListState, Paragraph, Tabs};
 use crate::db::SessionCombo;
 use crate::layout::Section;
 use crate::mascot::Reaction;
+use crate::search::matcher;
 use crate::theme;
 
 use super::modal::{WrappedInput, picker_list, small_modal_layout, start_modal_layout};
@@ -165,13 +163,6 @@ fn draw_recent(frame: &mut Frame, area: Rect, recent: &[SessionCombo]) {
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-/// The fuzzy matcher, built once: the pickers and the palette match on every
-/// frame.
-pub(super) fn matcher() -> &'static SkimMatcherV2 {
-    static MATCHER: LazyLock<SkimMatcherV2> = LazyLock::new(SkimMatcherV2::default);
-    &MATCHER
 }
 
 pub(super) fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {

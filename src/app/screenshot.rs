@@ -201,6 +201,28 @@ fn screenshots_of_the_longer_views() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+#[ignore = "writes docs/images/rewind.svg and rewind-day.svg; run with --ignored"]
+fn screenshots_of_rewind() {
+    let (dir, db) = temp_db("rewind");
+    drop(db);
+    write_history(&dir.join("jiary.db"));
+    let db = Db::open_at(&dir.join("jiary.db")).unwrap();
+    let mut app = App::new(db, None, None);
+    app.set_size((WIDTH, HEIGHT));
+    app.open_rewind();
+    // A search: the api project's days, with the notes about limits.
+    for c in "p:api limit".chars() {
+        app.handle_rewind(crossterm::event::KeyCode::Char(c));
+    }
+    write_svg(&mut app, HEIGHT, "rewind");
+    app.handle_rewind(crossterm::event::KeyCode::Enter);
+    assert!(matches!(app.screen, Screen::PastDay(_)));
+    write_svg(&mut app, HEIGHT, "rewind-day");
+    drop(app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A fresh db in a temp dir of its own.
 fn temp_db(name: &str) -> (std::path::PathBuf, Db) {
     let dir = std::env::temp_dir().join(format!("jiary-screenshot-{name}-{}", std::process::id()));
@@ -273,6 +295,8 @@ fn write_history(path: &std::path::Path) {
     // Sleep and mood from a source of their own, so the sessions stay the
     // same whether or not they are answered.
     let mut answers = Rng(0x51ee_9a11_0dd5_2026);
+    // Notes too, so `/rewind` has something to find in them.
+    let mut notes = Rng(0x0e07_e5ab_c123_4567);
     let today = Local::now().date_naive();
     let mut day = today - Duration::days(800);
     while day < today {
@@ -298,8 +322,8 @@ fn write_history(path: &std::path::Path) {
         }
         for s in sessions {
             tx.execute(
-                "INSERT INTO sessions (started_at, ended_at, project, task, activity, focus, interruptions)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO sessions (started_at, ended_at, project, task, activity, focus, interruptions, notes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 rusqlite::params![
                     s.0.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
                     s.1.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
@@ -307,7 +331,8 @@ fn write_history(path: &std::path::Path) {
                     s.3,
                     s.4,
                     s.5,
-                    s.6
+                    s.6,
+                    note(&mut notes, s.3)
                 ],
             )
             .unwrap();
@@ -315,6 +340,36 @@ fn write_history(path: &std::path::Path) {
         day += Duration::days(1);
     }
     tx.commit().unwrap();
+}
+
+/// Notes a task's sessions get now and then (one line each).
+const NOTES: &[(&str, &[&str])] = &[
+    (
+        "auth",
+        &[
+            "token refresh races the logout",
+            "session cookies: SameSite=Lax",
+        ],
+    ),
+    (
+        "rate limits",
+        &[
+            "the limiter needs a burst budget",
+            "limits per key, not per IP",
+        ],
+    ),
+    ("docs", &["error codes table is out of date"]),
+    ("week view", &["paging with ←→ works, scrolling next"]),
+    ("palette", &["fuzzy matching ranks prefixes first"]),
+    ("backups", &["restore drill: 12 minutes end to end"]),
+    ("terminal UIs", &["draft: why half blocks look sharper"]),
+];
+
+/// A note for a session of `task`, about a third of the time.
+fn note(rng: &mut Rng, task: Option<&str>) -> Option<String> {
+    let (_, list) = NOTES.iter().find(|(t, _)| Some(*t) == task)?;
+    let pick = rng.range(0, list.len() as i64 * 3 - 1) as usize;
+    list.get(pick).map(|note| format!("{note}\n"))
 }
 
 /// A made-up session: start, end, project, task, activity, focus,

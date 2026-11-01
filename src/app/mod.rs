@@ -23,6 +23,7 @@ use mood::MoodForm;
 use palette::{PaletteForm, draw_palette};
 use period_view::PeriodView;
 use rename::RenameForm;
+use rewind::{PastDay, Rewind};
 use settings_screen::SettingsForm;
 
 mod away;
@@ -39,6 +40,7 @@ mod palette;
 mod period_view;
 mod pomodoro;
 mod rename;
+mod rewind;
 #[cfg(test)]
 mod screenshot;
 mod sections;
@@ -161,6 +163,10 @@ enum Screen {
     Mood(MoodForm),
     /// `/settings`.
     Settings(SettingsForm),
+    /// Every past day, searched (`/rewind`); boxed: it holds them all.
+    Rewind(Box<Rewind>),
+    /// A day opened from `/rewind`, with the list to go back to.
+    PastDay(PastDay),
     /// Back after `AWAY_AFTER` or more without touching the computer,
     /// during a work session: what was that time?
     Away(chrono::DateTime<Utc>),
@@ -469,6 +475,8 @@ impl App {
             Screen::Rename(_) => self.handle_rename(key),
             Screen::Mood(_) => self.handle_mood(key),
             Screen::Settings(_) => self.handle_settings(key),
+            Screen::Rewind(_) => self.handle_rewind(key),
+            Screen::PastDay(_) => self.handle_past_day(key),
             Screen::Away(since) => {
                 let since = *since;
                 self.handle_away(key, since);
@@ -505,6 +513,8 @@ impl App {
             Screen::Rename(form) => self.draw_rename(frame, content, form, input),
             Screen::Mood(form) => self.draw_mood(frame, content, form),
             Screen::Settings(form) => self.draw_settings(frame, content, form),
+            Screen::Rewind(view) => self.draw_rewind(frame, content, view),
+            Screen::PastDay(day) => self.draw_past_day(frame, day),
             Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 

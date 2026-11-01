@@ -55,6 +55,17 @@ impl App {
     /// and release without moving) collapses or expands it. The wheel
     /// scrolls today's sessions.
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        let wheel = match mouse.kind {
+            MouseEventKind::ScrollUp => -3,
+            MouseEventKind::ScrollDown => 3,
+            _ => 0,
+        };
+        match self.screen {
+            Screen::Rewind(_) if wheel != 0 => return self.rewind_move(wheel / 3),
+            Screen::PastDay(_) if wheel != 0 => return self.past_day_scroll(wheel),
+            Screen::Rewind(_) | Screen::PastDay(_) => return,
+            _ => {}
+        }
         if matches!(self.screen, Screen::Period(_)) {
             match mouse.kind {
                 MouseEventKind::ScrollUp => self.scroll_period(-3),

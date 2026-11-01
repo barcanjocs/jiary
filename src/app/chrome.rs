@@ -41,6 +41,10 @@ impl App {
     /// calls this after drawing to show or hide the cursor.
     pub fn cursor_position(&self, size: (u16, u16)) -> Option<(u16, u16)> {
         let [_, content, _] = chrome_layout(ratatui::layout::Rect::new(0, 0, size.0, size.1));
+        if let Screen::Rewind(view) = &self.screen {
+            let (input, area) = self.rewind_input(content, view);
+            return Some(input.cursor_in(area));
+        }
         let input = self.wrapped_input(content)?;
         let input_area = match &self.screen {
             Screen::StartSession(_) | Screen::Palette(_) | Screen::Rename(_) => {
@@ -74,6 +78,9 @@ impl App {
     /// most as many rows as the modal can grow to on `content`. Shared by
     /// `draw` and `cursor_position` so the two always agree.
     pub(super) fn wrapped_input(&self, content: ratatui::layout::Rect) -> Option<WrappedInput> {
+        if let Screen::Rewind(view) = &self.screen {
+            return Some(self.rewind_input(content, view).0);
+        }
         let (value, placeholder) = self.text_input()?;
         let base_height = match self.screen {
             Screen::StartSession(_) | Screen::Palette(_) | Screen::Rename(_) => START_MODAL_HEIGHT,
@@ -213,6 +220,13 @@ impl App {
                 ],
             },
             Screen::Settings(_) => &[("↑↓", "select"), ("Space/←→", "change"), ("Esc", "close")],
+            Screen::Rewind(_) => &[
+                ("type", "search"),
+                ("↑↓", "pick"),
+                ("Enter", "open day"),
+                ("Esc", "clear/back"),
+            ],
+            Screen::PastDay(_) => &[("←→", "older/newer"), ("↑↓", "scroll"), ("Esc", "back")],
             Screen::Away(_) => &[
                 ("k", "keep"),
                 ("b", "break"),

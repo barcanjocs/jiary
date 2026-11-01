@@ -7,8 +7,8 @@ The [README](../../README.md) gets you started. This manual covers the rest.
   fixing the times.
 - [The main screen](main-screen.md): its three sections, the cat, colors,
   resizing and the mouse.
-- [Looking back](looking-back.md): the command palette, and the week, month
-  and year views.
+- [Looking back](looking-back.md): the command palette, the week, month
+  and year views, and Rewind, to browse and search every past day.
 - [Keys](keys.md): every key in one place.
 - [Your data](data.md): where it lives, what's in it, backing up, and
   errors.

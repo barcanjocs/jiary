@@ -10,9 +10,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, ListItem, ListState, Paragraph};
 
 use crate::period::Period;
+use crate::search::matcher;
 use crate::theme;
 
-use super::forms::matcher;
 use super::modal::WrappedInput;
 use super::modal::{picker_list, start_modal_layout};
 use super::text::plural;
@@ -50,6 +50,8 @@ enum Action {
     MoodOn(bool),
     /// The settings screen.
     Settings,
+    /// Every past day, searched.
+    Rewind,
 }
 
 const fn command(
@@ -86,6 +88,7 @@ pub(super) const COMMANDS: &[Command] = &[
     view("weekly", "this week, by day", Period::Week),
     view("monthly", "this month, by day", Period::Month),
     view("yearly", "this year's focus", Period::Year),
+    screen("rewind", "search all past days", Action::Rewind),
     screen("rename", "rename or merge a label", Action::Rename),
     screen("mood", "today's sleep and mood", Action::Mood),
     command("start", "start a session", 's', "s"),
@@ -227,6 +230,7 @@ impl App {
                         Action::Mood => self.ask_mood(),
                         Action::MoodOn(on) => self.set_sleep_and_mood(on),
                         Action::Settings => self.open_settings(),
+                        Action::Rewind => self.open_rewind(),
                     }
                 }
             }

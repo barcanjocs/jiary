@@ -67,6 +67,10 @@ next frame shows the result. No event bus, no async, no shared state:
   interruptions, disruptions, breaks, span, gaps, and the sessions as
   timeline `Block`s. Takes any sessions, so the longer views use it too.
   Pure.
+- **`search.rs`**: the `/rewind` query: `Query::parse` (words, prefixes,
+  quotes, dates), `matches_date`, and `match_session`, which also says
+  which note line matched; and `matcher()`, the one fuzzy matcher the
+  pickers, the palette and searches share. Pure.
 - **`period.rs`**: `Period` (week from Monday, calendar month, calendar
   year): `days(offset, today)` gives the first and last day `offset` periods
   from the current one, `title` names it. Pure.
@@ -94,6 +98,7 @@ next frame shows the result. No event bus, no async, no shared state:
   - One file per screen: `main_screen.rs`, `forms.rs` (start and note
     forms, `Autocomplete`, `fuzzy_filter`), `mood.rs` (sleep and mood),
     `settings_screen.rs` (`/settings`), `pomodoro.rs` (the cue and `p`),
+    `rewind.rs` (`/rewind` and the past days it opens),
     `rename.rs`, `palette.rs`, `period_view.rs`, `away.rs`, `help.rs`.
   - Shared pieces: `sections.rs` (main-screen geometry, scrolling, mouse),
     `chrome.rs` (header, status line, cursor), `cat.rs` (mood, reactions,
@@ -242,6 +247,8 @@ enum Screen {
     Rename(Box<RenameForm>),             // boxed too
     Mood(MoodForm),                      // sleep and mood
     Settings(SettingsForm),              // /settings
+    Rewind(Box<Rewind>),                 // /rewind: every day, searched
+    PastDay(PastDay),                    // a day opened from it
     Away(DateTime<Utc>),                 // back from an absence: since when
 }
 ```
@@ -449,6 +456,35 @@ the target would branch on `Pomodoro::mode`; as `draw` takes `&self`,
 something that has to happen once (a bell, ending the session) would need
 a tick that can mutate, such as the loop that calls `observe_idle`. `p`
 would then go back to the last mode used rather than to `Soft`.
+
+### Rewind
+
+`/rewind` (`open_rewind`, `rewind.rs`) loads every session once
+(`db.all_sessions`) into `Screen::Rewind(Box<Rewind>)`: the sessions,
+every day with sessions newest first (`RewindDay`: date, session indices,
+its `DaySummary`, the running session counted through its in-memory copy),
+and the hours the rows' timelines share. Nothing after that touches the
+db.
+
+Each keystroke re-parses the input (`search::Query`) and recomputes
+`found` (the matching days, each with its matching sessions and the note
+line that matched; no sessions when the query has only dates) and
+`matched` (their dates, for the grid), and resets the pick. `rewind_lines`
+builds the list from that: a row per day (marker, date, `timeline_row`,
+`day_total`), then the matching sessions. The grid on top is
+`year_focus_grid` for the picked day's year, `focus_cell` on matched
+days and `Empty` on the rest. `rewind_follow` keeps the picked day's rows
+in view after every move. The input is a one-row `WrappedInput`; the
+chrome asks `rewind_input` for it and for the cursor, since its width and
+place aren't a modal's.
+
+Enter moves the list into `Screen::PastDay(PastDay { rewind, scroll })`.
+The day shown is the list's pick, so ←→ just move the pick (through the
+matching days, with a query) and Esc moves the list back as it was.
+`past_day_lines` is `summary_body_of` (the main screen's summary, for any
+`DaySummary`) with the graphs, then the day's sessions as the main screen
+draws today's (`timeline_item_lines`) with all their notes, projects
+colored distinct across that day (`project_colors_of`).
 
 ### Settings screen
 

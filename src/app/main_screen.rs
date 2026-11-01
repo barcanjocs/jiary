@@ -21,8 +21,8 @@ use super::graphs::{
     activity_bar, focus_row, hour_labels, project_bar, start_of_hour, timeline_row,
 };
 use super::items::{
-    SUMMARY_LABEL_WIDTH, activity_items, focus_items, hanging_lines, interruptions_span,
-    project_items, project_span, time_split_items, value_or_none, wrap_items,
+    ProjectColors, SUMMARY_LABEL_WIDTH, activity_items, focus_items, hanging_lines,
+    interruptions_span, project_items, project_span, time_split_items, value_or_none, wrap_items,
 };
 use super::palette::PaletteForm;
 use super::sections::draw_scrollbar;
@@ -434,15 +434,25 @@ impl App {
     /// from day to day, and are made distinct across today's projects (the
     /// main screen's view; see `theme::project_colors`).
     pub(super) fn project_color(&self, project: Option<&str>) -> Color {
-        let Some(project) = project else {
-            return theme::NO_PROJECT;
-        };
-        let mut today = self
+        let today = self
             .today_sessions
             .iter()
             .chain(&self.active_session)
             .filter_map(|s| s.project.as_deref())
             .collect::<Vec<_>>();
+        self.project_color_among(project, today)
+    }
+
+    /// A project's color, made distinct across the projects `among` (a
+    /// day's): see `project_color`.
+    pub(super) fn project_color_among<'a>(
+        &self,
+        project: Option<&'a str>,
+        mut today: Vec<&'a str>,
+    ) -> Color {
+        let Some(project) = project else {
+            return theme::NO_PROJECT;
+        };
         if !today.contains(&project) {
             today.push(project);
         }
@@ -471,6 +481,19 @@ impl App {
         project_span(project, self.project_color(project))
     }
 
+    /// Projects colored like `project_color`, distinct across `sessions`'
+    /// projects (a past day's).
+    pub(super) fn project_colors_of<'a>(
+        &'a self,
+        sessions: &[&'a Session],
+    ) -> impl Fn(Option<&str>) -> Color + 'a {
+        let projects = sessions
+            .iter()
+            .filter_map(|s| s.project.as_deref())
+            .collect::<Vec<_>>();
+        move |project| self.project_color_among(project, projects.clone())
+    }
+
     /// The pinned part of the active section: the running session's info,
     /// or a hint.
     pub(super) fn active_lines(&self) -> Vec<Line<'static>> {
@@ -497,7 +520,7 @@ impl App {
             if !lines.is_empty() {
                 lines.push(Line::default());
             }
-            lines.extend(self.timeline_item_lines(session));
+            lines.extend(self.timeline_item_lines(session, &|p| self.project_color(p)));
         }
         lines
     }
@@ -524,71 +547,13 @@ impl App {
 
     fn summary_body(&self, width: u16, graphs: bool) -> Vec<Line<'static>> {
         let summary = self.day_summary();
-        let Some((start, end)) = summary.span else {
+        if summary.span.is_none() {
             return vec![Line::from(Span::styled(
                 "Nothing tracked yet today.",
                 theme::DIMMED,
             ))];
-        };
-
-        let time = |d: chrono::Duration| Span::styled(fmt_hms(d), theme::VALUE);
-        let activities = activity_items(&summary);
-        let projects = project_items(&summary, &|p| self.project_color(p));
-        let focus = focus_items(&summary);
-        let mut day = vec![vec![Span::styled(
-            format!("{} – {}", fmt_time(&start), fmt_time(&end)),
-            theme::VALUE,
-        )]];
-        day.extend(time_split_items(&summary));
-        day.push(vec![Span::raw("gaps "), time(summary.untracked())]);
-
-        // Two pictures lead their rows when there is room for them: the day
-        // as a timeline in activity colors, and each activity's share of
-        // the tracked time as one stacked bar.
-        let graph_width = width.saturating_sub(SUMMARY_LABEL_WIDTH) as usize;
-        let mut day_rows = Vec::new();
-        let mut activity_rows = Vec::new();
-        let mut project_rows = Vec::new();
-        if graphs {
-            // From the hour the day began, so the hours line up from the
-            // left edge; the minutes before the first start show blank.
-            let from = start_of_hour(start);
-            day_rows.push(timeline_row(&summary, from, end, graph_width));
-            day_rows.push(hour_labels(from, end, graph_width));
-            activity_rows.push(activity_bar(&summary, graph_width));
-            project_rows.push(project_bar(&summary, graph_width, &|p| {
-                self.project_color(p)
-            }));
-            // The hours under the timeline already show the span.
-            day.remove(0);
         }
-
-        let mut lines = Vec::new();
-        if graphs {
-            // The focus line sits on top of the timeline, under no label.
-            let from = start_of_hour(start);
-            let indent = Span::raw(" ".repeat(SUMMARY_LABEL_WIDTH as usize));
-            let focus = focus_row(&summary, from, end, graph_width);
-            lines.push(Line::from([vec![indent], focus].concat()));
-        }
-        for (i, (label, graph_rows, items)) in [
-            ("Day     ", day_rows, day),
-            ("Activity", activity_rows, activities),
-            ("Project ", project_rows, projects),
-            ("Focus   ", Vec::new(), focus),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            // With the graphs there is room to breathe: a blank row
-            // between groups.
-            if graphs && i > 0 {
-                lines.push(Line::default());
-            }
-            let rows = [graph_rows, wrap_items(items, width, label)].concat();
-            lines.extend(hanging_lines(label, rows));
-        }
-        lines
+        summary_body_of(&summary, width, graphs, &|p| self.project_color(p))
     }
 
     /// The collapsed summary: tracked time and the top activity.
@@ -674,7 +639,11 @@ impl App {
 
     /// One timeline item: time range, duration, focus badge and interruption
     /// count on the first line, project·task·activity below it, then notes.
-    fn timeline_item_lines(&self, session: &Session) -> Vec<Line<'static>> {
+    pub(super) fn timeline_item_lines(
+        &self,
+        session: &Session,
+        colors: ProjectColors,
+    ) -> Vec<Line<'static>> {
         let start = fmt_time(&session.started_at);
         let (end, duration) = match &session.ended_at {
             Some(end) => (
@@ -707,7 +676,7 @@ impl App {
             session
                 .project
                 .as_deref()
-                .map(|p| self.project_span(Some(p))),
+                .map(|p| project_span(Some(p), colors(Some(p)))),
             session.task.as_deref().map(|t| Span::raw(t.to_string())),
             Some(theme::activity(&session.activity)),
         ]
@@ -733,4 +702,74 @@ impl App {
 
         lines
     }
+}
+
+/// A day's summary body (see `App::summary_lines`) for a day with tracked
+/// time, wrapped to `width`, projects colored by `colors`. Shared by the
+/// main screen and past days (`/rewind`).
+pub(super) fn summary_body_of(
+    summary: &DaySummary,
+    width: u16,
+    graphs: bool,
+    colors: ProjectColors,
+) -> Vec<Line<'static>> {
+    let Some((start, end)) = summary.span else {
+        return Vec::new();
+    };
+    let time = |d: chrono::Duration| Span::styled(fmt_hms(d), theme::VALUE);
+    let activities = activity_items(summary);
+    let projects = project_items(summary, colors);
+    let focus = focus_items(summary);
+    let mut day = vec![vec![Span::styled(
+        format!("{} – {}", fmt_time(&start), fmt_time(&end)),
+        theme::VALUE,
+    )]];
+    day.extend(time_split_items(summary));
+    day.push(vec![Span::raw("gaps "), time(summary.untracked())]);
+
+    // Two pictures lead their rows when there is room for them: the day
+    // as a timeline in activity colors, and each activity's share of
+    // the tracked time as one stacked bar.
+    let graph_width = width.saturating_sub(SUMMARY_LABEL_WIDTH) as usize;
+    let mut day_rows = Vec::new();
+    let mut activity_rows = Vec::new();
+    let mut project_rows = Vec::new();
+    if graphs {
+        // From the hour the day began, so the hours line up from the
+        // left edge; the minutes before the first start show blank.
+        let from = start_of_hour(start);
+        day_rows.push(timeline_row(summary, from, end, graph_width));
+        day_rows.push(hour_labels(from, end, graph_width));
+        activity_rows.push(activity_bar(summary, graph_width));
+        project_rows.push(project_bar(summary, graph_width, colors));
+        // The hours under the timeline already show the span.
+        day.remove(0);
+    }
+
+    let mut lines = Vec::new();
+    if graphs {
+        // The focus line sits on top of the timeline, under no label.
+        let from = start_of_hour(start);
+        let indent = Span::raw(" ".repeat(SUMMARY_LABEL_WIDTH as usize));
+        let focus = focus_row(summary, from, end, graph_width);
+        lines.push(Line::from([vec![indent], focus].concat()));
+    }
+    for (i, (label, graph_rows, items)) in [
+        ("Day     ", day_rows, day),
+        ("Activity", activity_rows, activities),
+        ("Project ", project_rows, projects),
+        ("Focus   ", Vec::new(), focus),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // With the graphs there is room to breathe: a blank row
+        // between groups.
+        if graphs && i > 0 {
+            lines.push(Line::default());
+        }
+        let rows = [graph_rows, wrap_items(items, width, label)].concat();
+        lines.extend(hanging_lines(label, rows));
+    }
+    lines
 }

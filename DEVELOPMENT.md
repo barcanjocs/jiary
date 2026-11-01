@@ -43,9 +43,9 @@ truth for state — this file plus `git log` is all that is needed to resume.
   `docs/images/`; `main.svg` changes on every run (it shows the time), so
   only commit it when the main screen changed.
 - 1.1.0 in progress (everything in the backlog goes in): J (sleep and
-  mood) and K (soft Pomodoro, `/settings`) done, not yet released.
-- Next, in order: backlog A (browse past days, likely `/day` with ←→ like
-  the period views), then D and F.
+  mood), K (soft Pomodoro, `/settings`) and A (`/rewind`) done, not yet
+  released.
+- Next, in order: backlog D (stale sessions), then F (relaunch as focus).
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
   maintainer, not an agent. Runner images age out: macOS builds moved to
@@ -82,12 +82,17 @@ from its scope note alone, without re-deriving context.
 - [x] **B. Weekly summary** — done 2026-10-31, grown into `/weekly`,
       `/monthly` and `/yearly` (calendar periods, ←→ to page): a row per
       day (or month), totals, activity/project bars, focus grid.
-- [ ] **A. History view** (medium). Browse past days: navigate day by day
-      with sessions rendered like the main screen, plus fuzzy search over
-      notes/projects/tasks across all time. Read-only. The pieces exist:
-      `db.sessions_between(day, day)`, `summarize` over any sessions, and
-      the period views' ←→ paging; likely a `/day` command (or Enter on a
-      day row in a week/month).
+- [x] **A. `/rewind`** — done 2026-11-01 for 1.1.0: every day with
+      sessions, newest first, a row each, searched as you type (`search.rs`:
+      every word must match within one session; plain words fuzzy on
+      activity/project/task and substring on notes; `a:` `p:` `t:` `n:`,
+      quoted phrases, `YYYY-MM-DD` / `YYYY-MM` / `YYYY` and `d:oct`). The
+      year focus grid on top, for the picked day's year, lit on matching
+      days. Enter opens the day read-only (`PastDay`: summary with graphs,
+      sessions with all notes); ←→ step through the listed days; Esc back
+      with the query kept. All sessions loaded once (`db.all_sessions`).
+      Not done: Enter on a day row in `/weekly` / `/monthly` to open it.
+
 - [ ] **D. Stale-session handling** (small). If the app exits mid-session, the
       next launch shows a "live" timer that actually started before today.
       Detect `started_at` before local midnight and mark it clearly (e.g.
@@ -194,6 +199,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/settings.rs` — `Settings` (the Pomodoro, sleep and mood) and the
   `settings.conf` file, read and written like `layout.conf`. Pure; unit
   tests at the bottom.
+- `src/search.rs` — the `/rewind` query: parsing and matching, plus the
+  shared fuzzy matcher. Pure; unit tests at the bottom.
 - `src/captions.rs` — sentences under the cat, per mood and per activity;
   add new ones here. Unit tests at the bottom.
 - `src/mascot.rs` — the cat: half-block pixel-art sprites and their
@@ -206,7 +213,7 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/app/` — all UI, one `impl App` block per file: `mod.rs` (`App`
   state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
   file per screen (`main_screen`, `forms`, `mood`, `settings_screen`,
-  `palette`, `period_view`, `rename`, `away`, `help`), `pomodoro`, shared pieces (`sections`, `chrome`, `cat`, `modal`,
+  `palette`, `period_view`, `rewind`, `rename`, `away`, `help`), `pomodoro`, shared pieces (`sections`, `chrome`, `cat`, `modal`,
   `items`, `graphs`, `text`), `tests/` (a file per screen, the harness
   in `tests/mod.rs`), and `screenshot.rs` (the
   docs' pictures in `docs/images/`, ignored tests). See docs/dev/implementation.md.
