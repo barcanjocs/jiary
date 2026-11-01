@@ -3,7 +3,6 @@
 
 use crossterm::event::KeyCode;
 use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
@@ -13,6 +12,7 @@ use ratatui::widgets::{Block, BorderType, ListItem, ListState, Paragraph};
 use crate::period::Period;
 use crate::theme;
 
+use super::forms::matcher;
 use super::modal::WrappedInput;
 use super::modal::{picker_list, start_modal_layout};
 use super::text::plural;
@@ -102,10 +102,9 @@ pub(super) fn palette_matches(query: &str) -> Vec<&'static Command> {
     if query.is_empty() {
         return COMMANDS.iter().collect();
     }
-    let matcher = SkimMatcherV2::default();
     let mut scored = COMMANDS
         .iter()
-        .filter_map(|c| matcher.fuzzy_match(c.name, query).map(|score| (score, c)))
+        .filter_map(|c| matcher().fuzzy_match(c.name, query).map(|score| (score, c)))
         .collect::<Vec<_>>();
     // Stable: ties keep the list's order.
     scored.sort_by_key(|&(score, _)| std::cmp::Reverse(score));

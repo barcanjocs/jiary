@@ -1,6 +1,8 @@
 //! The start form (activity, project and task, each an `Autocomplete`) and
 //! the note form.
 
+use std::sync::LazyLock;
+
 use crossterm::event::KeyCode;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -165,14 +167,20 @@ fn draw_recent(frame: &mut Frame, area: Rect, recent: &[SessionCombo]) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+/// The fuzzy matcher, built once: the pickers and the palette match on every
+/// frame.
+pub(super) fn matcher() -> &'static SkimMatcherV2 {
+    static MATCHER: LazyLock<SkimMatcherV2> = LazyLock::new(SkimMatcherV2::default);
+    &MATCHER
+}
+
 pub(super) fn fuzzy_filter(query: &str, candidates: &[String]) -> Vec<String> {
     if query.is_empty() {
         return candidates.to_vec();
     }
-    let matcher = SkimMatcherV2::default();
     let mut scored: Vec<(i64, &String)> = candidates
         .iter()
-        .filter_map(|c| matcher.fuzzy_match(c, query).map(|s| (s, c)))
+        .filter_map(|c| matcher().fuzzy_match(c, query).map(|s| (s, c)))
         .collect();
     scored.sort_by_key(|a| std::cmp::Reverse(a.0));
     scored.into_iter().take(5).map(|(_, c)| c.clone()).collect()

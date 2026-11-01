@@ -167,8 +167,6 @@ from its scope note alone, without re-deriving context.
 - [ ] **Nits** (tiny, do whenever):
   - `app/tests.rs` (~2,700 lines) is still one file; it could follow the
     code into one test file per screen, with the harness in `tests/mod.rs`.
-  - `fuzzy_filter` constructs a `SkimMatcherV2` per call (per frame); make it
-    static.
 
 ## Conventions (don't drift)
 
