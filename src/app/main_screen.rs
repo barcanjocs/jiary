@@ -278,6 +278,7 @@ impl App {
             }
             KeyCode::Char(c @ '1'..='3') => self.rate(c as i32 - '0' as i32),
             KeyCode::Char('u') => self.undo(),
+            KeyCode::Char('p') => self.toggle_pomodoro(),
             KeyCode::Char('[') => self.move_start(-START_STEP),
             KeyCode::Char(']') => self.move_start(START_STEP),
             _ => {}
@@ -613,21 +614,23 @@ impl App {
             elapsed.num_seconds() % 60,
         );
 
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(format!("{h:02}:{m:02}:{s:02}"), theme::TITLE),
-                Span::styled(
-                    format!("  since {}", fmt_time(&session.started_at)),
-                    theme::DIMMED,
-                ),
-            ]),
+        let mut lines = vec![Line::from(vec![
+            Span::styled(format!("{h:02}:{m:02}:{s:02}"), self.timer_style()),
+            Span::styled(
+                format!("  since {}", fmt_time(&session.started_at)),
+                theme::DIMMED,
+            ),
+        ])];
+        // The Pomodoro's bar, right under the timer it measures.
+        lines.extend(self.pomodoro_line());
+        lines.extend([
             theme::kv(
                 "Project",
                 vec![self.project_span(session.project.as_deref())],
             ),
             theme::kv("Task", vec![value_or_none(&session.task, Style::new())]),
             theme::kv("Activity", vec![theme::activity(&session.activity)]),
-        ];
+        ]);
 
         let interruptions = session.interruptions.unwrap_or(0);
         lines.push(theme::kv(

@@ -212,6 +212,7 @@ impl App {
                     ("Esc", "cancel"),
                 ],
             },
+            Screen::Settings(_) => &[("↑↓", "select"), ("Space/←→", "change"), ("Esc", "close")],
             Screen::Away(_) => &[
                 ("k", "keep"),
                 ("b", "break"),

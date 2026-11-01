@@ -3,7 +3,7 @@
 The [README](../../README.md) gets you started. This manual covers the rest.
 
 - [Recording your day](recording.md): starting and ending sessions,
-  rating focus, sleep and mood, notes, interruptions, detours, undo, renaming names, and
+  rating focus, the Pomodoro, settings, sleep and mood, notes, interruptions, detours, undo, renaming names, and
   fixing the times.
 - [The main screen](main-screen.md): its three sections, the cat, colors,
   resizing and the mouse.

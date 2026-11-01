@@ -16,7 +16,8 @@ use super::App;
 use super::text::wrap_text;
 
 /// After this long in a work session the cat gets drowsy, a nudge to take a
-/// break. (A candidate for a user setting.)
+/// break. With the Pomodoro on, its target takes over (the cat has a
+/// coffee instead).
 pub(super) const DROWSY_AFTER_MINUTES: i64 = 25;
 
 /// Columns the cat takes beside the session text: its canvas plus a gap on
@@ -101,7 +102,9 @@ pub(super) fn fresh_seed() -> u64 {
 impl App {
     /// What the cat does for the current session: idle with none, asleep on
     /// a break, chatting in a meeting, gaming in a disruption, and writing
-    /// in a work session (drowsy once it runs past `DROWSY_AFTER_MINUTES`).
+    /// in a work session: with the Pomodoro on, having a coffee once it
+    /// reaches the target; otherwise drowsy once it runs past
+    /// `DROWSY_AFTER_MINUTES`.
     pub(super) fn mood(&self) -> Mood {
         let Some(session) = &self.active_session else {
             return Mood::Idle;
@@ -110,6 +113,10 @@ impl App {
             BREAK => Mood::Sleeping,
             MEETING => Mood::Meeting,
             DISRUPTION => Mood::Gaming,
+            _ if let Some(pomodoro) = self.pomodoro() => match pomodoro.reached() {
+                true => Mood::BreakEarned,
+                false => Mood::Working,
+            },
             _ if Utc::now() - session.started_at
                 >= chrono::Duration::minutes(DROWSY_AFTER_MINUTES) =>
             {

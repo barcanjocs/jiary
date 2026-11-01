@@ -33,6 +33,7 @@ use super::mood::{MoodForm, MoodStep};
 use super::palette::{COMMANDS, PaletteForm, palette_matches};
 use super::period_view::PeriodView;
 use super::rename::RenameStep;
+use super::settings_screen::SettingsForm;
 use super::text::{fmt_time, wrap_text};
 use super::*;
 
@@ -45,6 +46,7 @@ mod main_screen;
 mod mood;
 mod palette;
 mod period_view;
+mod pomodoro;
 mod rename;
 mod sessions;
 
@@ -384,6 +386,7 @@ fn every_screen_survives_tiny_terminals() {
                 counts: (3, 4),
                 notice: Some("word ".repeat(30)),
             })),
+            Screen::Settings(SettingsForm { selection: 2 }),
             Screen::Mood(MoodForm {
                 date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
                 step: MoodStep::Mood,

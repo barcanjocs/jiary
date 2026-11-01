@@ -30,6 +30,7 @@ pub(super) fn draw_help(frame: &mut Frame, content: Rect) {
             ("r", "resume after d, b or m"),
             ("1 / 2 / 3", "rate focus, just after"),
             ("u", "undo last start or end"),
+            ("p", "Pomodoro on or off"),
             ("[ / ]", "move start by 5 min"),
             ("q / Ctrl+C", "quit"),
         ],

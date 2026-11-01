@@ -25,6 +25,12 @@ const WORKING: &[&str] = &[
 ];
 /// A work session past the drowsy threshold.
 const DROWSY: &[&str] = &["where is that pomodoro timer?"];
+/// A work session past the Pomodoro target.
+const BREAK_EARNED: &[&str] = &[
+    "break's earned, if you want one",
+    "a coffee? no rush",
+    "good place for a stretch",
+];
 /// A break.
 const SLEEPING: &[&str] = &["rest is productive", "stress doesn't ship"];
 /// A meeting.
@@ -55,6 +61,7 @@ fn sentences(mood: Mood, activity: Option<&str>) -> &'static [&'static str] {
         Mood::Idle => IDLE,
         Mood::Working => WORKING,
         Mood::Drowsy => DROWSY,
+        Mood::BreakEarned => BREAK_EARNED,
         Mood::Sleeping => SLEEPING,
         Mood::Meeting => MEETING,
         Mood::Gaming => GAMING,
@@ -75,9 +82,17 @@ mod tests {
 
     #[test]
     fn every_caption_is_a_non_empty_single_line() {
-        let lists = [IDLE, WORKING, DROWSY, SLEEPING, MEETING, GAMING]
-            .into_iter()
-            .chain(BY_ACTIVITY.iter().map(|(_, list)| *list));
+        let lists = [
+            IDLE,
+            WORKING,
+            DROWSY,
+            BREAK_EARNED,
+            SLEEPING,
+            MEETING,
+            GAMING,
+        ]
+        .into_iter()
+        .chain(BY_ACTIVITY.iter().map(|(_, list)| *list));
         for list in lists {
             for sentence in list {
                 assert!(!sentence.trim().is_empty());

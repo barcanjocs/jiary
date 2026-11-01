@@ -10,6 +10,7 @@ Press `?` in Jiary to see these keys, or `/` to find an action by name.
 | `e` | End the running session |
 | `1` `2` `3` | Rate your focus, within 5 seconds of a session ending |
 | `u` | Undo the last start or end |
+| `p` | Turn the Pomodoro on or off |
 | `n` | Add a note to the running session |
 | `i` | Count an interruption |
 | `d` | Start a disruption (needs a running session) |
@@ -34,6 +35,17 @@ See [Recording your day](recording.md).
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` | Scroll the focused section |
 
 See [The main screen](main-screen.md), which also covers the mouse.
+
+## Settings (`/settings`)
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` / `j` `k` | Pick a setting |
+| `Space` / `Enter` / `→` | Change it (the target: 5 minutes longer) |
+| `←` | Change it the other way (the target: 5 minutes shorter) |
+| `Esc` / `q` | Close |
+
+See [Settings](recording.md#settings).
 
 ## Sleep and mood
 

@@ -43,9 +43,9 @@ truth for state — this file plus `git log` is all that is needed to resume.
   `docs/images/`; `main.svg` changes on every run (it shows the time), so
   only commit it when the main screen changed.
 - 1.1.0 in progress (everything in the backlog goes in): J (sleep and
-  mood) done, not yet released.
+  mood) and K (soft Pomodoro, `/settings`) done, not yet released.
 - Next, in order: backlog A (browse past days, likely `/day` with ←→ like
-  the period views) and K (soft Pomodoro, with `/settings`), then D and F.
+  the period views), then D and F.
 - Releasing: see `docs/dev/README.md` (bump `version`, commit, tag, push
   the tag; the workflow builds and publishes). Tag pushes are done by the
   maintainer, not an agent. Runner images age out: macOS builds moved to
@@ -122,39 +122,16 @@ from its scope note alone, without re-deriving context.
       month) or under (year) the focus grid, only when the period has
       answers. Limits kept: two fixed questions, no reminders, no
       correlations or trends.
-- [ ] **K. Soft Pomodoro** (small-medium). A target session length that
-      Jiary shows you've reached, without ever interrupting you: you keep
-      going while in flow, and when you glance at the screen it says "you
-      can take a break now, if you want". Discussed 2026-10-31; the limits
-      are the point, so keep them:
-      - Never interrupts: no bell, no notification, no blinking or growing
-        cue, nothing that stops or ends the session. The cue is only seen
-        if you look at the main screen.
-      - The cue: a thin bar under the timer filling up toward the target;
-        on reaching it the timer turns green and the cat does something
-        new (stretching, a coffee) with a caption like "break's earned, if
-        you want one". Past the target, it just stays that way. Work
-        sessions only: detours (breaks, disruptions, meetings) get no cue.
-      - `/settings`: a small modal (the first settings screen; later
-        settings go here too). Rows `Soft Pomodoro  on` and `Target  25m`;
-        ↑↓ pick a row, Space/Enter toggle, ←→ change the target in 5 min
-        steps, Esc closes. Changes apply at once. It opens a screen, so it
-        needs no command arguments (not blocked on H).
-      - `p` on the main screen turns it on or off (also `/pomodoro` in the
-        palette, and in `?` help). Toggling mid-session just shows or
-        hides the cue against the elapsed time.
-      - Storage: `settings.conf`, which J added (`settings.rs`); add the
-        Pomodoro keys there. `/settings` should list J's sleep-and-mood
-        switch too (as a row beside `/mood-on` / `/mood-off`). Nothing in the
-        db: decided 2026-10-31 not to store the target per session. Hit
-        counts mostly restate session length, and they pull toward a score
-        or streak, which Jiary avoids (see J). Can be added later as a
-        nullable `sessions.target` column if ever wanted.
-      - When on, the cat dozes at the target instead of
-        `DROWSY_AFTER_MINUTES` (25, already marked as a candidate for a
-        setting); when off, nothing changes from today. Update the user
-        manual (recording, main screen, keys) and the README's "Why I made
-        this", which mentions the 25 minutes.
+- [x] **K. Soft Pomodoro** — done 2026-11-01 for 1.1.0: `p` (and
+      `/pomodoro`) turns it on; a bar under the timer fills toward the
+      target, then the timer turns green and the cat has a coffee
+      (`Mood::BreakEarned`), never interrupting; detours get no cue.
+      `/settings` (`app/settings_screen.rs`) sets the mode, the target (5–120
+      min, 5 min steps) and sleep and mood. Stored in `settings.conf` as
+      `pomodoro=off|soft` and `pomodoro_target`; nothing in the db. Built
+      for a later "hard" mode: `PomodoroMode` in `settings.rs`, and
+      `App::pomodoro()` in `app/pomodoro.rs` (see "Adding a stricter mode"
+      in `docs/dev/implementation.md`).
 
 ## Conventions (don't drift)
 
@@ -214,7 +191,7 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
 - `src/layout.rs` — main-screen section geometry (`LayoutPrefs::resolve`,
   resizing with clamping) and the `layout.conf` file. Pure; unit tests at
   the bottom.
-- `src/settings.rs` — `Settings` (sleep and mood on or off) and the
+- `src/settings.rs` — `Settings` (the Pomodoro, sleep and mood) and the
   `settings.conf` file, read and written like `layout.conf`. Pure; unit
   tests at the bottom.
 - `src/captions.rs` — sentences under the cat, per mood and per activity;
@@ -228,8 +205,8 @@ Requires Rust stable (edition 2024). No system dependencies (SQLite bundled).
   widgets take their styles from here so the look is tweaked in one place.
 - `src/app/` — all UI, one `impl App` block per file: `mod.rs` (`App`
   state, `Screen`, session lifecycle, `handle_key`/`draw` dispatch), one
-  file per screen (`main_screen`, `forms`, `mood`, `palette`,
-  `period_view`, `rename`, `away`, `help`), shared pieces (`sections`, `chrome`, `cat`, `modal`,
+  file per screen (`main_screen`, `forms`, `mood`, `settings_screen`,
+  `palette`, `period_view`, `rename`, `away`, `help`), `pomodoro`, shared pieces (`sections`, `chrome`, `cat`, `modal`,
   `items`, `graphs`, `text`), `tests/` (a file per screen, the harness
   in `tests/mod.rs`), and `screenshot.rs` (the
   docs' pictures in `docs/images/`, ignored tests). See docs/dev/implementation.md.

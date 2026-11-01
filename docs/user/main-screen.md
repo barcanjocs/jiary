@@ -4,8 +4,9 @@
 
 The main screen has three sections, stacked:
 
-- **Active** (top): the running session. Its timer, project, task, activity
-  and interruptions are pinned at the top. Below them are its notes: notes
+- **Active** (top): the running session. Its timer (with the
+  [Pomodoro](recording.md#the-pomodoro)'s bar under it, when it's on),
+  project, task, activity and interruptions are pinned at the top. Below them are its notes: notes
   from earlier sessions on the same project and task first, then this
   session's. The notes scroll as they grow.
 - **Today** (middle): today's sessions, newest first, each with its times,
@@ -21,7 +22,9 @@ row below shows the keys you're most likely to need (or an
 A small pixel-art cat sits on the right of the active section when there's
 room for it. It follows what you're doing: it idles when nothing is
 running, types on a laptop during work (and dozes off over it after 25
-minutes, a nudge to take a break), sleeps on a break, chats in a meeting,
+minutes, a nudge to take a break; with the
+[Pomodoro](recording.md#the-pomodoro) on, it has a coffee at the target
+instead), sleeps on a break, chats in a meeting,
 and plays video games when disrupted. It also reacts to what you do: it
 flinches at an interruption, writes your note down, and reacts to your
 focus rating. A short caption under it says what it's up to.

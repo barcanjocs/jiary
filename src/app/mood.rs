@@ -7,8 +7,6 @@
 //! Deliberately just these two, fixed: no custom fields, no reminders (see
 //! the backlog's J in DEVELOPMENT.md).
 
-use std::time::Instant;
-
 use crossterm::event::KeyCode;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -94,10 +92,7 @@ impl App {
     /// `/mood-on`, `/mood-off`: saved at once; what was recorded stays.
     pub(super) fn set_sleep_and_mood(&mut self, on: bool) {
         self.settings.sleep_and_mood = on;
-        if let Some(path) = &self.settings_path
-            && let Err(e) = self.settings.save(path)
-        {
-            self.set_error(format!("Could not save settings: {e}"));
+        if !self.save_settings() {
             return;
         }
         self.notify(if on {
@@ -105,11 +100,6 @@ impl App {
         } else {
             "Sleep and mood off; /mood-on turns them back on"
         });
-    }
-
-    /// Shows `text` in the status line for a moment.
-    fn notify(&mut self, text: &str) {
-        self.notice = Some((text.to_string(), Instant::now()));
     }
 
     /// Keys in the prompt: 1–3 answer the question and move on (the second

@@ -5,7 +5,8 @@
 //! What it does follows the session (`Mood`): idling with nothing running,
 //! typing on a laptop during work and dozing off over it in a long session,
 //! asleep on a break, chatting with a friend in a meeting, gaming when
-//! disrupted. Some actions trigger a short one-off `Reaction` on top: a
+//! disrupted, and with a coffee once a session reaches the Pomodoro
+//! target. Some actions trigger a short one-off `Reaction` on top: a
 //! flinch on an interruption, writing the note down in a notebook when one
 //! is added, and a mood that matches the focus rating when a session ends.
 //!
@@ -33,6 +34,9 @@ pub enum Mood {
     Working,
     /// A long work session: dozing off over the laptop.
     Drowsy,
+    /// A work session past the Pomodoro target: a coffee beside it, a
+    /// break earned.
+    BreakEarned,
     /// A break: asleep, with z's floating up.
     Sleeping,
     /// A meeting: talking with another cat.
@@ -66,7 +70,7 @@ const fn frame(pixels: [&'static str; HEIGHT as usize * 2]) -> Frame {
 // inner ears and nose, `K` eyes and mouth, `W` eye shine; its friend: `F`
 // fur, `f` muzzle and belly; props: `a` laptop, `k` its screen, `c` code,
 // `d` keys, `N` paper, `g` ink and spine, `O` pen, `D` controller, `r` / `G`
-// buttons.
+// buttons, `M` mug, `b` coffee.
 //
 // The cat's body is on columns 10–20 in every scene where it is alone.
 
@@ -196,6 +200,49 @@ const DOZE: Frame = frame(DOZE_PIXELS);
 const DOZE_Z: Frame = Frame {
     pixels: DOZE_PIXELS,
     text: &[(0, 22, "z", theme::CAT_TEXT)],
+};
+
+// --- break earned: content, a steaming coffee beside it ---------------------
+
+/// The idle cat, eyes open, with a mug on the left.
+const COFFEE_PIXELS: [&str; 10] = [
+    "............C.....C.....",
+    "...........CPC...CPC....",
+    "...........CCCCCCCCC....",
+    "..........CCCWCCCWCCC...",
+    "..........CCCKCPCKCCC...",
+    "...........CCCLLLCCC..C.",
+    "...MbbbM....CCLLLCC...C.",
+    "...MMMMMMM..CCLLLCC..C..",
+    "...MMMMM.M..CCLLLCCCC...",
+    "...MMMMMMM..CC...CC.....",
+];
+
+/// The same with its eyes closed, savoring it.
+const COFFEE_SHUT_PIXELS: [&str; 10] = [
+    "............C.....C.....",
+    "...........CPC...CPC....",
+    "...........CCCCCCCCC....",
+    "..........CCCCCCCCCCC...",
+    "..........CCCKCPCKCCC...",
+    "...........CCCLLLCCC..C.",
+    "...MbbbM....CCLLLCC...C.",
+    "...MMMMMMM..CCLLLCC..C..",
+    "...MMMMM.M..CCLLLCCCC...",
+    "...MMMMMMM..CC...CC.....",
+];
+
+const COFFEE_A: Frame = Frame {
+    pixels: COFFEE_PIXELS,
+    text: &[(2, 4, "~", theme::CAT_STEAM)],
+};
+const COFFEE_B: Frame = Frame {
+    pixels: COFFEE_PIXELS,
+    text: &[(1, 5, "~", theme::CAT_STEAM), (2, 5, "~", theme::CAT_STEAM)],
+};
+const COFFEE_SIP: Frame = Frame {
+    pixels: COFFEE_SHUT_PIXELS,
+    text: &[(1, 4, "~", theme::CAT_STEAM)],
 };
 
 // --- noting: writing in an open notebook ------------------------------------
@@ -460,6 +507,15 @@ const DROWSY_LOOP: Animation = &[
     (900, &DOZE_Z),
 ];
 
+/// Steam rising off the coffee, the cat closing its eyes now and then.
+const COFFEE_LOOP: Animation = &[
+    (900, &COFFEE_A),
+    (900, &COFFEE_B),
+    (900, &COFFEE_A),
+    (1200, &COFFEE_SIP),
+    (900, &COFFEE_B),
+];
+
 /// z, then z Z, then Z: the z's float up and away.
 const SLEEP_LOOP: Animation = &[(900, &SLEEP_A), (900, &SLEEP_B), (900, &SLEEP_C)];
 
@@ -526,6 +582,7 @@ impl Mood {
             Mood::Idle => IDLE_LOOP,
             Mood::Working => WORK_LOOP,
             Mood::Drowsy => DROWSY_LOOP,
+            Mood::BreakEarned => COFFEE_LOOP,
             Mood::Sleeping => SLEEP_LOOP,
             Mood::Meeting => MEET_LOOP,
             Mood::Gaming => GAME_LOOP,
@@ -594,6 +651,8 @@ fn color(pixel: u8) -> Option<Color> {
         b'D' => Some(theme::CAT_CONTROLLER),
         b'r' => Some(theme::CAT_BUTTON_A),
         b'G' => Some(theme::CAT_BUTTON_B),
+        b'M' => Some(theme::CAT_MUG),
+        b'b' => Some(theme::CAT_COFFEE),
         _ => None,
     }
 }
@@ -635,6 +694,7 @@ mod tests {
             Mood::Idle,
             Mood::Working,
             Mood::Drowsy,
+            Mood::BreakEarned,
             Mood::Sleeping,
             Mood::Meeting,
             Mood::Gaming,
@@ -762,6 +822,7 @@ mod tests {
             &TYPE_A,
             &TYPE_B,
             &DOZE_Z,
+            &COFFEE_SIP,
             &WRITE_A,
             &GAME_A,
             &STARTLED,

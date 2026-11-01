@@ -92,7 +92,10 @@ I like starting a work session with a Pomodoro in mind, but I don't want to
 be interrupted after 25 minutes: if I'm in deep flow, I want to keep going
 until I get tired, then glance at the clock and check I've put in the time
 before taking a break. So Jiary never alerts you. The timer just counts up,
-and the cat starts dozing off once you've been at it for 25 minutes.
+and the cat starts dozing off once you've been at it for 25 minutes. Press
+`p` for a soft Pomodoro: a bar under the timer fills up toward your target
+(25 minutes unless you change it), then the timer turns green and the cat
+has a coffee. It's still only there when you look.
 
 I also wanted starting a session, and getting through a busy day of
 interruptions, breaks and meetings, to take a key or two rather than a

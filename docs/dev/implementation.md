@@ -75,7 +75,8 @@ next frame shows the result. No event bus, no async, no shared state:
   sections, `resize` / `set_*_height` move borders with clamping, and
   `parse` / `load` / `save` handle `layout.conf`. Pure geometry, no
   rendering.
-- **`settings.rs`**: `Settings` (for now `sleep_and_mood`), read and
+- **`settings.rs`**: `Settings` (the Pomodoro's `PomodoroMode` and
+  target, `sleep_and_mood`), read and
   written like the layout file, as `settings.conf`. See
   [Settings file](#settings-file).
 - **`mascot.rs`**: the cat. Sprites are grids of palette characters, two
@@ -92,6 +93,7 @@ next frame shows the result. No event bus, no async, no shared state:
     `draw` dispatch on `Screen`.
   - One file per screen: `main_screen.rs`, `forms.rs` (start and note
     forms, `Autocomplete`, `fuzzy_filter`), `mood.rs` (sleep and mood),
+    `settings_screen.rs` (`/settings`), `pomodoro.rs` (the cue and `p`),
     `rename.rs`, `palette.rs`, `period_view.rs`, `away.rs`, `help.rs`.
   - Shared pieces: `sections.rs` (main-screen geometry, scrolling, mouse),
     `chrome.rs` (header, status line, cursor), `cat.rs` (mood, reactions,
@@ -239,6 +241,7 @@ enum Screen {
     Period(PeriodView),
     Rename(Box<RenameForm>),             // boxed too
     Mood(MoodForm),                      // sleep and mood
+    Settings(SettingsForm),              // /settings
     Away(DateTime<Utc>),                 // back from an absence: since when
 }
 ```
@@ -417,6 +420,44 @@ like focus ratings (`answer_color`).
 once and leave a `notice` in the status line. Off, `s` never asks, `/mood`
 only says it's off, and the longer views leave sleep and mood out; the
 `days` rows stay.
+
+### Pomodoro
+
+`settings.pomodoro` is a `PomodoroMode` (`Off`, `Soft`) and
+`settings.target_minutes` its target (5–120, 25 by default). Everything
+asks `App::pomodoro()` (`pomodoro.rs`), which gives the running session's
+`Pomodoro { mode, progress }` (elapsed over target) and is `None` when off,
+with nothing running, or for a detour. From it:
+
+- `pomodoro_line`: a row right under the timer, `━` filled toward the
+  target (accent, then green and full) and `─` for the rest, then the
+  target. It adds a row to the pinned info, so the section's height
+  follows.
+- `timer_style`: the accent, green once `reached()`.
+- `App::mood`: `Mood::BreakEarned` (the cat with a steaming coffee,
+  captions in `BREAK_EARNED`) from the target on, in place of the doze at
+  `DROWSY_AFTER_MINUTES`; with it off, nothing changes.
+
+`p` (`toggle_pomodoro`, also `/pomodoro`) switches between `Off` and
+`Soft` and leaves a notice; `/settings` cycles the modes and steps the
+target. Nothing goes in the db: reaching the target isn't recorded.
+
+**Adding a stricter mode.** A `Hard` mode (one that interrupts) would be a
+new `PomodoroMode` variant, in `ALL` and `name()`; the settings file,
+`/settings` and the notices already go through those. What it does at
+the target would branch on `Pomodoro::mode`; as `draw` takes `&self`,
+something that has to happen once (a bell, ending the session) would need
+a tick that can mutate, such as the loop that calls `observe_idle`. `p`
+would then go back to the last mode used rather than to `Soft`.
+
+### Settings screen
+
+`/settings` opens `Screen::Settings(SettingsForm)` (`settings_screen.rs`):
+a small modal with a row per `Setting` (`Pomodoro`, `Target`,
+`SleepAndMood`), `label  value`. ↑↓ pick, Space / Enter / → step forward
+(`next` mode, +5 minutes, toggle), ← back; each change saves at once
+(`save_settings`). A new setting is a `Setting` variant, its label, value
+and step.
 
 ### Away
 
@@ -612,9 +653,11 @@ failures go to the error line and the in-memory layout carries on.
 ### Settings file
 
 `settings.conf`, beside `layout.conf` and handled the same way: `key=value`
-lines (`sleep_and_mood`), lenient parsing, saved through a temp file and a
-rename whenever a setting changes. A missing file means the defaults (sleep
-and mood on).
+lines (`pomodoro=off|soft`, `pomodoro_target`, `sleep_and_mood`), lenient
+parsing (an unknown mode, say from a newer Jiary, leaves the default),
+saved through a temp file and a rename whenever a setting changes. A
+missing file means the defaults (Pomodoro off, 25 minutes, sleep and mood
+on).
 
 ### Modals and inputs
 

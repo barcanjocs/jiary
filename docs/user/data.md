@@ -10,8 +10,8 @@ Everything is in one SQLite file, created on first run:
 Next to it are three small files:
 
 - `layout.conf`: the main screen's section sizes and collapsed sections;
-- `settings.conf`: whether Jiary asks about sleep and mood (`/mood-off`,
-  `/mood-on`);
+- `settings.conf`: your [settings](recording.md#settings): the Pomodoro,
+  its target, and whether Jiary asks about sleep and mood;
 - `jiary.lock`: makes sure only one Jiary runs at a time, so two can't write
   to the diary at once. A second Jiary says the first is already running
   (with its process id) and exits. The lock is released however Jiary

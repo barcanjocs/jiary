@@ -48,6 +48,8 @@ enum Action {
     Mood,
     /// Turns sleep and mood on or off.
     MoodOn(bool),
+    /// The settings screen.
+    Settings,
 }
 
 const fn command(
@@ -78,19 +80,14 @@ const fn screen(name: &'static str, description: &'static str, action: Action) -
     }
 }
 
-/// Everything the palette offers, in the order it lists them.
+/// Everything the palette offers, in the order it lists them: the views
+/// and what is used most first, the settings near the end.
 pub(super) const COMMANDS: &[Command] = &[
     view("weekly", "this week, by day", Period::Week),
     view("monthly", "this month, by day", Period::Month),
     view("yearly", "this year's focus", Period::Year),
     screen("rename", "rename or merge a label", Action::Rename),
     screen("mood", "today's sleep and mood", Action::Mood),
-    screen(
-        "mood-off",
-        "stop asking sleep and mood",
-        Action::MoodOn(false),
-    ),
-    screen("mood-on", "ask sleep and mood again", Action::MoodOn(true)),
     command("start", "start a session", 's', "s"),
     command("end", "end the session", 'e', "e"),
     command("note", "add a note", 'n', "n"),
@@ -100,9 +97,17 @@ pub(super) const COMMANDS: &[Command] = &[
     command("meeting", "join a meeting", 'm', "m"),
     command("resume", "back to work", 'r', "r"),
     command("undo", "undo start or end", 'u', "u"),
+    command("pomodoro", "Pomodoro on or off", 'p', "p"),
     command("earlier", "start 5m earlier", '[', "["),
     command("later", "start 5m later", ']', "]"),
     command("reset", "reset section sizes", '=', "="),
+    screen("settings", "Pomodoro, sleep and mood", Action::Settings),
+    screen(
+        "mood-off",
+        "stop asking sleep and mood",
+        Action::MoodOn(false),
+    ),
+    screen("mood-on", "ask sleep and mood again", Action::MoodOn(true)),
     command("help", "show all keys", '?', "?"),
     command("quit", "quit Jiary", 'q', "q"),
 ];
@@ -221,6 +226,7 @@ impl App {
                         Action::Rename => self.open_rename(),
                         Action::Mood => self.ask_mood(),
                         Action::MoodOn(on) => self.set_sleep_and_mood(on),
+                        Action::Settings => self.open_settings(),
                     }
                 }
             }

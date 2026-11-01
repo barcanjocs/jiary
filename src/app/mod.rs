@@ -23,6 +23,7 @@ use mood::MoodForm;
 use palette::{PaletteForm, draw_palette};
 use period_view::PeriodView;
 use rename::RenameForm;
+use settings_screen::SettingsForm;
 
 mod away;
 mod cat;
@@ -36,10 +37,12 @@ mod modal;
 mod mood;
 mod palette;
 mod period_view;
+mod pomodoro;
 mod rename;
 #[cfg(test)]
 mod screenshot;
 mod sections;
+mod settings_screen;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -156,6 +159,8 @@ enum Screen {
     Rename(Box<RenameForm>),
     /// Today's sleep and mood: before the day's first session, or `/mood`.
     Mood(MoodForm),
+    /// `/settings`.
+    Settings(SettingsForm),
     /// Back after `AWAY_AFTER` or more without touching the computer,
     /// during a work session: what was that time?
     Away(chrono::DateTime<Utc>),
@@ -231,6 +236,23 @@ impl App {
     /// so the line reflects the outcome of the most recent one.
     fn clear_error(&mut self) {
         self.error = None;
+    }
+
+    /// Shows `text` in the status line for a moment.
+    fn notify(&mut self, text: &str) {
+        self.notice = Some((text.to_string(), Instant::now()));
+    }
+
+    /// Saves the settings (when they have a file), right after a change.
+    /// Returns false, with the error shown, when that fails.
+    fn save_settings(&mut self) -> bool {
+        if let Some(path) = &self.settings_path
+            && let Err(e) = self.settings.save(path)
+        {
+            self.set_error(format!("Could not save settings: {e}"));
+            return false;
+        }
+        true
     }
 
     /// Reloads the lists shown on the main screen. Called whenever the active
@@ -446,6 +468,7 @@ impl App {
             Screen::Period(_) => self.handle_period(key),
             Screen::Rename(_) => self.handle_rename(key),
             Screen::Mood(_) => self.handle_mood(key),
+            Screen::Settings(_) => self.handle_settings(key),
             Screen::Away(since) => {
                 let since = *since;
                 self.handle_away(key, since);
@@ -481,6 +504,7 @@ impl App {
             Screen::Period(view) => self.draw_period(frame, view),
             Screen::Rename(form) => self.draw_rename(frame, content, form, input),
             Screen::Mood(form) => self.draw_mood(frame, content, form),
+            Screen::Settings(form) => self.draw_settings(frame, content, form),
             Screen::Away(since) => self.draw_away(frame, content, *since),
         }
 

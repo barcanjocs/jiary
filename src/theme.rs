@@ -34,6 +34,10 @@ pub const CAT_PEN: Color = Color::Yellow;
 pub const CAT_CONTROLLER: Color = Color::DarkGray;
 pub const CAT_BUTTON_A: Color = Color::Red;
 pub const CAT_BUTTON_B: Color = Color::Green;
+pub const CAT_MUG: Color = Color::White;
+/// Coffee: a brown no named color has.
+pub const CAT_COFFEE: Color = Color::Indexed(94);
+pub const CAT_STEAM: Color = MUTED;
 /// Symbols drawn as text: `z` and `…`, the flinch's `!`, a note's `✓`,
 /// hearts and music notes.
 pub const CAT_TEXT: Color = MUTED;

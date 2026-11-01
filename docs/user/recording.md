@@ -57,6 +57,39 @@ disruptions aren't focused work, so ending one doesn't open it.
 Today's list shows each rating as a badge: `F1` (red) to `F3` (green), or
 `F-` when unrated.
 
+## The Pomodoro
+
+Turn the Pomodoro on with `p` and Jiary shows when a work session reaches
+its target length (25 minutes unless you change it). It never interrupts
+you: there's no sound, no notification and no blinking, and the session
+keeps running. You only see it when you look at the main screen.
+
+- A thin bar under the timer fills up toward the target, with the target
+  beside it.
+- At the target, the timer turns green and the cat puts its work aside for a
+  coffee: "break's earned, if you want one". If you keep going, it stays
+  that way.
+- Breaks, disruptions and meetings have no target, so they get none of it.
+
+`p` again turns it off, also in the middle of a session: the bar just
+appears or goes, measured against the time so far. `/settings` changes the
+target, in 5-minute steps from 5 minutes to 2 hours.
+
+Jiary doesn't record whether you reached the target. Counting Pomodoros
+would turn your sessions into a score, and Jiary keeps no scores.
+
+## Settings
+
+`/settings` opens the settings, one row each:
+
+- **Pomodoro:** `off` or `soft` (see [above](#the-pomodoro)).
+- **Target:** the Pomodoro's session length.
+- **Sleep and mood:** whether Jiary asks about them (see
+  [below](#sleep-and-mood)).
+
+`↑`/`↓` pick a row, `Space`, `Enter` or `→` change it (`←` goes the other
+way), and `Esc` closes. Changes are saved as you make them.
+
 ## Sleep and mood
 
 The day's first `s` asks two things before the start form opens: how you
@@ -74,8 +107,8 @@ views set your focus against them (see
 [Looking back](looking-back.md#sleep-and-mood)).
 
 It's only these two, and Jiary asks once a day, without reminders. If you
-don't want them at all, `/mood-off` stops the question and hides them from
-the views. Your answers so far are kept, and `/mood-on` brings it all back.
+don't want them at all, `/mood-off` (or `/settings`) stops the question and
+hides them from the views. Your answers so far are kept, and `/mood-on` brings it all back.
 
 ## Undo
 

@@ -14,7 +14,8 @@ learn the keys. It's also how you open what has no key of its own: the
 longer views below, `/rename` (see
 [Renaming and merging names](recording.md#renaming-and-merging-names)), and
 `/mood`, `/mood-off` and `/mood-on` (see
-[Sleep and mood](recording.md#sleep-and-mood)).
+[Sleep and mood](recording.md#sleep-and-mood)), and `/settings` (see
+[Settings](recording.md#settings)).
 
 ## Weeks and months
 
